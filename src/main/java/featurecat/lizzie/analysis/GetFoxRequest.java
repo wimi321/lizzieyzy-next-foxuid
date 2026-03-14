@@ -2,112 +2,136 @@ package featurecat.lizzie.analysis;
 
 import featurecat.lizzie.gui.FoxKifuDownload;
 import featurecat.lizzie.util.Utils;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import org.jdesktop.swingx.util.OS;
+import org.json.JSONObject;
 
 public class GetFoxRequest {
-  private Process process;
-  private InputStreamReader inputStream;
-  private OutputStreamWriter outputStream;
+  private static final String BASE_URL = "https://h5.foxwq.com/yehuDiamond/chessbook_local";
+
   private ScheduledExecutorService executor;
-  private FoxKifuDownload foxKifuDownload;
+  private final FoxKifuDownload foxKifuDownload;
 
   public GetFoxRequest(FoxKifuDownload foxKifuDownload) {
     this.foxKifuDownload = foxKifuDownload;
-    File foxFile = new File("foxReq" + File.separator + "FoxRequest.jar");
-    if (!foxFile.exists()) {
-      Utils.copyFoxReq();
-    }
-    String jarString = " -jar -Dfile.encoding=utf-8 foxReq" + File.separator + "FoxRequest.jar";
     try {
-      if (OS.isWindows()) {
-        boolean success = false;
-        File java64_1 = new File(Utils.java64Path1);
-        if (java64_1.exists()) {
-          try {
-            process = Runtime.getRuntime().exec(Utils.java64Path1 + jarString);
-            success = true;
-          } catch (Exception e) {
-            success = false;
-            e.printStackTrace();
-          }
-        }
-        if (!success) {
-          File java64_2 = new File(Utils.java64Path2);
-          if (java64_2.exists()) {
-            try {
-              process = Runtime.getRuntime().exec(Utils.java64Path2 + jarString);
-              success = true;
-            } catch (Exception e) {
-              success = false;
-              e.printStackTrace();
-            }
-          }
-        }
-        if (!success) {
-          File java32 = new File(Utils.java32Path);
-          if (java32.exists()) {
-            try {
-              process = Runtime.getRuntime().exec(Utils.java32Path + jarString);
-              success = true;
-            } catch (Exception e) {
-              success = false;
-              e.printStackTrace();
-            }
-          }
-        }
-        if (!success) {
-          process = Runtime.getRuntime().exec("java" + jarString);
-        }
-      } else {
-        process = Runtime.getRuntime().exec("java" + jarString);
-      }
-      inputStream = new InputStreamReader(process.getInputStream(), "UTF-8");
-      outputStream = new OutputStreamWriter(process.getOutputStream(), "UTF-8");
       executor = Executors.newSingleThreadScheduledExecutor();
-      executor.execute(this::read);
     } catch (Exception e) {
       Utils.showMsg(e.getLocalizedMessage());
     }
   }
 
-  private void read() {
+  public void sendCommand(String command) {
+    if (command == null || command.trim().isEmpty()) {
+      return;
+    }
+    executor.execute(() -> handleCommand(command.trim()));
+  }
+
+  private void handleCommand(String command) {
     try {
-      int c;
-      StringBuilder line = new StringBuilder();
-      while ((c = inputStream.read()) != -1) {
-        line.append((char) c);
-        if ((c == '\n')) {
-          try {
-            parseLine(line.toString());
-          } catch (Exception ex) {
-            ex.printStackTrace();
-          }
-          line = new StringBuilder();
-        }
+      String[] parts = command.split("\\s+");
+      if (parts.length < 2) {
+        return;
+      }
+      if ("user_name".equals(parts[0])) {
+        handleUserName(parts[1]);
+        return;
+      }
+      if ("uid".equals(parts[0])) {
+        String uid = parts[1];
+        String lastCode = parts.length >= 3 ? parts[2] : "0";
+        emit(fetchChessList(uid, lastCode));
+        return;
+      }
+      if ("chessid".equals(parts[0])) {
+        emit(fetchSgf(parts[1]));
+      }
+    } catch (Exception e) {
+      emitError(e.getMessage());
+    }
+  }
+
+  private void handleUserName(String userInput) {
+    String text = userInput == null ? "" : userInput.trim();
+    if (text.isEmpty()) {
+      emitError("empty fox user");
+      return;
+    }
+    // 仅支持 UID：不再尝试用户名反查。
+    if (!text.matches("\\d+")) {
+      JSONObject failed = new JSONObject();
+      failed.put("result", 1);
+      failed.put("resultstr", "Only Fox UID is supported. Please input numeric UID.");
+      emit(failed.toString());
+      return;
+    }
+    emit(fetchChessList(text, "0"));
+  }
+
+  private String fetchChessList(String uid, String lastCode) {
+    return httpGet(
+        BASE_URL
+            + "/YHWQFetchChessList?srcuid=0&dstuid="
+            + url(uid)
+            + "&type=1&lastcode="
+            + url(lastCode)
+            + "&searchkey=&uin="
+            + url(uid));
+  }
+
+  private String fetchSgf(String chessid) {
+    return httpGet(BASE_URL + "/YHWQFetchChess?chessid=" + url(chessid));
+  }
+
+  private String httpGet(String url) {
+    java.net.HttpURLConnection conn = null;
+    try {
+      conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+      conn.setRequestMethod("GET");
+      conn.setConnectTimeout(15000);
+      conn.setReadTimeout(15000);
+      conn.setRequestProperty("Accept", "application/json,text/plain,*/*");
+      conn.setRequestProperty(
+          "User-Agent",
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+              + "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1");
+      int code = conn.getResponseCode();
+      java.io.InputStream in =
+          code >= 200 && code < 400 ? conn.getInputStream() : conn.getErrorStream();
+      if (in == null) {
+        throw new IOException("HTTP " + code + " with empty body");
+      }
+      try (java.io.InputStream input = in;
+          java.util.Scanner scanner = new java.util.Scanner(input, "UTF-8").useDelimiter("\\A")) {
+        return scanner.hasNext() ? scanner.next() : "";
       }
     } catch (IOException e) {
-      e.printStackTrace();
+      throw new RuntimeException(e);
+    } finally {
+      if (conn != null) {
+        conn.disconnect();
+      }
     }
   }
 
-  private void parseLine(String string) {
-    //    System.out.println(string);
-    //    Lizzie.gtpConsole.addLine(string);
-    if (!string.equals("\n") && !string.equals("\r\n")) foxKifuDownload.receiveResult(string);
+  private static String url(String text) {
+    return URLEncoder.encode(text == null ? "" : text, StandardCharsets.UTF_8);
   }
 
-  public void sendCommand(String command) {
-    try {
-      outputStream.write((command + "\n"));
-      outputStream.flush();
-    } catch (IOException e) {
-      e.printStackTrace();
+  private void emit(String payload) {
+    if (payload != null && !payload.trim().isEmpty()) {
+      foxKifuDownload.receiveResult(payload);
     }
+  }
+
+  private void emitError(String msg) {
+    JSONObject error = new JSONObject();
+    error.put("result", 1);
+    error.put("resultstr", msg == null ? "request failed" : msg);
+    emit(error.toString());
   }
 }

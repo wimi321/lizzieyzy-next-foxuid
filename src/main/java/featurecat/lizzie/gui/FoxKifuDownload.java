@@ -273,23 +273,28 @@ public class FoxKifuDownload extends JFrame {
 
   private void getFoxKifus() {
     // TODO Auto-generated method stub
-    if (txtUserName.getText().trim().isEmpty()) {
+    String foxUidText = txtUserName.getText().trim();
+    if (foxUidText.isEmpty()) {
       Utils.showMsg(Lizzie.resourceBundle.getString("FoxKifuDownload.noUser"), this);
+      return;
+    }
+    if (!foxUidText.matches("\\d+")) {
+      Utils.showMsg("仅支持野狐UID，请输入纯数字UID", this);
       return;
     }
     if (isSearching) {
       Utils.showMsg(Lizzie.resourceBundle.getString("FoxKifuDownload.waitLastSearch"), this);
       return;
     }
-    myUid = 0;
+    myUid = Integer.parseInt(foxUidText);
     isSearching = true;
     isSecondTimeReqEmpty = false;
     isRequestEmpty = false;
     foxReq = new GetFoxRequest(this);
     foxKifuInfos = new ArrayList<KifuInfo>();
     lastCode = "";
-    Lizzie.config.lastFoxName = txtUserName.getText();
-    foxReq.sendCommand("user_name " + Lizzie.config.lastFoxName);
+    Lizzie.config.lastFoxName = foxUidText;
+    foxReq.sendCommand("uid " + foxUidText + " 0");
     Lizzie.config.uiConfig.put("last-fox-name", Lizzie.config.lastFoxName);
   }
 
