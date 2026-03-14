@@ -21,6 +21,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -56,6 +58,7 @@ public class Lizzie {
   /** Launches the game window, and runs the game. */
   public static void main(String[] args) throws IOException {
     mainArgs = args;
+    ensureWritableWorkingDir();
     config = new Config();
     if (config.logConsoleToFile) {
       PrintStream oldPrintStream = System.out;
@@ -163,6 +166,22 @@ public class Lizzie {
       }
     }
     if (Lizzie.config.autoReplayBranch) frame.autoReplayBranch();
+  }
+
+  private static void ensureWritableWorkingDir() {
+    try {
+      Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
+      if (Files.isWritable(cwd)) {
+        return;
+      }
+      Path fallback = Path.of(System.getProperty("user.home"), ".lizzieyzy-next-foxuid");
+      Files.createDirectories(fallback.resolve("save"));
+      System.setProperty("user.dir", fallback.toString());
+      System.out.println("switch user.dir to writable path: " + fallback);
+    } catch (Exception e) {
+      // Keep default behavior if we fail to switch directory.
+      e.printStackTrace();
+    }
   }
 
   public static void setFrameSize(Window frame, int width, int height) {

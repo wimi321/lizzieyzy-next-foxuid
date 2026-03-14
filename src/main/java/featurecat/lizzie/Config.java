@@ -8,6 +8,8 @@ import java.awt.Color;
 import java.awt.Frame;
 import java.awt.Toolkit;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import javax.swing.*;
 import org.jdesktop.swingx.util.OS;
@@ -126,9 +128,10 @@ public class Config {
   public JSONObject saveBoard;
   public JSONObject saveBoardConfig;
 
-  private String configFilename = "config.txt";
-  private String persistFilename = "persist";
-  private String saveBoardFilename = "save" + File.separator + "save";
+  private static final String WORK_DIR = resolveWorkDir();
+  private String configFilename = WORK_DIR + File.separator + "config.txt";
+  private String persistFilename = WORK_DIR + File.separator + "persist";
+  private String saveBoardFilename = WORK_DIR + File.separator + "save" + File.separator + "save";
 
   public Theme theme;
   public float winrateStrokeWidth = 1.7f;
@@ -218,6 +221,28 @@ public class Config {
   public int matchAiLastMove = 1000;
   public int movelistSelectedIndex = 0;
   public int movelistSelectedIndexTop = 0;
+
+  private static String resolveWorkDir() {
+    try {
+      Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
+      if (Files.isWritable(cwd)) {
+        return cwd.toString();
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+    try {
+      Path fallback = Path.of(System.getProperty("user.home"), ".lizzieyzy-next-foxuid");
+      Files.createDirectories(fallback.resolve("save"));
+      System.out.println("Config dir fallback: " + fallback);
+      return fallback.toString();
+    } catch (Exception e) {
+      e.printStackTrace();
+      return System.getProperty("user.home");
+    }
+  }
+
   public boolean moveListTopCurNode = false;
 
   public int winrateDiffRange1 = 3;
