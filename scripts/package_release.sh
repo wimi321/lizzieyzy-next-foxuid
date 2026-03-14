@@ -76,7 +76,41 @@ make_bundle \
   "#!/usr/bin/env bash
 set -e
 cd \"\$(dirname \"\$0\")\"
+if [[ \"\$(uname -s)\" == \"Darwin\" ]]; then
+  ARCH=\"\$(uname -m)\"
+  if [[ \"\$ARCH\" == \"arm64\" ]]; then
+    sh ./start-mac-arm64.sh
+    exit 0
+  fi
+  sh ./start-mac-amd64.sh
+  exit 0
+fi
 java -jar \"Lizzieyzy/lizzie-yzy2.5.3-shaded.jar\""
+
+cat >"$STAGE_DIR/$DATE_TAG-Macosx.amd64.Linux.amd64.without.engine/start-mac-arm64.sh" <<'EOF'
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
+java -jar "Lizzieyzy/lizzie-yzy2.5.3-shaded.jar"
+EOF
+chmod +x "$STAGE_DIR/$DATE_TAG-Macosx.amd64.Linux.amd64.without.engine/start-mac-arm64.sh"
+
+cat >"$STAGE_DIR/$DATE_TAG-Macosx.amd64.Linux.amd64.without.engine/start-mac-amd64.sh" <<'EOF'
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
+java -jar "Lizzieyzy/lizzie-yzy2.5.3-shaded.jar"
+EOF
+chmod +x "$STAGE_DIR/$DATE_TAG-Macosx.amd64.Linux.amd64.without.engine/start-mac-amd64.sh"
+
+cat >"$STAGE_DIR/$DATE_TAG-Macosx.amd64.Linux.amd64.without.engine/Mac-CPU-Notes.txt" <<'EOF'
+Mac chip support:
+- Apple Silicon (arm64): use start-mac-arm64.sh
+- Intel (x86_64): use start-mac-amd64.sh
+- Or use start-macos-linux.sh for auto-detection.
+
+If old native dependencies are incompatible in your environment, install a matching JDK and try Rosetta for x86_64 mode.
+EOF
 
 make_bundle \
   "$DATE_TAG-other-systems.without.engine" \
