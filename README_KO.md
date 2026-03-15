@@ -1,5 +1,17 @@
-# LizzieYzy - 바둑 엔진용 GUI
+# LizzieYzy Next-FoxUID - 바둑 엔진용 GUI
+## 먼저 읽어주세요
+**원래 LizzieYzy에서는 텐센트 Fox 기보 동기화 기능이 제대로 작동하지 않았습니다. 이 유지보수 포크에서 그 기능을 복구했고, 이제 Fox ID를 입력해 최신 공개 기보를 가져올 수 있습니다.**
+
+## 유지보수 핵심 변경
+**이 포크에서 가장 중요한 변경점은 아래와 같습니다.**
+
+* **Fox 기보 동기화 복구**: 원래 흐름이 이미 깨져 있어서, 이제 Fox H5 API를 직접 호출하도록 수정했습니다.
+* **Fox ID로 바로 가져오기**: 사용자명 검색은 제거했고, Fox ID를 입력해 최신 공개 기보를 가져오도록 바꿨습니다.
+* **멀티 플랫폼 배포 복구**: Windows / macOS / Linux 배포 파일을 다시 정리했습니다.
+
 ![screenshot_ko](/screenshot_ko.png?raw=true)
+
+LizzieYzy Next-FoxUID는 더 이상 유지되지 않는 원본 LizzieYzy에서 망가진 기능을 복구하고 계속 사용할 수 있게 유지하는 포크입니다. 현재 이 포크는 Fox 기보 동기화를 복구했고, 더 이해하기 쉬운 Fox ID 입력 방식으로 바꿨습니다.
 
 LizzieYzy는 [Lizzie](https://github.com/featurecat/lizzie)를 기반으로 [Katago](https://github.com/lightvector/KataGo)、[LeelaZero](https://github.com/leela-zero/leela-zero)、[Leela](https://github.com/gcp/Leela)、[ZenGTP](https://github.com/yzyray/ZenGTP)、[SAI](http://sai.unich.it)、[Pachi](https://github.com/pasky/pachi) 등의 다른 GTP engine들을 로드할 수 있도록 수정된 그래픽 인터페이스입니다.
 
