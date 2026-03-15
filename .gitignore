@@ -1,6 +1,9 @@
 .tools/
+.cache/
 target/
 dist/
+engines/
+weights/
 config.txt
 persist
 save/

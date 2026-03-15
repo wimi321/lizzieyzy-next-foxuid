@@ -129,6 +129,10 @@ public class Config {
   public JSONObject saveBoardConfig;
 
   private static final String WORK_DIR = resolveWorkDir();
+  private static final String BUNDLED_ENGINE_NAME = "KataGo Bundled";
+  private static final String BUNDLED_ENGINE_ROOT = "engines";
+  private static final String BUNDLED_WEIGHT_ROOT = "weights";
+  private static final String BUNDLED_WEIGHT_NAME = "default.bin.gz";
   private String configFilename = WORK_DIR + File.separator + "config.txt";
   private String persistFilename = WORK_DIR + File.separator + "persist";
   private String saveBoardFilename = WORK_DIR + File.separator + "save" + File.separator + "save";
@@ -222,6 +226,19 @@ public class Config {
   public int movelistSelectedIndex = 0;
   public int movelistSelectedIndexTop = 0;
 
+  private static class BundledKataGoConfig {
+    private final String engineCommand;
+    private final String analysisCommand;
+    private final String estimateCommand;
+
+    private BundledKataGoConfig(
+        String engineCommand, String analysisCommand, String estimateCommand) {
+      this.engineCommand = engineCommand;
+      this.analysisCommand = analysisCommand;
+      this.estimateCommand = estimateCommand;
+    }
+  }
+
   private static String resolveWorkDir() {
     try {
       Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
@@ -240,6 +257,197 @@ public class Config {
     } catch (Exception e) {
       e.printStackTrace();
       return System.getProperty("user.home");
+    }
+  }
+
+  private static Optional<Path> findBundledAppRoot() {
+    LinkedHashSet<Path> seedPaths = new LinkedHashSet<>();
+    try {
+      File codeSource =
+          new File(Config.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+      seedPaths.add((codeSource.isFile() ? codeSource.toPath().getParent() : codeSource.toPath()));
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+    seedPaths.add(Path.of("").toAbsolutePath());
+    seedPaths.add(Path.of(System.getProperty("user.dir")).toAbsolutePath());
+
+    for (Path seedPath : seedPaths) {
+      Path current = seedPath;
+      for (int depth = 0; current != null && depth < 6; depth++) {
+        if (Files.isDirectory(current.resolve(BUNDLED_ENGINE_ROOT))
+            && Files.isDirectory(current.resolve(BUNDLED_WEIGHT_ROOT))) {
+          return Optional.of(current);
+        }
+        current = current.getParent();
+      }
+    }
+    return Optional.empty();
+  }
+
+  private static String detectBundledPlatformDir() {
+    String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+    String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+    boolean isArm = arch.contains("aarch64") || arch.contains("arm64");
+    boolean is64 = arch.contains("64");
+    if (osName.contains("win")) {
+      return is64 ? "windows-x64" : "windows-x86";
+    }
+    if (osName.contains("mac") || osName.contains("darwin")) {
+      return isArm ? "macos-arm64" : "macos-amd64";
+    }
+    return is64 ? "linux-x64" : "linux-x86";
+  }
+
+  private static String quotePath(Path path) {
+    return "\"" + path.toAbsolutePath().normalize().toString() + "\"";
+  }
+
+  private static boolean isBundledCommand(String command) {
+    return command.contains("engines/katago") || command.contains("engines\\katago");
+  }
+
+  private static boolean hasConfiguredEngine(JSONArray engineSettings) {
+    for (int i = 0; i < engineSettings.length(); i++) {
+      JSONObject engineInfo = engineSettings.optJSONObject(i);
+      if (engineInfo != null && !engineInfo.optString("command", "").trim().isEmpty()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static BundledKataGoConfig detectBundledKataGoConfig() {
+    Optional<Path> appRootOpt = findBundledAppRoot();
+    if (!appRootOpt.isPresent()) {
+      return null;
+    }
+
+    Path appRoot = appRootOpt.get();
+    String binaryName = OS.isWindows() ? "katago.exe" : "katago";
+    Path enginePath =
+        appRoot
+            .resolve(BUNDLED_ENGINE_ROOT)
+            .resolve("katago")
+            .resolve(detectBundledPlatformDir())
+            .resolve(binaryName);
+    Path weightPath = appRoot.resolve(BUNDLED_WEIGHT_ROOT).resolve(BUNDLED_WEIGHT_NAME);
+    Path gtpConfigPath =
+        appRoot
+            .resolve(BUNDLED_ENGINE_ROOT)
+            .resolve("katago")
+            .resolve("configs")
+            .resolve("gtp.cfg");
+    Path estimateConfigPath =
+        appRoot
+            .resolve(BUNDLED_ENGINE_ROOT)
+            .resolve("katago")
+            .resolve("configs")
+            .resolve("estimate.cfg");
+    Path analysisConfigPath =
+        appRoot
+            .resolve(BUNDLED_ENGINE_ROOT)
+            .resolve("katago")
+            .resolve("configs")
+            .resolve("analysis.cfg");
+
+    if (!Files.isRegularFile(enginePath)
+        || !Files.isRegularFile(weightPath)
+        || !Files.isRegularFile(gtpConfigPath)
+        || !Files.isRegularFile(analysisConfigPath)) {
+      return null;
+    }
+
+    String engineCommand =
+        quotePath(enginePath)
+            + " gtp -model "
+            + quotePath(weightPath)
+            + " -config "
+            + quotePath(gtpConfigPath);
+    String analysisCommand =
+        quotePath(enginePath)
+            + " analysis -model "
+            + quotePath(weightPath)
+            + " -config "
+            + quotePath(analysisConfigPath)
+            + " -quit-without-waiting";
+    Path effectiveEstimateConfig =
+        Files.isRegularFile(estimateConfigPath) ? estimateConfigPath : gtpConfigPath;
+    String estimateCommand =
+        quotePath(enginePath)
+            + " gtp -model "
+            + quotePath(weightPath)
+            + " -config "
+            + quotePath(effectiveEstimateConfig);
+    return new BundledKataGoConfig(engineCommand, analysisCommand, estimateCommand);
+  }
+
+  private void applyBundledKataGoDefaults() {
+    BundledKataGoConfig bundledConfig = detectBundledKataGoConfig();
+    if (bundledConfig == null) {
+      return;
+    }
+
+    JSONObject ui = config.getJSONObject("ui");
+    JSONObject leelaz = config.getJSONObject("leelaz");
+    JSONArray engineSettings = leelaz.optJSONArray("engine-settings-list");
+    boolean hadConfiguredEngine = engineSettings != null && hasConfiguredEngine(engineSettings);
+    boolean firstTimeLoadFlag = ui.optBoolean("first-time-load", true);
+    if (engineSettings == null) {
+      engineSettings = new JSONArray();
+      leelaz.put("engine-settings-list", engineSettings);
+    }
+
+    int bundledIndex = -1;
+    for (int i = 0; i < engineSettings.length(); i++) {
+      JSONObject engineInfo = engineSettings.optJSONObject(i);
+      if (engineInfo == null) {
+        continue;
+      }
+      if (BUNDLED_ENGINE_NAME.equals(engineInfo.optString("name", ""))
+          || isBundledCommand(engineInfo.optString("command", ""))) {
+        bundledIndex = i;
+        break;
+      }
+    }
+
+    JSONObject bundledEngine;
+    if (bundledIndex >= 0) {
+      bundledEngine = engineSettings.getJSONObject(bundledIndex);
+    } else {
+      bundledEngine = new JSONObject();
+      engineSettings.put(bundledEngine);
+      bundledIndex = engineSettings.length() - 1;
+    }
+
+    bundledEngine.put("command", bundledConfig.engineCommand);
+    bundledEngine.put("name", BUNDLED_ENGINE_NAME);
+    bundledEngine.put("preload", false);
+    bundledEngine.put("komi", 7.5);
+    bundledEngine.put("width", 19);
+    bundledEngine.put("height", 19);
+    bundledEngine.put("useJavaSSH", false);
+    bundledEngine.put("useKeyGen", false);
+    bundledEngine.put("keyGenPath", "");
+    bundledEngine.put("ip", "");
+    bundledEngine.put("port", "");
+    bundledEngine.put("userName", "");
+    bundledEngine.put("password", "");
+    bundledEngine.put("initialCommand", "");
+
+    boolean shouldPreferBundled =
+        firstTimeLoadFlag || !hadConfiguredEngine || bundledEngine.optBoolean("isDefault", false);
+    if (shouldPreferBundled) {
+      for (int i = 0; i < engineSettings.length(); i++) {
+        JSONObject engineInfo = engineSettings.optJSONObject(i);
+        if (engineInfo != null) {
+          engineInfo.put("isDefault", i == bundledIndex);
+        }
+      }
+      ui.put("autoload-default", true);
+      ui.put("default-engine", bundledIndex);
+      ui.put("analysis-engine-command", bundledConfig.analysisCommand);
+      ui.put("estimate-command", bundledConfig.estimateCommand);
     }
   }
 
@@ -952,6 +1160,7 @@ public class Config {
       }
       this.config = loadAndMergeConfigdef(defaultConfig, configFilename, true);
     }
+    applyBundledKataGoDefaults();
     // Persisted properties
 
     this.saveBoard = loadAndMergeSaveBoardConfig(saveBoardConf, saveBoardFilename, false);

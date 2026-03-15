@@ -28,9 +28,41 @@ fi
 ARCH="$(uname -m)"
 if [[ "$ARCH" == "arm64" ]]; then
   ARCH_TAG="mac-arm64"
+  ENGINE_PLATFORM_DIR="macos-arm64"
 else
   ARCH_TAG="mac-amd64"
+  ENGINE_PLATFORM_DIR="macos-amd64"
 fi
+
+has_bundled_katago() {
+  [[ -f "$ROOT_DIR/weights/default.bin.gz" ]] \
+    && [[ -d "$ROOT_DIR/engines/katago/$ENGINE_PLATFORM_DIR" ]] \
+    && find "$ROOT_DIR/engines/katago/$ENGINE_PLATFORM_DIR" -maxdepth 1 -type f | grep -q .
+}
+
+if has_bundled_katago; then
+  PACKAGE_FLAVOR="with-katago"
+  PACKAGE_NOTE="Bundled KataGo included for this macOS package."
+else
+  PACKAGE_FLAVOR="without.engine"
+  PACKAGE_NOTE="No bundled KataGo in this macOS package."
+fi
+
+copy_bundle_engine_assets() {
+  if ! has_bundled_katago; then
+    return 0
+  fi
+
+  mkdir -p "$INPUT_DIR/engines/katago" "$INPUT_DIR/weights"
+  cp -R "$ROOT_DIR/engines/katago/$ENGINE_PLATFORM_DIR" "$INPUT_DIR/engines/katago/"
+  if [[ -d "$ROOT_DIR/engines/katago/configs" ]]; then
+    cp -R "$ROOT_DIR/engines/katago/configs" "$INPUT_DIR/engines/katago/"
+  fi
+  if [[ -f "$ROOT_DIR/engines/katago/VERSION.txt" ]]; then
+    cp "$ROOT_DIR/engines/katago/VERSION.txt" "$INPUT_DIR/engines/katago/"
+  fi
+  cp "$ROOT_DIR/weights/default.bin.gz" "$INPUT_DIR/weights/default.bin.gz"
+}
 
 DIST_DIR="$ROOT_DIR/dist/macos"
 INPUT_DIR="$DIST_DIR/input"
@@ -42,6 +74,7 @@ mkdir -p "$INPUT_DIR" "$APP_IMAGE_DIR" "$DMG_DIR"
 cp "$JAR_PATH" "$INPUT_DIR/"
 cp README.md README_EN.md README_KO.md LICENSE.txt "$INPUT_DIR/"
 cp readme_cn.pdf readme_en.pdf "$INPUT_DIR/"
+copy_bundle_engine_assets
 
 APP_NAME="LizzieYzy Next-FoxUID"
 MAIN_JAR="$(basename "$JAR_PATH")"
@@ -73,9 +106,9 @@ jpackage \
   --java-options "-Xmx4096m"
 
 APP_BUNDLE="$APP_IMAGE_DIR/$APP_NAME.app"
-APP_ZIP="$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.app.zip"
+APP_ZIP="$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.${PACKAGE_FLAVOR}.app.zip"
 DMG_FILE="$(ls "$DMG_DIR"/*.dmg | head -n 1)"
-FINAL_DMG="$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.dmg"
+FINAL_DMG="$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.${PACKAGE_FLAVOR}.dmg"
 
 mkdir -p "$ROOT_DIR/dist/release"
 cp "$DMG_FILE" "$FINAL_DMG"
@@ -84,10 +117,11 @@ cp "$DMG_FILE" "$FINAL_DMG"
   ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$APP_ZIP"
 )
 
-cat >"$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}-install.txt" <<EOF
+cat >"$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.${PACKAGE_FLAVOR}-install.txt" <<EOF
 Package type: unsigned macOS app + dmg
 Build architecture: $ARCH
 Generated on: $DATE_TAG
+Engine: $PACKAGE_NOTE
 
 Install:
 1. Open the dmg and drag app to Applications.
@@ -100,4 +134,4 @@ Notes:
 EOF
 
 echo "Artifacts:"
-ls -lh "$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}"*
+ls -lh "$ROOT_DIR/dist/release/${DATE_TAG}-${ARCH_TAG}.${PACKAGE_FLAVOR}"*
