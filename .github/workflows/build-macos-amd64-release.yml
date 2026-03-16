@@ -1,0 +1,67 @@
+name: Build macOS amd64 Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_tag:
+        description: Release date tag, for example 2026-03-16
+        required: true
+        default: 2026-03-16
+      release_tag:
+        description: Existing GitHub release tag to upload into
+        required: true
+        default: 2.5.3-next-foxuid-2026-03-16.2
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install maven katago
+
+      - name: Build shaded jar
+        run: mvn -DskipTests package
+
+      - name: Prepare bundled KataGo assets
+        env:
+          HTTPS_PROXY: ""
+          HTTP_PROXY: ""
+          https_proxy: ""
+          http_proxy: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: ./scripts/prepare_bundled_katago.sh
+
+      - name: Build macOS amd64 package
+        run: ./scripts/package_macos_dmg.sh "${{ inputs.date_tag }}" 2.5.3 target/lizzie-yzy2.5.3-shaded.jar
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-amd64-with-katago
+          path: |
+            dist/release/*mac-amd64.with-katago*
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            dist/release/*mac-amd64.with-katago* \
+            --repo "${{ github.repository }}" \
+            --clobber

@@ -15,7 +15,25 @@ WEIGHTS_ROOT="$ROOT_DIR/weights"
 CONFIG_ROOT="$ENGINES_ROOT/configs"
 WINDOWS_ROOT="$ENGINES_ROOT/windows-x64"
 LINUX_ROOT="$ENGINES_ROOT/linux-x64"
-MACOS_ARM64_ROOT="$ENGINES_ROOT/macos-arm64"
+
+detect_macos_platform_dir() {
+  local arch
+  arch="${MACOS_KATAGO_ARCH:-$(uname -m)}"
+  if [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
+    echo "macos-arm64"
+  else
+    echo "macos-amd64"
+  fi
+}
+
+brew_prefix_for() {
+  local formula="$1"
+  if ! command -v brew >/dev/null 2>&1; then
+    echo ""
+    return 0
+  fi
+  brew --prefix "$formula" 2>/dev/null || true
+}
 
 require_cmd() {
   local cmd="$1"
@@ -121,49 +139,62 @@ prepare_linux_bundle() {
   chmod +x "$LINUX_ROOT/katago"
 }
 
-prepare_macos_arm64_bundle() {
-  local katago_bin="${MACOS_ARM64_KATAGO_BIN:-/opt/homebrew/bin/katago}"
-  local libzip_bin="${MACOS_ARM64_LIBZIP:-/opt/homebrew/opt/libzip/lib/libzip.5.dylib}"
-  local liblzma_bin="${MACOS_ARM64_LIBLZMA:-/opt/homebrew/opt/xz/lib/liblzma.5.dylib}"
-  local libzstd_bin="${MACOS_ARM64_LIBZSTD:-/opt/homebrew/opt/zstd/lib/libzstd.1.dylib}"
+prepare_macos_bundle() {
+  local katago_prefix
+  local libzip_prefix
+  local xz_prefix
+  local zstd_prefix
+  local platform_dir
+
+  katago_prefix="$(brew_prefix_for katago)"
+  libzip_prefix="$(brew_prefix_for libzip)"
+  xz_prefix="$(brew_prefix_for xz)"
+  zstd_prefix="$(brew_prefix_for zstd)"
+  platform_dir="$(detect_macos_platform_dir)"
+
+  local macos_root="$ENGINES_ROOT/$platform_dir"
+  local katago_bin="${MACOS_KATAGO_BIN:-${katago_prefix:+$katago_prefix/bin/katago}}"
+  local libzip_bin="${MACOS_LIBZIP_BIN:-${libzip_prefix:+$libzip_prefix/lib/libzip.5.dylib}}"
+  local liblzma_bin="${MACOS_LIBLZMA_BIN:-${xz_prefix:+$xz_prefix/lib/liblzma.5.dylib}}"
+  local libzstd_bin="${MACOS_LIBZSTD_BIN:-${zstd_prefix:+$zstd_prefix/lib/libzstd.1.dylib}}"
 
   if [[ ! -x "$katago_bin" ]]; then
-    echo "Skipping macos-arm64 bundle: $katago_bin not found"
+    echo "Skipping $platform_dir bundle: $katago_bin not found"
     return 0
   fi
 
   require_cmd install_name_tool
 
-  rm -rf "$MACOS_ARM64_ROOT"
-  mkdir -p "$MACOS_ARM64_ROOT/lib"
+  rm -rf "$macos_root"
+  mkdir -p "$macos_root/lib"
 
-  cp -Lf "$katago_bin" "$MACOS_ARM64_ROOT/katago"
-  cp -Lf "$libzip_bin" "$MACOS_ARM64_ROOT/lib/libzip.5.dylib"
-  cp -Lf "$liblzma_bin" "$MACOS_ARM64_ROOT/lib/liblzma.5.dylib"
-  cp -Lf "$libzstd_bin" "$MACOS_ARM64_ROOT/lib/libzstd.1.dylib"
-  chmod +x "$MACOS_ARM64_ROOT/katago"
+  cp -Lf "$katago_bin" "$macos_root/katago"
+  cp -Lf "$libzip_bin" "$macos_root/lib/libzip.5.dylib"
+  cp -Lf "$liblzma_bin" "$macos_root/lib/liblzma.5.dylib"
+  cp -Lf "$libzstd_bin" "$macos_root/lib/libzstd.1.dylib"
+  chmod +x "$macos_root/katago"
 
   install_name_tool \
-    -change /opt/homebrew/opt/libzip/lib/libzip.5.dylib \
+    -change "$libzip_bin" \
     @executable_path/lib/libzip.5.dylib \
-    "$MACOS_ARM64_ROOT/katago"
-  install_name_tool -id @loader_path/libzip.5.dylib "$MACOS_ARM64_ROOT/lib/libzip.5.dylib"
-  install_name_tool -id @loader_path/liblzma.5.dylib "$MACOS_ARM64_ROOT/lib/liblzma.5.dylib"
-  install_name_tool -id @loader_path/libzstd.1.dylib "$MACOS_ARM64_ROOT/lib/libzstd.1.dylib"
+    "$macos_root/katago"
+  install_name_tool -id @loader_path/libzip.5.dylib "$macos_root/lib/libzip.5.dylib"
+  install_name_tool -id @loader_path/liblzma.5.dylib "$macos_root/lib/liblzma.5.dylib"
+  install_name_tool -id @loader_path/libzstd.1.dylib "$macos_root/lib/libzstd.1.dylib"
   install_name_tool \
-    -change /opt/homebrew/opt/xz/lib/liblzma.5.dylib \
+    -change "$liblzma_bin" \
     @loader_path/liblzma.5.dylib \
-    "$MACOS_ARM64_ROOT/lib/libzip.5.dylib"
+    "$macos_root/lib/libzip.5.dylib"
   install_name_tool \
-    -change /opt/homebrew/opt/zstd/lib/libzstd.1.dylib \
+    -change "$libzstd_bin" \
     @loader_path/libzstd.1.dylib \
-    "$MACOS_ARM64_ROOT/lib/libzip.5.dylib"
+    "$macos_root/lib/libzip.5.dylib"
 
   if command -v codesign >/dev/null 2>&1; then
-    codesign --force --sign - "$MACOS_ARM64_ROOT/lib/"*.dylib "$MACOS_ARM64_ROOT/katago" >/dev/null 2>&1 || true
+    codesign --force --sign - "$macos_root/lib/"*.dylib "$macos_root/katago" >/dev/null 2>&1 || true
   fi
 
-  "$MACOS_ARM64_ROOT/katago" version >/dev/null
+  "$macos_root/katago" version >/dev/null
 }
 
 write_manifest() {
@@ -198,7 +229,7 @@ main() {
   prepare_configs "$windows_src"
   prepare_windows_bundle "$windows_src"
   prepare_linux_bundle "$linux_src"
-  prepare_macos_arm64_bundle
+  prepare_macos_bundle
   write_manifest "$model_path"
 
   echo
