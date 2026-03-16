@@ -15,6 +15,11 @@
 2. `with-katago` bundles can run right after unzip or install. `without.engine` bundles need your own engine setup.
 3. Open the app and use the Fox sync entry to fetch the latest public game by Fox ID.
 
+## Where Is The Bundled Weight File?
+- Windows / Linux bundles: `Lizzieyzy/weights/default.bin.gz`
+- macOS bundles: inside the `.app` package at `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- If Finder only shows one `.app` file, that is expected. Use “Show Package Contents” to inspect it.
+
 ![screenshot_en](/screenshot_en.png?raw=true)
 
 LizzieYzy Next-FoxUID is a maintained fork of LizzieYzy focused on reviving broken features and keeping the project usable. This branch restores Fox kifu sync and changes it to a simpler Fox ID based flow.

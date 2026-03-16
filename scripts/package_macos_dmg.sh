@@ -128,6 +128,11 @@ Install:
 2. First run may be blocked by Gatekeeper, use:
    System Settings -> Privacy & Security -> Open Anyway
 
+Bundled KataGo paths inside the app bundle:
+- Engine: LizzieYzy Next-FoxUID.app/Contents/app/engines/katago/$ENGINE_PLATFORM_DIR/katago
+- Weight: LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz
+- Configs: LizzieYzy Next-FoxUID.app/Contents/app/engines/katago/configs/
+
 Notes:
 - This package is unsigned/not notarized.
 - For Intel/Apple Silicon dual-native support, build once on each architecture.

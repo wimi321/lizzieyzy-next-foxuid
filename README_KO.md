@@ -14,6 +14,11 @@
 2. `with-katago` 패키지는 압축 해제 또는 설치 후 바로 사용할 수 있습니다. `without.engine` 패키지는 엔진을 직접 설정해야 합니다.
 3. 앱을 열고 Fox ID를 입력해 최신 공개 기보를 가져옵니다.
 
+## 내장 가중치 파일 위치
+- Windows / Linux 패키지: `Lizzieyzy/weights/default.bin.gz`
+- macOS 패키지: `.app` 내부의 `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- Finder 에서 `.app` 하나만 보여도 정상입니다. 앱을 우클릭하고 “패키지 내용 보기”로 확인할 수 있습니다.
+
 ![screenshot_ko](/screenshot_ko.png?raw=true)
 
 LizzieYzy Next-FoxUID는 더 이상 유지되지 않는 원본 LizzieYzy에서 망가진 기능을 복구하고 계속 사용할 수 있게 유지하는 포크입니다. 현재 이 포크는 Fox 기보 동기화를 복구했고, 더 이해하기 쉬운 Fox ID 입력 방식으로 바꿨습니다.

@@ -156,6 +156,29 @@ Changes:
 Package:
 - $bundle_note
 EOF
+
+  if [[ -n "$engine_platforms" ]]; then
+    cat >"$root/Bundled-KataGo.txt" <<EOF
+This package includes bundled KataGo assets.
+
+Weight file:
+- Lizzieyzy/weights/default.bin.gz
+
+Engine directories:
+EOF
+    local platform_dir
+    IFS=',' read -r -a platform_dirs <<<"$engine_platforms"
+    for platform_dir in "${platform_dirs[@]}"; do
+      if has_engine_files "$platform_dir"; then
+        printf -- "- Lizzieyzy/engines/katago/%s/\n" "$platform_dir" >>"$root/Bundled-KataGo.txt"
+      fi
+    done
+    cat >>"$root/Bundled-KataGo.txt" <<'EOF'
+
+Config files:
+- Lizzieyzy/engines/katago/configs/
+EOF
+  fi
 }
 
 WINDOWS64_FLAVOR="$(bundle_flavor windows-x64)"

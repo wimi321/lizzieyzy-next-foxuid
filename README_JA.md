@@ -15,6 +15,11 @@
 2. `with-katago` パッケージは解凍またはインストール後すぐ使えます。`without.engine` は別途エンジン設定が必要です。
 3. アプリを開き、野狐IDを入力して最新の公開棋譜を取得します。
 
+## 内蔵重みファイルの場所
+- Windows / Linux パッケージ: `Lizzieyzy/weights/default.bin.gz`
+- macOS パッケージ: `.app` 内部の `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- Finder で `.app` しか見えなくても正常です。右クリックして「パッケージの内容を表示」を選ぶと確認できます。
+
 ![screenshot_ja](/screenshot_en.png?raw=true)
 
 LizzieYzy Next-FoxUID は、元の LizzieYzy で壊れてしまった機能を復旧し、今後も使える状態を保つためのメンテナンスフォークです。現在は野狐棋譜同期を修復し、より分かりやすい「野狐ID入力」方式に変更しています。

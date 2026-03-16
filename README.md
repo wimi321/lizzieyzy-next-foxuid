@@ -15,6 +15,11 @@
 2. `with-katago` 整合包下载后直接解压或安装即可用；`without.engine` 版本需要自己配置引擎。
 3. 打开程序后，使用“野狐棋谱（输入野狐ID获取）”功能同步最新公开棋谱。
 
+## 整合版里权重文件在哪
+- Windows / Linux 整合包：权重文件就在 `Lizzieyzy/weights/default.bin.gz`。
+- macOS 整合包：权重文件在 `.app` 程序包内部，路径是 `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`。
+- 如果你在 Finder 里只看到一个 `.app`，这是正常的；右键应用，选择“显示包内容”就能看到。
+
 ![screenshot](/screenshot.png?raw=true)
 
 LizzieYzy Next-FoxUID 是 LizzieYzy 的维护分支，专门接手原项目里已经失效或没人继续维护的功能。当前已经修复腾讯野狐棋谱同步，并改成更直接的“输入野狐ID获取”。
@@ -66,6 +71,11 @@ LizzieYzy 是一个引擎界面,修改自[Lizzie](https://github.com/featurecat/
 1. Download the package for your system from [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases).
 2. `with-katago` bundles can run right after unzip or install. `without.engine` bundles need your own engine setup.
 3. Open the app and use the Fox sync entry to fetch the latest public game by Fox ID.
+
+## Where Is The Bundled Weight File?
+- Windows / Linux bundles: `Lizzieyzy/weights/default.bin.gz`
+- macOS bundles: inside the `.app` package at `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- If Finder only shows one `.app` file, that is expected. Use “Show Package Contents” to inspect it.
 
 ![screenshot_en](/screenshot_en.png?raw=true)
 
@@ -120,6 +130,11 @@ We have added some new features on Lizzie's basis: **Hawk Eye, Flash Analyze, Ba
 2. `with-katago` パッケージは解凍またはインストール後すぐ使えます。`without.engine` は別途エンジン設定が必要です。
 3. アプリを開き、野狐IDを入力して最新の公開棋譜を取得します。
 
+## 内蔵重みファイルの場所
+- Windows / Linux パッケージ: `Lizzieyzy/weights/default.bin.gz`
+- macOS パッケージ: `.app` 内部の `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- Finder で `.app` しか見えなくても正常です。右クリックして「パッケージの内容を表示」を選ぶと確認できます。
+
 ![screenshot_ja](/screenshot_en.png?raw=true)
 
 LizzieYzy Next-FoxUID は、元の LizzieYzy で壊れてしまった機能を復旧し、今後も使える状態を保つためのメンテナンスフォークです。現在は野狐棋譜同期を修復し、より分かりやすい「野狐ID入力」方式に変更しています。
@@ -171,6 +186,11 @@ Lizzie をもとに、**Hawk Eye、Flash Analyze、Batch Analyze、Estimate、Bo
 1. [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases) 에서 내 시스템에 맞는 패키지를 다운로드합니다.
 2. `with-katago` 패키지는 압축 해제 또는 설치 후 바로 사용할 수 있습니다. `without.engine` 패키지는 엔진을 직접 설정해야 합니다.
 3. 앱을 열고 Fox ID를 입력해 최신 공개 기보를 가져옵니다.
+
+## 내장 가중치 파일 위치
+- Windows / Linux 패키지: `Lizzieyzy/weights/default.bin.gz`
+- macOS 패키지: `.app` 내부의 `LizzieYzy Next-FoxUID.app/Contents/app/weights/default.bin.gz`
+- Finder 에서 `.app` 하나만 보여도 정상입니다. 앱을 우클릭하고 “패키지 내용 보기”로 확인할 수 있습니다.
 
 ![screenshot_ko](/screenshot_ko.png?raw=true)
 
