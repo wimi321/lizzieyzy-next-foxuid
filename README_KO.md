@@ -46,7 +46,11 @@ Releases: <https://github.com/wimi321/lizzieyzy-next-foxuid/releases>
 2. 가장 쉽게 시작하려면 `with-katago` 패키지를 선택합니다.
 3. 앱을 열고 Fox ID를 입력해 최신 공개 기보를 가져옵니다.
 
-Detailed install guide: [Installation Guide](docs/INSTALL_EN.md)
+## 상세 문서
+
+- [설치 가이드](docs/INSTALL_KO.md)
+- [Troubleshooting (English)](docs/TROUBLESHOOTING_EN.md)
+- [Package Overview (English)](docs/PACKAGES_EN.md)
 
 ## 내장 정보
 

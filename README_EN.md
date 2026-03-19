@@ -60,6 +60,7 @@ Releases: <https://github.com/wimi321/lizzieyzy-next-foxuid/releases>
 - [Installation Guide](docs/INSTALL_EN.md)
 - [Troubleshooting](docs/TROUBLESHOOTING_EN.md)
 - [Package Overview](docs/PACKAGES_EN.md)
+- [Maintenance Notes](docs/MAINTENANCE_EN.md)
 
 ## What Makes This Fork Different
 

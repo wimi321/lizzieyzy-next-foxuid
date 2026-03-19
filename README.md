@@ -84,6 +84,8 @@
 - [安装指南](docs/INSTALL.md)
 - [常见问题与排错](docs/TROUBLESHOOTING.md)
 - [发布包说明](docs/PACKAGES.md)
+- [维护说明](docs/MAINTENANCE.md)
+- [发布检查清单](docs/RELEASE_CHECKLIST.md)
 
 ## 和原版相比，变化在哪里
 
@@ -158,8 +160,11 @@
 - [x] 恢复多平台发布包
 - [x] 补齐 Intel Mac 打包流程
 - [x] 梳理 Windows / macOS / Linux 下载策略
+- [x] 补安装与排错文档
+- [x] 文档与界面统一 Fox ID / 野狐ID 术语
 - [ ] 增加更多实机安装验收记录
 - [ ] 继续优化首页视觉、截图与演示素材
+- [ ] 继续补完整的日文 / 韩文排错文档
 - [ ] 收集真实用户反馈，持续压缩新手上手成本
 
 ## 参与维护

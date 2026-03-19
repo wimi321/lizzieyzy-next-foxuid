@@ -42,7 +42,7 @@ A concise, reproducible report saves a lot of time for everyone.
 
 1. 改动尽量聚焦，一个 PR 解决一类问题。
 2. 不要顺手混入无关重构。
-3. 如果改了打包、引擎路径、野狐同步流程，请说明测试方式。
+3. 如果改了打包、引擎路径、野狐同步流程，请说明测试方式。打包相关改动建议同时参考 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
 4. 如果改了文案或界面，请附截图。
 5. 尽量保持中英文术语一致，尤其是 `Fox ID / 野狐ID`、`with-katago`、`without.engine`。
 
