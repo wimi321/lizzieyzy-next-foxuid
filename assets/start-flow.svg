@@ -1,0 +1,69 @@
+<svg width="1280" height="560" viewBox="0 0 1280 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="68" y1="40" x2="1210" y2="524" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAEFD3"/>
+      <stop offset="0.55" stop-color="#F0D8A1"/>
+      <stop offset="1" stop-color="#E2B864"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFFDF8" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#FFF2D5" stop-opacity="0.94"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1280" height="560" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#6B4918" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="560" rx="36" fill="url(#bg)"/>
+
+  <text x="640" y="92" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="40" font-weight="800" fill="#1A1713">Typical flow: download, fetch, review</text>
+  <text x="640" y="130" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="20" font-weight="500" fill="#755C30">Pick a package, enter a Fox ID, then continue with KataGo review.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="204" width="254" height="250" rx="28" fill="url(#panel)" stroke="#F2DFBB"/>
+    <rect x="354" y="204" width="254" height="250" rx="28" fill="url(#panel)" stroke="#F2DFBB"/>
+    <rect x="638" y="204" width="254" height="250" rx="28" fill="url(#panel)" stroke="#F2DFBB"/>
+    <rect x="922" y="204" width="288" height="250" rx="28" fill="url(#panel)" stroke="#F2DFBB"/>
+  </g>
+
+  <circle cx="124" cy="246" r="18" fill="#1B4D3E"/>
+  <text x="124" y="252" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="14" font-weight="800" fill="#F7F0DF">01</text>
+  <text x="98" y="306" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#171513">Choose a package</text>
+  <text x="98" y="344" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">Most users should start</text>
+  <text x="98" y="368" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">with with-katago.</text>
+  <rect x="98" y="396" width="150" height="32" rx="16" fill="#1B4D3E" fill-opacity="0.12"/>
+  <text x="173" y="417" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#1B4D3E">Windows / macOS / Linux</text>
+
+  <path d="M325 328H350" stroke="#A8742A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M342 314L358 328L342 342" stroke="#A8742A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="408" cy="246" r="18" fill="#7F4F24"/>
+  <text x="408" y="252" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="14" font-weight="800" fill="#FFF6E6">02</text>
+  <text x="382" y="306" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#171513">Launch the app</text>
+  <text x="382" y="344" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">Open the build for your</text>
+  <text x="382" y="368" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">system and start it.</text>
+  <rect x="382" y="396" width="132" height="32" rx="16" fill="#7F4F24" fill-opacity="0.12"/>
+  <text x="448" y="417" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#7F4F24">DMG / ZIP packages</text>
+
+  <path d="M609 328H634" stroke="#A8742A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M626 314L642 328L626 342" stroke="#A8742A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="692" cy="246" r="18" fill="#2F4858"/>
+  <text x="692" y="252" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="14" font-weight="800" fill="#F5F7FA">03</text>
+  <text x="666" y="306" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#171513">Enter Fox ID</text>
+  <text x="666" y="344" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">Open the Fox sync entry</text>
+  <text x="666" y="368" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">and input the numeric ID.</text>
+  <rect x="666" y="396" width="164" height="32" rx="16" fill="#2F4858" fill-opacity="0.12"/>
+  <text x="748" y="417" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#2F4858">Latest visible public games</text>
+
+  <path d="M893 328H918" stroke="#A8742A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M910 314L926 328L910 342" stroke="#A8742A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="976" cy="246" r="18" fill="#4E8B57"/>
+  <text x="976" y="252" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="14" font-weight="800" fill="#F4F9F2">04</text>
+  <text x="950" y="306" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#171513">Review with KataGo</text>
+  <text x="950" y="344" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">Use LizzieYzy for charts,</text>
+  <text x="950" y="368" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#6F5A33">mistakes, and analysis.</text>
+  <rect x="950" y="396" width="176" height="32" rx="16" fill="#4E8B57" fill-opacity="0.12"/>
+  <text x="1038" y="417" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#4E8B57">Bundled or custom engine</text>
+</svg>

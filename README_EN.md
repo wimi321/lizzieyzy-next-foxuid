@@ -35,34 +35,24 @@
 > [!IMPORTANT]
 > The original Fox sync flow in LizzieYzy no longer worked reliably. This fork restores it and standardizes the UI around **Fox ID** input.
 
-## Why People Look At This Fork First
+## What This Fork Fixes
 
 `LizzieYzy Next-FoxUID` is a maintained fork of the original `lizzieyzy` project.
 
-The goal is simple: keep the workflow people actually depend on in working shape, so you can install it, fetch games, and keep reviewing without rebuilding everything yourself.
+This repository is not a rewrite. It keeps the original LizzieYzy usable for the parts people still rely on.
 
-<table>
-<tr>
-<td width="50%">
-<strong>Fox sync works again</strong><br/>
-The broken public-game fetch flow has been replaced with a working implementation that continues to fetch the latest visible games by Fox ID.
-</td>
-<td width="50%">
-<strong>The wording is finally clear</strong><br/>
-UI and docs now consistently say <strong>Fox ID</strong>, instead of mixing UID, usernames, and older terms.
-</td>
-</tr>
-<tr>
-<td width="50%">
-<strong>Packages are easier to choose</strong><br/>
-Windows, macOS, and Linux releases are reorganized around out-of-box use versus custom engine setup.
-</td>
-<td width="50%">
-<strong>This is an ongoing fork</strong><br/>
-The project keeps shipping packages, docs, and installation feedback fixes instead of stopping after a one-time patch.
-</td>
-</tr>
-</table>
+The main goals are straightforward:
+
+- install it without guesswork
+- fetch public Fox games by **Fox ID**
+- continue with KataGo review
+
+This fork mainly fixes these problems:
+
+- the original Fox sync flow stopped working for many users
+- UI and docs mixed Fox ID, UID, and username wording
+- release packages were harder than they should be to choose from
+- install and troubleshooting information was scattered
 
 ## If You Just Want To Start
 
@@ -105,6 +95,19 @@ Related links:
 - [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases)
 - [Package Overview](docs/PACKAGES_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
+
+## Typical Flow
+
+<p align="center">
+  <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />
+</p>
+
+For most users, the path is straightforward:
+
+1. Download the package for your system, usually `with-katago`
+2. Launch the app and open the Fox sync entry
+3. Enter a numeric **Fox ID** to fetch the latest public games
+4. Continue with bundled or custom KataGo review
 
 ## Quick Start
 

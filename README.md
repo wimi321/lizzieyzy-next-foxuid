@@ -98,6 +98,19 @@
 - [发布包说明](docs/PACKAGES.md)
 - [已验证平台](docs/TESTED_PLATFORMS.md)
 
+## 实际使用流程
+
+<p align="center">
+  <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />
+</p>
+
+大多数用户实际使用时，基本就是这几步：
+
+1. 下载适合自己系统的包，优先选 `with-katago`
+2. 启动程序，打开“野狐棋谱（输入野狐ID获取）”
+3. 输入纯数字的野狐ID，获取最新公开棋谱
+4. 继续用内置或自定义 KataGo 做分析和复盘
+
 ## 快速开始
 
 1. 去 [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases) 下载适合你系统的包。

@@ -35,22 +35,18 @@
 > [!IMPORTANT]
 > 元の LizzieYzy では野狐棋譜同期が実質的に使いにくい状態でした。このフォークではその流れを修復し、入力方式も **野狐ID** に統一しています。
 
-## このフォークについて
+## このメンテ版で変わったこと
 
 `LizzieYzy Next-FoxUID` は、元の `lizzieyzy` を今でも実用的に使える状態で維持するためのフォークです。
 
-目的は別アプリを作ることではなく、実際に使われる主な流れを維持することです。
+このリポジトリは別アプリを一から作るためのものではありません。元の LizzieYzy を使っていた人が、今の環境でもそのまま使い続けやすいように整えていくためのフォークです。
 
-- インストールできる
-- 起動できる
-- 野狐の公開棋譜を取得できる
-- KataGo で分析できる
+主に直しているのは次の点です。
 
-現在このフォークが重点的に解決しているのは次の3点です。
-
-- 元プロジェクトで壊れていた野狐棋譜同期
-- 分かりにくかった配布パッケージ構成
-- 分散していたインストール、トラブル対応、保守情報
+- 壊れていた野狐棋譜同期を使える状態に戻したこと
+- UI とドキュメントの表記を **野狐ID** に統一したこと
+- 配布パッケージを選びやすく整理し直したこと
+- インストールとトラブル対応の情報をこのリポジトリにまとめたこと
 
 ## 今すぐ始めたいなら
 
@@ -80,9 +76,12 @@
 
 ## どのパッケージを選ぶか
 
-普通の利用者なら、まず `with-katago` を選べば大きく外しません。
+> [!TIP]
+> 迷ったら `with-katago` を選べば大丈夫です。`without.engine` は自分でエンジンを管理したい人向けです。
 
-`without.engine` は、自分でエンジンを差し替える前提の人向けです。
+<p align="center">
+  <img src="assets/package-guide.svg" alt="LizzieYzy Next-FoxUID Package Guide" width="100%" />
+</p>
 
 | 環境 | 推奨パッケージ | Java | KataGo | 向いている人 |
 | --- | --- | --- | --- | --- |
@@ -99,6 +98,19 @@
 - [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases)
 - [Package Overview (English)](docs/PACKAGES_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
+
+## よくある使い方
+
+<p align="center">
+  <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />
+</p>
+
+多くの利用者は、だいたい次の流れで使います。
+
+1. 自分の環境に合うパッケージをダウンロードする
+2. アプリを起動して野狐棋譜の入口を開く
+3. 数字の **野狐ID** を入力して公開棋譜を取得する
+4. そのまま KataGo 解析とレビューを続ける
 
 ## クイックスタート
 

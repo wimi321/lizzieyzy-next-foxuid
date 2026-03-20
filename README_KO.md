@@ -35,22 +35,18 @@
 > [!IMPORTANT]
 > 원래 LizzieYzy 에서는 Fox 기보 동기화가 사실상 잘 동작하지 않았습니다. 이 포크는 그 흐름을 복구하고 입력 방식도 **Fox ID** 기준으로 통일했습니다.
 
-## 이 포크는 무엇인가
+## 이 유지보수판이 바꾼 점
 
 `LizzieYzy Next-FoxUID` 는 원래 `lizzieyzy` 를 지금도 실제로 쓸 수 있는 상태로 유지하기 위한 포크입니다.
 
-새 앱을 다시 만드는 것이 목적이 아니라, 사람들이 실제로 사용하는 핵심 흐름을 계속 살려두는 것이 목적입니다.
+이 저장소는 완전히 새로운 앱을 다시 만드는 프로젝트가 아닙니다. 기존 LizzieYzy 사용자가 지금 환경에서도 계속 설치하고, 기보를 가져오고, 분석할 수 있도록 유지보수하는 데 초점을 둡니다.
 
-- 설치된다
-- 실행된다
-- Fox 공개 기보를 가져온다
-- KataGo 로 분석한다
+주로 손본 부분은 다음과 같습니다.
 
-이 포크가 지금 집중해서 해결하는 문제는 다음 세 가지입니다.
-
-- 원 프로젝트에서 망가진 Fox 기보 동기화
-- 어떤 배포 패키지를 받아야 하는지 헷갈리는 문제
-- 설치, 문제 해결, 유지보수 정보가 흩어져 있던 문제
+- 망가졌던 Fox 기보 동기화를 다시 사용할 수 있게 복구
+- UI 와 문서의 용어를 **Fox ID** 로 통일
+- 배포 패키지를 플랫폼과 용도 기준으로 다시 정리
+- 설치와 문제 해결 문서를 이 저장소에 모아서 계속 갱신
 
 ## 바로 시작하고 싶다면
 
@@ -80,9 +76,12 @@
 
 ## 어떤 패키지를 받아야 하나
 
-일반 사용자라면 먼저 `with-katago` 를 고르면 됩니다.
+> [!TIP]
+> 대부분의 사용자는 `with-katago` 를 먼저 고르면 됩니다. `without.engine` 은 엔진을 직접 관리하려는 경우에만 고르세요.
 
-`without.engine` 은 엔진을 직접 바꾸거나 관리하려는 사용자용입니다.
+<p align="center">
+  <img src="assets/package-guide.svg" alt="LizzieYzy Next-FoxUID Package Guide" width="100%" />
+</p>
 
 | 환경 | 추천 패키지 | Java | KataGo | 추천 대상 |
 | --- | --- | --- | --- | --- |
@@ -99,6 +98,19 @@
 - [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases)
 - [Package Overview (English)](docs/PACKAGES_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
+
+## 보통은 이렇게 사용합니다
+
+<p align="center">
+  <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />
+</p>
+
+대부분의 사용자는 보통 다음 순서로 사용합니다.
+
+1. 내 시스템에 맞는 패키지를 다운로드합니다
+2. 앱을 실행하고 Fox 기보 가져오기 메뉴를 엽니다
+3. 숫자로 된 **Fox ID** 를 입력해 공개 기보를 가져옵니다
+4. 그대로 KataGo 분석과 복기를 이어갑니다
 
 ## 빠른 시작
 
