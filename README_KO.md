@@ -22,9 +22,11 @@
 <p align="center">
   <a href="https://github.com/wimi321/lizzieyzy-next-foxuid/releases">Releases</a>
   ·
-  <a href="#바로-시작하고-싶다면">바로 시작</a>
+  <a href="#한눈에-보기">한눈에 보기</a>
   ·
   <a href="#어떤-패키지를-받아야-하나">패키지 선택</a>
+  ·
+  <a href="#처음에는-이-순서로-사용">첫 사용 흐름</a>
   ·
   <a href="#빠른-시작">빠른 시작</a>
   ·
@@ -39,45 +41,17 @@
 > - Fox 기보를 가져올 때는 **숫자 Fox ID** 만 입력. 숫자만 가능, 닉네임 불가
 > - 첫 실행에서는 바로 쓸 수 있도록 분석 환경 준비를 자동으로 먼저 시도
 
-## 이런 사용자에게 맞습니다
+## 한눈에 보기
 
-- 예전에 `lizzieyzy` 를 썼는데 지금은 Fox 기보 동기화가 안 되는 사용자
-- 내려받은 뒤 바로 계속 쓸 수 있는 유지보수판이 필요한 사용자
-- 처음부터 설정 때문에 막히고 싶지 않은 사용자
-- Windows / macOS / Linux 용 패키지를 쉽게 고르고 싶은 사용자
+| 궁금한 점 | 이 유지보수판의 답 |
+| --- | --- |
+| 내려받은 뒤 바로 열 수 있나 | Windows 는 `installer.exe`, macOS 는 `.dmg`, Linux 는 통합 zip 을 주 추천으로 둡니다 |
+| Fox 기보를 지금도 가져올 수 있나 | 고장난 공개 기보 가져오기 흐름을 복구하고 계속 유지보수합니다 |
+| 무엇을 입력해야 하나 | 표기를 **숫자 Fox ID** 로 통일하고, 숫자만 가능하며 닉네임은 불가하다고 명확히 씁니다 |
+| 첫 실행에서 설정 때문에 멈추지 않나 | 먼저 분석 환경 자동 준비를 시도하므로 대부분의 사용자는 바로 시작할 수 있습니다 |
+| 앞으로도 계속 관리되나 | 이 저장소 자체가 계속 릴리스하고 수정하기 위한 유지보수 포크입니다 |
 
-## 다운로드 전 여기만 보면 됩니다
-
-| 환경 | 먼저 받을 패키지 | 어떤 사용자에게 맞는가 |
-| --- | --- | --- |
-| Windows x64 | `windows64.with-katago.installer.exe` | 가장 쉬운 경로. 먼저 이것을 고르면 됩니다 |
-| Windows x64 | `windows64.with-katago.portable.zip` | 설치 없이 바로 시작하고 싶은 경우 |
-| Windows x64 | `windows64.without.engine.portable.zip` | 엔진을 직접 관리하고 싶은 경우 |
-| macOS Apple Silicon | `mac-arm64.with-katago.dmg` | M 시리즈 Mac |
-| macOS Intel | `mac-amd64.with-katago.dmg` | Intel Mac |
-| Linux x64 | `linux64.with-katago.zip` | Linux 데스크톱 |
-
-> [!TIP]
-> 현재 공개 release 는 일반 사용자를 위해 이 6개 패키지를 중심으로 정리되어 있습니다.
-
-## 왜 이 유지보수판을 먼저 보게 되는가
-
-이 포크는 겉모습을 바꾸는 것보다, 사용자가 실제로 자주 막히는 경로를 먼저 복구하는 데 초점을 둡니다.
-
-- 설치한 뒤 바로 열리는가
-- 지금도 Fox 공개 기보를 가져올 수 있는가
-- 첫 실행에서 설정 때문에 오래 막히지 않는가
-- release 페이지에서 뭘 받아야 하는지 바로 알 수 있는가
-
-이 유지보수판이 실제로 바꾼 점:
-
-- 고장난 Fox 기보 동기화 경로를 복구하고 계속 유지보수
-- UI 와 문서 표현을 **숫자 Fox ID** 로 통일
-- Windows 는 `.installer.exe` 를 주 추천 경로로 변경
-- 첫 실행에서 바로 쓸 수 있도록 분석 환경 자동 준비를 우선
-- 공개 release 를 6개의 주 패키지로 정리
-
-## 스크린샷
+## 실제 화면
 
 ![LizzieYzy Next-FoxUID Screenshot](screenshot_ko.png)
 
@@ -90,7 +64,7 @@
   <img src="assets/package-guide.svg" alt="LizzieYzy Next-FoxUID Package Guide" width="100%" />
 </p>
 
-| 환경 | 추천 패키지 | Java | KataGo | 추천 대상 |
+| 환경 | 추천 패키지 | 런타임 포함 | 바로 분석 가능 | 추천 대상 |
 | --- | --- | --- | --- | --- |
 | Windows x64 | `windows64.with-katago.installer.exe` | 포함 | 포함 | 다운로드 후 바로 쓰고 싶은 경우 |
 | Windows x64 | `windows64.with-katago.portable.zip` | 포함 | 포함 | 설치 없이 바로 시작하고 싶은 경우 |
@@ -108,7 +82,7 @@
 - [Package Overview (English)](docs/PACKAGES_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
 
-## 보통은 이렇게 사용합니다
+## 처음에는 이 순서로 사용
 
 <p align="center">
   <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />

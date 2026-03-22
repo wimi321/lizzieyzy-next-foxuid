@@ -23,7 +23,11 @@
 <p align="center">
   <a href="https://github.com/wimi321/lizzieyzy-next-foxuid/releases">Download Releases</a>
   ·
-  <a href="#what-to-download-first">What To Download</a>
+  <a href="#one-page-overview">At A Glance</a>
+  ·
+  <a href="#what-to-download-first">Pick Your Download</a>
+  ·
+  <a href="#first-time-flow">First-Time Flow</a>
   ·
   <a href="#three-minute-setup">Three-Minute Setup</a>
   ·
@@ -38,14 +42,21 @@
 > - Fox kifu fetch now expects a **numeric Fox ID**: digits only, no nickname
 > - First launch tries to prepare the bundled analysis environment for you
 
-## Who This Is For
+## One-Page Overview
 
-- You used `lizzieyzy` before, but Fox sync no longer works for you
-- You want a build you can install and keep using right away
-- You want to start using it, not spend your first session on setup
-- You want clear packages for Windows, macOS, and Linux
+| What you care about | What this maintained fork now does |
+| --- | --- |
+| Can I install it and open it without fuss? | Windows leads with `installer.exe`, macOS leads with `.dmg`, Linux keeps one practical bundled zip |
+| Can I still fetch Fox games? | Yes. The broken public-game sync path is restored and maintained |
+| What am I supposed to type? | The UI now says **numeric Fox ID** everywhere, and it clearly says digits only, no nickname |
+| Will first launch get stuck on setup? | The app prepares the bundled analysis environment first, so most users can start immediately |
+| Is this just a one-off patch? | No. This repo exists to keep shipping releases, docs, and fixes |
 
-## Download In One Glance
+## What To Download First
+
+<p align="center">
+  <img src="assets/package-guide.svg" alt="LizzieYzy Next-FoxUID Package Guide" width="100%" />
+</p>
 
 | If you are on | Download this first | Best for |
 | --- | --- | --- |
@@ -59,30 +70,23 @@
 > [!TIP]
 > The maintained public release page now keeps only the 6 primary user-facing assets in the main recommendation list. If older tags still show compatibility packages, treat them as historical assets rather than the main path.
 
-## Why People Look At This Fork First
+## First-Time Flow
 
-This fork is not trying to repaint the whole project before the basics work again. It focuses on the path people actually use:
-
-- can you install it and open it without friction
-- can you still fetch public Fox games
-- do you still have to spend the first launch on manual setup
-- can you tell what to download without guessing
-
-What this maintained fork changes:
-
-- the broken Fox sync path is restored and kept maintainable
-- the UI and docs now say **numeric Fox ID** and make the digits-only rule clearer
-- Windows now leads with `.installer.exe`, while portable `.exe` builds stay available
-- first launch prepares the bundled analysis environment before asking you to configure anything
-- the public release page stays focused on 6 primary packages
+<p align="center">
+  <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />
+</p>
 
 ## Three-Minute Setup
 
 1. Go to [Releases](https://github.com/wimi321/lizzieyzy-next-foxuid/releases) and choose the package for your system.
 2. Windows users should start with `windows64.with-katago.installer.exe`; macOS users should pick the correct `.dmg`; Linux users should choose `linux64.with-katago.zip`.
-3. On first launch, the app now tries to auto-detect bundled KataGo, configs, and the default weight.
+3. On first launch, the app now tries to prepare the bundled analysis environment automatically.
 4. Open **Fox Kifu (Fetch by numeric Fox ID)** and enter a numeric Fox ID. Digits only, not a nickname.
 5. Fetch the latest public games and continue with bundled or custom KataGo review.
+
+<p align="center">
+  <img src="assets/fox-id-demo.gif" alt="LizzieYzy Next-FoxUID Fox numeric ID demo" width="100%" />
+</p>
 
 ## What First Launch Does Now
 
@@ -97,7 +101,7 @@ At startup, it now tries to:
 
 That keeps the common case simple: install, open, fetch, review.
 
-## Screenshot
+## Actual Interface
 
 ![LizzieYzy Next-FoxUID Screenshot](screenshot_en.png)
 
@@ -106,7 +110,7 @@ That keeps the common case simple: install, open, fetch, review.
 > [!TIP]
 > For most users, the rule is simple: choose `with-katago` if you want the shortest path, and `without.engine` only if you want to manage the engine yourself.
 
-| Platform | Recommended asset | Bundled Java | Bundled KataGo | Install style |
+| Platform | Recommended asset | Runtime included | Ready to review | Install style |
 | --- | --- | --- | --- | --- |
 | Windows x64 | `windows64.with-katago.installer.exe` | Yes | Yes | Installer with Start Menu and desktop shortcut |
 | Windows x64 | `windows64.with-katago.portable.zip` | Yes | Yes | Portable app image, unzip and run `LizzieYzy Next-FoxUID.exe` |
@@ -118,7 +122,7 @@ That keeps the common case simple: install, open, fetch, review.
 A few design choices behind this layout:
 
 - Windows now treats the installer as the primary user-facing package, so the easiest path is obvious.
-- The Windows no-engine package also moves to a portable `.exe` flow instead of a bat-first flow.
+- The Windows no-engine package also uses the same portable `.exe` style instead of an older manual-launch style.
 - macOS stays centered on `.dmg` installers, one for Apple Silicon and one for Intel.
 - Linux keeps a practical all-in-one package.
 - The public release page now stays focused on the 6 primary assets instead of mixing in historical compatibility bundles.

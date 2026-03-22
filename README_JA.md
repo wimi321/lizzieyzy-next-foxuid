@@ -22,9 +22,11 @@
 <p align="center">
   <a href="https://github.com/wimi321/lizzieyzy-next-foxuid/releases">Releases</a>
   ·
-  <a href="#今すぐ始めたいなら">今すぐ始める</a>
+  <a href="#ひと目でわかること">ひと目でわかる</a>
   ·
   <a href="#どのパッケージを選ぶか">パッケージ選択</a>
+  ·
+  <a href="#初回はこの順番で使う">最初の流れ</a>
   ·
   <a href="#クイックスタート">クイックスタート</a>
   ·
@@ -39,45 +41,17 @@
 > - 野狐棋譜取得では **野狐数字ID** を入力する。数字のみ、ニックネーム不可
 > - 初回起動では、そのまま使えるように分析まわりの準備を自動で進める
 
-## この版が向いている人
+## ひと目でわかること
 
-- 以前 `lizzieyzy` を使っていて、今は野狐棋譜同期が壊れて困っている人
-- ダウンロードしてすぐ使える継続保守版が欲しい人
-- 最初に設定で止まりたくない人
-- Windows / macOS / Linux で分かりやすい配布パッケージが欲しい人
+| 気になること | このメンテ版の答え |
+| --- | --- |
+| ダウンロード後すぐ開けるか | Windows は `installer.exe`、macOS は `.dmg`、Linux は整合 zip を主推薦 |
+| 野狐棋譜を今でも取れるか | 壊れていた公開棋譜取得の流れを修復して継続保守 |
+| 何を入力すればよいか | 表記を **野狐数字ID** に統一し、数字のみ・ニックネーム不可と明記 |
+| 初回起動で設定に止まらないか | まず分析まわりの自動準備を試みるので、多くの利用者はそのまま始められる |
+| 今後も保守されるか | このリポジトリ自体が継続リリースと修正のために運用される |
 
-## ダウンロード前にまずここを見る
-
-| 環境 | まず選ぶパッケージ | どういう人向けか |
-| --- | --- | --- |
-| Windows x64 | `windows64.with-katago.installer.exe` | すぐ使いたい人向け。まずはこれで十分 |
-| Windows x64 | `windows64.with-katago.portable.zip` | インストーラなしで始めたい人向け |
-| Windows x64 | `windows64.without.engine.portable.zip` | エンジンを自分で管理したい人向け |
-| macOS Apple Silicon | `mac-arm64.with-katago.dmg` | M シリーズ Mac |
-| macOS Intel | `mac-amd64.with-katago.dmg` | Intel Mac |
-| Linux x64 | `linux64.with-katago.zip` | Linux デスクトップ |
-
-> [!TIP]
-> 公開 release では、普通の利用者向けにこの 6 種類を主推薦として整理しています。
-
-## このメンテ版が先に直したこと
-
-このフォークが先に解決したいのは、見た目の刷新ではなく、利用者が本当に詰まりやすい部分です。
-
-- インストール後にちゃんと起動するか
-- 野狐公開棋譜を今でも取得できるか
-- 初回起動で設定に時間を取られずに済むか
-- release ページでどのファイルを選べばよいか分かるか
-
-この版で実際に変わったこと:
-
-- 壊れていた野狐棋譜同期を修復し、継続保守の対象にした
-- UI とドキュメントの表記を **野狐数字ID** に統一した
-- Windows は `.installer.exe` を主推薦にした
-- 初回起動でそのまま使えるように分析まわりの自動準備を優先する
-- 公開 release を 6 個の主パッケージに絞った
-
-## スクリーンショット
+## 実際の画面
 
 ![LizzieYzy Next-FoxUID Screenshot](screenshot_en.png)
 
@@ -90,7 +64,7 @@
   <img src="assets/package-guide.svg" alt="LizzieYzy Next-FoxUID Package Guide" width="100%" />
 </p>
 
-| 環境 | 推奨パッケージ | Java | KataGo | 向いている人 |
+| 環境 | 推奨パッケージ | 実行環境 | すぐ解析できるか | 向いている人 |
 | --- | --- | --- | --- | --- |
 | Windows x64 | `windows64.with-katago.installer.exe` | 同梱 | 同梱 | ダウンロード後すぐ使いたい |
 | Windows x64 | `windows64.with-katago.portable.zip` | 同梱 | 同梱 | インストーラを使わずに始めたい |
@@ -108,7 +82,7 @@
 - [Package Overview (English)](docs/PACKAGES_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
 
-## よくある使い方
+## 初回はこの順番で使う
 
 <p align="center">
   <img src="assets/start-flow.svg" alt="LizzieYzy Next-FoxUID Start Flow" width="100%" />

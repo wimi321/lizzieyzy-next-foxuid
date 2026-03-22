@@ -60,27 +60,27 @@
     <circle cx="238" cy="283" r="18" fill="#E8F5E5" stroke="#4E8B57" stroke-width="4"/>
     <circle cx="292" cy="283" r="18" fill="#191919"/>
   </g>
-  <text x="104" y="446" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="20" font-weight="700" fill="#2A2318">Fox games, fetched again.</text>
-  <text x="104" y="474" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="16" font-weight="500" fill="#70592D">Restore the public-game flow by Fox ID</text>
-  <text x="104" y="496" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="16" font-weight="500" fill="#70592D">and keep the familiar analysis path.</text>
+  <text x="104" y="446" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#2A2318">野狐数字ID抓谱，重新可用</text>
+  <text x="104" y="476" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="16" font-weight="500" fill="#70592D">输入纯数字的野狐数字ID，抓最新公开棋谱</text>
+  <text x="104" y="500" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="16" font-weight="500" fill="#70592D">然后继续分析、复盘和研究。</text>
 
   <g filter="url(#shadow)">
     <rect x="432" y="84" width="788" height="472" rx="30" fill="url(#panel)" stroke="#FFF6E3" stroke-width="2"/>
   </g>
-  <rect x="484" y="128" width="220" height="42" rx="21" fill="#173C34"/>
-  <text x="594" y="155" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#F8F1E0">MAINTAINED FORK</text>
+  <rect x="484" y="128" width="180" height="42" rx="21" fill="#173C34"/>
+  <text x="574" y="155" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#F8F1E0">持续维护版</text>
 
   <text x="484" y="244" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="72" font-weight="800" fill="#171513">LizzieYzy</text>
   <text x="484" y="322" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="72" font-weight="800" fill="#171513">Next-FoxUID</text>
-  <text x="484" y="382" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#6C5328">Restored Fox sync. Clearer packages.</text>
-  <text x="484" y="418" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#6C5328">KataGo-ready releases.</text>
+  <text x="484" y="384" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="32" font-weight="700" fill="#6C5328">原版失效的野狐抓谱，已经修好</text>
+  <text x="484" y="424" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#6C5328">Windows 直接下 exe，打开就能继续分析</text>
 
-  <text x="484" y="454" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="21" font-weight="500" fill="#7C6741">Windows   macOS   Linux</text>
+  <text x="484" y="462" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="21" font-weight="500" fill="#7C6741">Windows   macOS   Linux</text>
 
-  <rect x="484" y="486" width="164" height="46" rx="23" fill="#1B4D3E"/>
-  <text x="566" y="516" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F7F0DF">Fox ID flow</text>
-  <rect x="666" y="486" width="172" height="46" rx="23" fill="#7F4F24"/>
-  <text x="752" y="516" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#FFF7E8">Clear packages</text>
-  <rect x="856" y="486" width="220" height="46" rx="23" fill="#2F4858"/>
-  <text x="966" y="516" text-anchor="middle" font-family="Avenir Next, Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F5F7FA">Built-in KataGo</text>
+  <rect x="484" y="486" width="178" height="46" rx="23" fill="#1B4D3E"/>
+  <text x="573" y="516" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#F7F0DF">野狐数字ID</text>
+  <rect x="680" y="486" width="220" height="46" rx="23" fill="#7F4F24"/>
+  <text x="790" y="516" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#FFF7E8">Windows 直接下 exe</text>
+  <rect x="918" y="486" width="220" height="46" rx="23" fill="#2F4858"/>
+  <text x="1028" y="516" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#F5F7FA">打开就能分析</text>
 </svg>
