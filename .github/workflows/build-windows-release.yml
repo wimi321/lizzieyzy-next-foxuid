@@ -72,7 +72,7 @@ jobs:
 
       - name: Validate public Windows assets
         shell: bash
-        run: ./scripts/validate_release_assets.sh windows dist/release "${{ inputs.date_tag }}"
+        run: bash ./scripts/validate_release_assets.sh windows dist/release "${{ inputs.date_tag }}"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

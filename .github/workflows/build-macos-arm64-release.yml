@@ -48,7 +48,7 @@ jobs:
         run: ./scripts/package_macos_dmg.sh "${{ inputs.date_tag }}" 2.5.3 target/lizzie-yzy2.5.3-shaded.jar
 
       - name: Validate public macOS arm64 assets
-        run: ./scripts/validate_release_assets.sh mac-arm64 dist/release "${{ inputs.date_tag }}"
+        run: bash ./scripts/validate_release_assets.sh mac-arm64 dist/release "${{ inputs.date_tag }}"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
