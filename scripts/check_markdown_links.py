@@ -12,6 +12,8 @@ FILES = [
     ROOT / "CONTRIBUTING.md",
     ROOT / "CODE_OF_CONDUCT.md",
     ROOT / "SECURITY.md",
+    ROOT / "SUPPORT.md",
+    ROOT / "ROADMAP.md",
 ]
 FILES.extend(sorted((ROOT / "docs").glob("*.md")))
 

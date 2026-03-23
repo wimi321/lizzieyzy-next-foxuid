@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-`LizzieYzy Next-FoxUID` 希望成为一个让人愿意长期参与的项目。
+`LizzieYzy Next` 希望成为一个让人愿意长期参与的项目。
 
 我们欢迎直接、具体、有效的反馈，也希望讨论始终保持基本的尊重。
 

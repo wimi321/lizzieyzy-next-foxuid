@@ -232,25 +232,31 @@ def draw_header(canvas, cfg):
 
 def draw_step_bar(canvas, active_step, cfg):
     draw = ImageDraw.Draw(canvas)
+    bar_rect = (188, 626, 932, 706)
+    x0, y0, x1, y1 = bar_rect
     bar = rounded_overlay(
         canvas.size,
-        (198, 646, 922, 694),
-        24,
+        bar_rect,
+        28,
         (255, 255, 255, 232),
         shadow=(0, 10, 18, (17, 17, 17, 26)),
         stroke=COLOR_PANEL_STROKE,
     )
     canvas.alpha_composite(bar)
-    draw.line((252, 670, 868, 670), fill=(218, 205, 184, 200), width=6)
-    xs = [252, 458, 664, 870]
+    inner_left = x0 + 60
+    inner_right = x1 - 60
+    circle_y = y0 + 44
+    label_y = y0 + 66
+    xs = [round(inner_left + idx * (inner_right - inner_left) / 3) for idx in range(4)]
+    draw.line((xs[0], circle_y, xs[-1], circle_y), fill=(218, 205, 184, 200), width=6)
     for idx, (label, color, cx) in enumerate(zip(cfg['step_labels'], ACCENTS, xs), start=1):
         r = 28 if idx == active_step else 22
         fill = color if idx == active_step else (235, 229, 217, 255)
-        draw.ellipse((cx - r, 670 - r, cx + r, 670 + r), fill=fill)
+        draw.ellipse((cx - r, circle_y - r, cx + r, circle_y + r), fill=fill)
         num_fill = (255, 255, 255, 255) if idx == active_step else (90, 82, 69, 255)
-        draw_text(draw, (cx, 670), f'{idx:02d}', font(cfg, 'bar_num'), num_fill, anchor='mm')
+        draw_text(draw, (cx, circle_y), f'{idx:02d}', font(cfg, 'bar_num'), num_fill, anchor='mm')
         label_fill = color if idx == active_step else COLOR_MUTED
-        draw_text(draw, (cx, 698), label, font(cfg, 'bar_label'), label_fill, anchor='ms')
+        draw_text(draw, (cx, label_y), label, font(cfg, 'bar_label'), label_fill, anchor='mm')
 
 
 def draw_callout(canvas, step_num, scene, cfg):
@@ -357,7 +363,16 @@ def draw_step3_modal(canvas, cfg):
     )
     canvas.alpha_composite(modal)
     draw = ImageDraw.Draw(canvas)
-    draw_chip(draw, (648, 230, 754, 262), cfg['modal_chip'], ACCENTS[2], (255, 255, 255, 255), font(cfg, 'step_chip'))
+    modal_chip_font = font(cfg, 'step_chip')
+    modal_chip_width = int(draw.textlength(cfg['modal_chip'], font=modal_chip_font) + 36)
+    draw_chip(
+        draw,
+        (648, 230, 648 + modal_chip_width, 262),
+        cfg['modal_chip'],
+        ACCENTS[2],
+        (255, 255, 255, 255),
+        modal_chip_font,
+    )
     draw_text(draw, (648, 316), cfg['modal_title'], font(cfg, 'modal_title'), COLOR_TEXT)
     draw_text(draw, (648, 350), cfg['modal_sub'], font(cfg, 'modal_body'), COLOR_MUTED)
     draw.rounded_rectangle((648, 376, 948, 422), radius=20, fill=(251, 248, 242, 255), outline=(226, 211, 184, 255), width=2)

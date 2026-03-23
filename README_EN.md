@@ -33,6 +33,22 @@
 > - You can now enter a **Fox nickname** directly. The app resolves the account and fetches recent public games automatically.
 > - First launch now tries to prepare the bundled analysis setup for you.
 
+## Community And Project Status
+
+| If you want to... | Go here |
+| --- | --- |
+| Download and install | [Releases](https://github.com/wimi321/lizzieyzy-next/releases) / [Installation Guide](docs/INSTALL_EN.md) |
+| Report bugs or installation results | [Support](SUPPORT.md) |
+| Discuss ideas and day-to-day usage | [GitHub Discussions](https://github.com/wimi321/lizzieyzy-next/discussions) / Chinese QQ group `299419120` |
+| See what the project is focusing on next | [ROADMAP.md](ROADMAP.md) |
+| Help maintain the project | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+This repository is deliberately focused on a few practical goals:
+
+- keep the LizzieYzy workflow maintained for the users who still rely on it
+- keep Fox game fetching, bundled KataGo, and release packages usable for normal users
+- reduce setup friction instead of assuming everyone wants to hand-configure everything
+
 ## Most Users Start Here
 
 If you are on **Windows**, download:
@@ -142,6 +158,8 @@ Current macOS builds are not signed or notarized yet. If macOS blocks the app th
 - [Package Overview](docs/PACKAGES_EN.md)
 - [Troubleshooting](docs/TROUBLESHOOTING_EN.md)
 - [Tested Platforms](docs/TESTED_PLATFORMS.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 - [Support](SUPPORT.md)
 

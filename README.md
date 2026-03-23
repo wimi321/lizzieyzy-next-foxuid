@@ -38,6 +38,22 @@
 > - 现在直接输入 **野狐昵称** 就行，程序会自动找到账号并获取最近公开棋谱
 > - 主推荐整合包已内置 KataGo，第一次打开会自动准备好
 
+## 社区与项目状态
+
+| 你现在想做什么 | 直接去这里 |
+| --- | --- |
+| 下载和安装 | [Releases](https://github.com/wimi321/lizzieyzy-next/releases) / [安装说明](docs/INSTALL.md) |
+| 反馈 bug 或安装结果 | [Support](SUPPORT.md) |
+| 讨论使用体验、提功能建议 | [GitHub Discussions](https://github.com/wimi321/lizzieyzy-next/discussions) / QQ 群 `299419120` |
+| 看项目接下来重点做什么 | [ROADMAP.md](ROADMAP.md) |
+| 想一起参与维护 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+当前这个仓库的定位很明确：
+
+- 持续维护 `lizzieyzy` 这条用户还在大量使用的分析链路
+- 优先保证野狐抓谱、KataGo 开箱即用、安装发布包易懂
+- 面向普通用户做简化，而不是只面向会自己折腾环境的人
+
 <p align="center">
   <img src="assets/highlights-zh.svg" alt="LizzieYzy Next 维护版亮点" width="100%" />
 </p>
@@ -151,6 +167,8 @@
 - [发布包说明](docs/PACKAGES.md)
 - [常见问题与排错](docs/TROUBLESHOOTING.md)
 - [已验证平台](docs/TESTED_PLATFORMS.md)
+- [项目路线图](ROADMAP.md)
+- [参与贡献](CONTRIBUTING.md)
 - [更新日志](CHANGELOG.md)
 - [Support](SUPPORT.md)
 
