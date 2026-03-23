@@ -78,12 +78,22 @@
 3. 输入野狐昵称，抓到棋谱后继续分析和复盘。
 
 <p align="center">
-  <img src="assets/fox-id-demo-cn.gif" alt="LizzieYzy Next-FoxUID 野狐昵称抓谱演示" width="960" />
+  <a href="assets/fox-id-demo-cn.gif">
+    <img src="assets/fox-id-demo-cn-cover.png" alt="LizzieYzy Next-FoxUID 野狐昵称抓谱演示" width="100%" />
+  </a>
 </p>
 
-## 实际界面
+<p align="center">
+  如果 GitHub 里的动图加载慢，直接点上面的图就能看完整演示。
+</p>
 
-![LizzieYzy Next-FoxUID Screenshot](screenshot.png)
+## 当前真实界面
+
+下面这张就是现在这个维护版的真实界面截图。底部可以直接看到 **野狐棋谱**、**更新官方权重** 等入口，不再是旧版本历史截图。
+
+<p align="center">
+  <img src="assets/interface-overview.png" alt="LizzieYzy Next-FoxUID 当前真实界面" width="100%" />
+</p>
 
 ## 整合包已经带好什么
 

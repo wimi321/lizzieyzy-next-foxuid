@@ -74,12 +74,22 @@ Quick rule:
 3. Enter a Fox nickname, fetch the latest visible public games, and continue reviewing.
 
 <p align="center">
-  <img src="assets/fox-id-demo.gif" alt="LizzieYzy Next-FoxUID Fox nickname demo" width="960" />
+  <a href="assets/fox-id-demo.gif">
+    <img src="assets/fox-id-demo-cover.png" alt="LizzieYzy Next-FoxUID Fox nickname demo" width="100%" />
+  </a>
+</p>
+
+<p align="center">
+  If GitHub delays GIF playback, click the image above to open the full animation.
 </p>
 
 ## Actual Interface
 
-![LizzieYzy Next-FoxUID Screenshot](screenshot_en.png)
+This is the current maintained build interface, not an old historical screenshot. The bottom toolbar now exposes practical entries such as **Fox Kifu** and **Update Official Weight** directly.
+
+<p align="center">
+  <img src="assets/interface-overview.png" alt="LizzieYzy Next-FoxUID actual interface" width="100%" />
+</p>
 
 ## What The Bundled Packages Already Include
 

@@ -74,12 +74,22 @@
 3. 野狐のニックネームを入力し、最新の公開棋譜を取得して、そのまま解析を続けます。
 
 <p align="center">
-  <img src="assets/fox-id-demo.gif" alt="LizzieYzy Next-FoxUID Demo" width="960" />
+  <a href="assets/fox-id-demo.gif">
+    <img src="assets/fox-id-demo-cover.png" alt="LizzieYzy Next-FoxUID Demo" width="100%" />
+  </a>
+</p>
+
+<p align="center">
+  GitHub 上で GIF の再生が遅い場合は、上の画像をクリックすると全体のアニメーションを開けます。
 </p>
 
 ## 実際の画面
 
-![LizzieYzy Next-FoxUID Screenshot](screenshot_en.png)
+以下は、現在のメンテ版そのものの実画面です。下部には **野狐棋譜** と **公式重み更新** の入口が直接見えるようになっています。
+
+<p align="center">
+  <img src="assets/interface-overview.png" alt="LizzieYzy Next-FoxUID actual interface" width="100%" />
+</p>
 
 ## 統合パッケージに最初から入っているもの
 

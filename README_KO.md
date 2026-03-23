@@ -74,12 +74,22 @@
 3. Fox 닉네임을 입력하고 최신 공개 기보를 가져온 뒤 바로 복기와 분석을 이어갑니다.
 
 <p align="center">
-  <img src="assets/fox-id-demo.gif" alt="LizzieYzy Next-FoxUID Demo" width="960" />
+  <a href="assets/fox-id-demo.gif">
+    <img src="assets/fox-id-demo-cover.png" alt="LizzieYzy Next-FoxUID Demo" width="100%" />
+  </a>
+</p>
+
+<p align="center">
+  GitHub 에서 GIF 재생이 느리면 위 이미지를 눌러 전체 애니메이션을 열 수 있습니다.
 </p>
 
 ## 실제 화면
 
-![LizzieYzy Next-FoxUID Screenshot](screenshot_ko.png)
+아래 이미지는 지금 유지보수 중인 현재 버전의 실제 화면입니다. 하단에서 **野狐棋谱** 와 **공식 가중치 업데이트** 같은 실사용 버튼을 바로 볼 수 있습니다.
+
+<p align="center">
+  <img src="assets/interface-overview.png" alt="LizzieYzy Next-FoxUID actual interface" width="100%" />
+</p>
 
 ## 통합 패키지에 이미 들어 있는 것
 

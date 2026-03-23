@@ -2,85 +2,95 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
-INPUT = ROOT / 'screenshot_en.png'
 TARGET = (1120, 714)
-SOURCE = (1500, 956)
-SX = TARGET[0] / SOURCE[0]
-SY = TARGET[1] / SOURCE[1]
+INTERFACE_OVERVIEW = ROOT / 'assets' / 'interface-overview.png'
 
-COLOR_TEXT = '#191613'
-COLOR_MUTED = '#6F5A33'
+COLOR_TEXT = '#171717'
+COLOR_MUTED = '#6E6E73'
+COLOR_PANEL = (255, 255, 255, 244)
+COLOR_PANEL_STROKE = (236, 236, 240, 255)
 
 FONT_ARIAL_BLACK = '/System/Library/Fonts/Supplemental/Arial Black.ttf'
 FONT_ARIAL_BOLD = '/System/Library/Fonts/Supplemental/Arial Bold.ttf'
 FONT_ARIAL = '/System/Library/Fonts/Supplemental/Arial.ttf'
 FONT_CJK = '/System/Library/Fonts/Hiragino Sans GB.ttc'
 
+ACCENTS = [
+    (23, 60, 52, 255),
+    (132, 86, 38, 255),
+    (56, 92, 122, 255),
+    (78, 139, 87, 255),
+]
+
 LOCALES = {
     'en': {
+        'input': INTERFACE_OVERVIEW,
         'gif': ROOT / 'assets' / 'fox-id-demo.gif',
         'cover': ROOT / 'assets' / 'fox-id-demo-cover.png',
         'fonts': {
             'header_chip': (FONT_ARIAL_BOLD, 15),
-            'header_title': (FONT_ARIAL_BLACK, 34),
-            'header_sub': (FONT_ARIAL, 20),
+            'header_title': (FONT_ARIAL_BLACK, 28),
+            'header_sub': (FONT_ARIAL, 18),
             'step_chip': (FONT_ARIAL_BOLD, 16),
-            'callout_title': (FONT_ARIAL_BLACK, 32),
-            'callout_body': (FONT_ARIAL_BOLD, 21),
-            'callout_small': (FONT_ARIAL, 18),
+            'callout_title': (FONT_ARIAL_BLACK, 28),
+            'callout_body': (FONT_ARIAL_BOLD, 20),
+            'callout_small': (FONT_ARIAL, 17),
             'bar_num': (FONT_ARIAL_BLACK, 16),
-            'bar_label': (FONT_ARIAL_BOLD, 16),
-            'helper_title': (FONT_ARIAL_BLACK, 26),
-            'helper_body': (FONT_ARIAL_BOLD, 19),
-            'helper_chip': (FONT_ARIAL_BOLD, 17),
-            'modal_title': (FONT_ARIAL_BLACK, 28),
-            'modal_body': (FONT_ARIAL, 19),
+            'bar_label': (FONT_ARIAL_BOLD, 15),
+            'helper_title': (FONT_ARIAL_BLACK, 24),
+            'helper_body': (FONT_ARIAL_BOLD, 18),
+            'helper_chip': (FONT_ARIAL_BOLD, 16),
+            'modal_title': (FONT_ARIAL_BLACK, 26),
+            'modal_body': (FONT_ARIAL, 18),
             'modal_button': (FONT_ARIAL_BOLD, 18),
             'modal_input': (FONT_ARIAL_BOLD, 22),
-            'badge': (FONT_ARIAL_BOLD, 18),
         },
         'header_chip': 'Quick Demo',
-        'header_title': 'From numeric Fox ID to KataGo review',
-        'header_sub': 'A short preview of the most common path after download.',
-        'step_labels': ['Package', 'Sync', 'Numeric ID', 'Review'],
-        'step2_badge': 'Open Sync',
+        'header_title_lines': ['Enter a Fox nickname', 'and keep reviewing'],
+        'header_sub': 'A short preview of the simplest path after download.',
+        'step_prefix': 'Step',
+        'step_of': 'of 4',
+        'step_labels': ['Install', 'Fox', 'Nickname', 'Review'],
+        'step2_badge': 'Open Fox Kifu',
         'step1_helper_title': 'Recommended first download',
         'step1_helper_lines': [
-            'Start with a bundled package, then switch later only if',
-            'you already manage your own engines.',
+            'Start with the bundled package.',
+            'Switch later only if you manage your own engine.',
         ],
         'step1_helper_chips': ['windows64.with-katago', 'mac-arm64.dmg', 'mac-amd64.dmg', 'linux64.with-katago'],
-        'modal_chip': 'Numeric Fox ID',
-        'modal_title': 'Enter the numeric Fox ID',
-        'modal_sub': 'Fetch the latest visible public games.',
+        'modal_chip': 'Fox nickname',
+        'modal_title': 'Enter a Fox nickname',
+        'modal_sub': 'Fetch recent public games automatically.',
+        'modal_input_value': 'fox_player',
         'modal_button': 'Fetch',
         'scenes': [
             {
-                'title': 'Choose a package',
-                'lines': ['Start with with-katago for', 'the quickest first run.'],
-                'chips': [('Windows x64', False), ('mac-arm64', False), ('mac-amd64', False), ('Linux x64', False), ('with-katago', True)],
+                'title': 'Pick the right package',
+                'lines': ['For most people, start with', 'the bundled release.'],
+                'chips': [('Windows', False), ('mac-arm64', False), ('mac-amd64', False), ('Linux', False), ('with-katago', True)],
             },
             {
                 'title': 'Open the Fox sync entry',
-                'lines': ['Launch the app, then open', 'the sync entry from the top menu.'],
+                'lines': ['Launch the app, then open', 'the Fox Kifu entry.'],
             },
             {
-                'title': 'Enter the numeric Fox ID',
-                'lines': ['Type the numeric Fox ID and fetch', 'the latest visible public games.'],
+                'title': 'Type the Fox nickname',
+                'lines': ['Use the nickname you already know.', 'The app resolves the account for you.'],
             },
             {
-                'title': 'Continue with KataGo review',
-                'lines': ['Use LizzieYzy for charts,', 'visits, mistakes, and review.'],
+                'title': 'Start KataGo review',
+                'lines': ['Keep going with winrate,', 'mistake review, and analysis.'],
             },
         ],
     },
     'cn': {
+        'input': INTERFACE_OVERVIEW,
         'gif': ROOT / 'assets' / 'fox-id-demo-cn.gif',
         'cover': ROOT / 'assets' / 'fox-id-demo-cn-cover.png',
         'fonts': {
             'header_chip': (FONT_CJK, 15),
-            'header_title': (FONT_CJK, 31),
-            'header_sub': (FONT_CJK, 19),
+            'header_title': (FONT_CJK, 27),
+            'header_sub': (FONT_CJK, 18),
             'step_chip': (FONT_CJK, 16),
             'callout_title': (FONT_CJK, 28),
             'callout_body': (FONT_CJK, 20),
@@ -93,23 +103,25 @@ LOCALES = {
             'modal_title': (FONT_CJK, 26),
             'modal_body': (FONT_CJK, 18),
             'modal_button': (FONT_CJK, 18),
-            'modal_input': (FONT_ARIAL_BOLD, 22),
-            'badge': (FONT_CJK, 17),
+            'modal_input': (FONT_CJK, 22),
         },
         'header_chip': '快速演示',
-        'header_title': '从野狐数字ID到 KataGo 分析',
-        'header_sub': '下载后最常见的使用路径',
-        'step_labels': ['安装包', '同步', '野狐数字ID', '分析'],
-        'step2_badge': '打开同步',
+        'header_title_lines': ['输入野狐昵称', '继续抓谱和分析'],
+        'header_sub': '下载后最常见、也最简单的使用路径。',
+        'step_prefix': '第',
+        'step_of': '步 / 共 4 步',
+        'step_labels': ['安装包', '野狐棋谱', '昵称', '分析'],
+        'step2_badge': '打开野狐棋谱',
         'step1_helper_title': '推荐先下载整合包',
         'step1_helper_lines': [
-            '先用内置 KataGo 的版本，',
-            '后面再按需要换引擎。',
+            '大多数用户先用内置 KataGo 的版本。',
+            '后面再按需要换成自己的引擎。',
         ],
         'step1_helper_chips': ['windows64.with-katago', 'mac-arm64.dmg', 'mac-amd64.dmg', 'linux64.with-katago'],
-        'modal_chip': '野狐数字ID',
-        'modal_title': '输入野狐数字ID',
-        'modal_sub': '获取最新公开棋谱',
+        'modal_chip': '野狐昵称',
+        'modal_title': '输入野狐昵称',
+        'modal_sub': '自动匹配账号并获取最近公开棋谱',
+        'modal_input_value': '什么好吃',
         'modal_button': '抓谱',
         'scenes': [
             {
@@ -119,26 +131,19 @@ LOCALES = {
             },
             {
                 'title': '打开野狐同步',
-                'lines': ['启动程序后，从上方菜单', '进入同步入口'],
+                'lines': ['启动程序后，从菜单进入', '野狐棋谱入口'],
             },
             {
-                'title': '输入野狐数字ID',
-                'lines': ['输入野狐数字ID，抓取', '最新公开棋谱'],
+                'title': '输入野狐昵称',
+                'lines': ['输入你知道的昵称。', '程序会自动匹配账号。'],
             },
             {
                 'title': '继续分析复盘',
-                'lines': ['继续用 LizzieYzy 查看', '胜率、失误和分析'],
+                'lines': ['继续查看胜率、失误', '和 KataGo 分析。'],
             },
         ],
     },
 }
-
-ACCENTS = [
-    (27, 77, 62, 255),
-    (140, 90, 36, 255),
-    (47, 72, 88, 255),
-    (78, 139, 87, 255),
-]
 
 
 def load_font(spec):
@@ -146,12 +151,16 @@ def load_font(spec):
     return ImageFont.truetype(path, size=size)
 
 
-def scale_rect(rect):
+def font(cfg, key):
+    return load_font(cfg['fonts'][key])
+
+
+def scale_rect(rect, sx, sy):
     x, y, w, h = rect
-    return (int(x * SX), int(y * SY), int((x + w) * SX), int((y + h) * SY))
+    return (int(x * sx), int(y * sy), int((x + w) * sx), int((y + h) * sy))
 
 
-def rounded_overlay(size, xy, radius, fill, shadow=(0, 12, 22, (97, 63, 19, 55)), stroke=None):
+def rounded_overlay(size, xy, radius, fill, shadow=(0, 12, 22, (21, 21, 21, 35)), stroke=None):
     layer = Image.new('RGBA', size, (0, 0, 0, 0))
     sx, sy, blur, shadow_color = shadow
     if shadow_color[3] > 0:
@@ -166,57 +175,79 @@ def rounded_overlay(size, xy, radius, fill, shadow=(0, 12, 22, (97, 63, 19, 55))
     return layer
 
 
-def draw_text(draw, pos, text, font, fill, anchor='la'):
-    draw.text(pos, text, font=font, fill=fill, anchor=anchor)
+def draw_text(draw, pos, text, font_obj, fill, anchor='la'):
+    draw.text(pos, text, font=font_obj, fill=fill, anchor=anchor)
+
+
+def draw_chip(draw, xy, text, bg, fg, font_obj):
+    x0, y0, x1, y1 = xy
+    draw.rounded_rectangle(xy, radius=(y1 - y0) // 2, fill=bg)
+    draw_text(draw, ((x0 + x1) // 2, (y0 + y1) // 2 + 1), text, font_obj, fg, anchor='mm')
 
 
 def highlight_overlay(size, rects, pulse=0.8):
-    overlay = Image.new('RGBA', size, (13, 11, 9, 128))
-    mask = Image.new('L', size, 132)
+    overlay = Image.new('RGBA', size, (18, 18, 18, 0))
+    mask = Image.new('L', size, 136)
     mdraw = ImageDraw.Draw(mask)
     for rect in rects:
-        mdraw.rounded_rectangle(rect, radius=22, fill=12)
+        mdraw.rounded_rectangle(rect, radius=24, fill=12)
     overlay.putalpha(mask)
 
     glow = Image.new('RGBA', size, (0, 0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
     for rect in rects:
         x0, y0, x1, y1 = rect
-        for inset, width, alpha in ((0, 4, int(225 * pulse)), (8, 2, int(140 * pulse))):
-            gdraw.rounded_rectangle((x0 - inset, y0 - inset, x1 + inset, y1 + inset), radius=24, outline=(255, 242, 214, alpha), width=width)
+        for inset, width, alpha in ((0, 4, int(210 * pulse)), (8, 2, int(120 * pulse))):
+            gdraw.rounded_rectangle(
+                (x0 - inset, y0 - inset, x1 + inset, y1 + inset),
+                radius=26,
+                outline=(255, 246, 231, alpha),
+                width=width,
+            )
     glow = glow.filter(ImageFilter.GaussianBlur(1))
     return overlay, glow
 
 
-def draw_chip(draw, xy, text, bg, fg, font):
-    x0, y0, x1, y1 = xy
-    draw.rounded_rectangle(xy, radius=(y1 - y0) // 2, fill=bg)
-    draw_text(draw, ((x0 + x1) // 2, y0 + (y1 - y0) // 2 + 1), text, font, fg, anchor='mm')
-
-
-def font(cfg, key):
-    return load_font(cfg['fonts'][key])
-
-
 def draw_header(canvas, cfg):
-    header = rounded_overlay(canvas.size, (44, 34, 570, 132), 28, (255, 250, 239, 235), shadow=(0, 10, 18, (84, 56, 18, 45)), stroke=(245, 226, 190, 255))
+    header = rounded_overlay(
+        canvas.size,
+        (40, 28, 760, 196),
+        30,
+        COLOR_PANEL,
+        shadow=(0, 14, 24, (17, 17, 17, 28)),
+        stroke=COLOR_PANEL_STROKE,
+    )
     canvas.alpha_composite(header)
     draw = ImageDraw.Draw(canvas)
-    draw_chip(draw, (70, 54, 176, 84), cfg['header_chip'], (27, 77, 62, 255), (247, 240, 223, 255), font(cfg, 'header_chip'))
-    draw_text(draw, (70, 108), cfg['header_title'], font(cfg, 'header_title'), COLOR_TEXT)
-    draw_text(draw, (70, 136), cfg['header_sub'], font(cfg, 'header_sub'), COLOR_MUTED)
+    draw_chip(draw, (66, 50, 170, 82), cfg['header_chip'], ACCENTS[0], (250, 250, 252, 255), font(cfg, 'header_chip'))
+    title_font = font(cfg, 'header_title')
+    sub_font = font(cfg, 'header_sub')
+    y = 118
+    for line in cfg['header_title_lines']:
+        draw_text(draw, (66, y), line, title_font, COLOR_TEXT)
+        bbox = draw.textbbox((66, y), line, font=title_font)
+        y = bbox[3] + 10
+    draw_text(draw, (66, y + 8), cfg['header_sub'], sub_font, COLOR_MUTED)
 
 
 def draw_step_bar(canvas, active_step, cfg):
     draw = ImageDraw.Draw(canvas)
-    bar = rounded_overlay(canvas.size, (196, 646, 924, 694), 24, (255, 250, 241, 220), shadow=(0, 10, 18, (94, 63, 20, 35)), stroke=(242, 223, 187, 255))
+    bar = rounded_overlay(
+        canvas.size,
+        (198, 646, 922, 694),
+        24,
+        (255, 255, 255, 232),
+        shadow=(0, 10, 18, (17, 17, 17, 26)),
+        stroke=COLOR_PANEL_STROKE,
+    )
     canvas.alpha_composite(bar)
-    draw.line((252, 670, 868, 670), fill=(227, 192, 123, 160), width=6)
+    draw.line((252, 670, 868, 670), fill=(218, 205, 184, 200), width=6)
     xs = [252, 458, 664, 870]
     for idx, (label, color, cx) in enumerate(zip(cfg['step_labels'], ACCENTS, xs), start=1):
         r = 28 if idx == active_step else 22
-        draw.ellipse((cx - r, 670 - r, cx + r, 670 + r), fill=color if idx == active_step else (232, 220, 196, 255))
-        num_fill = (247, 240, 223, 255) if idx == active_step else COLOR_MUTED
+        fill = color if idx == active_step else (235, 229, 217, 255)
+        draw.ellipse((cx - r, 670 - r, cx + r, 670 + r), fill=fill)
+        num_fill = (255, 255, 255, 255) if idx == active_step else (90, 82, 69, 255)
         draw_text(draw, (cx, 670), f'{idx:02d}', font(cfg, 'bar_num'), num_fill, anchor='mm')
         label_fill = color if idx == active_step else COLOR_MUTED
         draw_text(draw, (cx, 698), label, font(cfg, 'bar_label'), label_fill, anchor='ms')
@@ -224,87 +255,133 @@ def draw_step_bar(canvas, active_step, cfg):
 
 def draw_callout(canvas, step_num, scene, cfg):
     accent = ACCENTS[step_num - 1]
-    panel = rounded_overlay(canvas.size, (52, 168, 478, 404), 34, (255, 253, 247, 240), shadow=(0, 16, 26, (94, 64, 19, 50)), stroke=(241, 223, 194, 255))
+    panel = rounded_overlay(
+        canvas.size,
+        (48, 204, 492, 446),
+        32,
+        COLOR_PANEL,
+        shadow=(0, 18, 26, (17, 17, 17, 34)),
+        stroke=COLOR_PANEL_STROKE,
+    )
     canvas.alpha_composite(panel)
     draw = ImageDraw.Draw(canvas)
 
-    draw_chip(draw, (76, 192, 182, 226), f'Step {step_num} of 4' if cfg is LOCALES['en'] else f'第 {step_num} 步 / 共 4 步', accent, (248, 241, 225, 255), font(cfg, 'step_chip'))
-    draw_text(draw, (76, 274), scene['title'], font(cfg, 'callout_title'), COLOR_TEXT)
-    y = 324
+    if cfg['step_prefix'] == 'Step':
+        chip_text = f"{cfg['step_prefix']} {step_num} {cfg['step_of']}"
+    else:
+        chip_text = f"{cfg['step_prefix']} {step_num} {cfg['step_of']}"
+    draw_chip(draw, (74, 226, 188, 260), chip_text, accent, (255, 255, 255, 255), font(cfg, 'step_chip'))
+    title_font = font(cfg, 'callout_title')
+    body_font = font(cfg, 'callout_body')
+    chip_font = font(cfg, 'callout_small')
+    draw_text(draw, (74, 316), scene['title'], title_font, COLOR_TEXT)
+    title_bbox = draw.textbbox((74, 316), scene['title'], font=title_font)
+    y = title_bbox[3] + 20
     for line in scene['lines']:
-        draw_text(draw, (76, y), line, font(cfg, 'callout_body'), COLOR_MUTED)
-        y += 30
+        draw_text(draw, (74, y), line, body_font, COLOR_MUTED)
+        line_bbox = draw.textbbox((74, y), line, font=body_font)
+        y = line_bbox[3] + 12
     if scene.get('chips'):
-        x = 76
-        y = 364
+        x = 74
+        y += 12
         for text, selected in scene['chips']:
-            ft = font(cfg, 'callout_small')
-            tw = draw.textlength(text, font=ft)
-            w = int(tw + 34)
-            if x + w > 450:
-                x = 76
+            width = int(draw.textlength(text, font=chip_font) + 34)
+            if x + width > 456:
+                x = 74
                 y += 42
-            bg = accent if selected else (238, 228, 208, 230)
-            fg = (248, 241, 225, 255) if selected else COLOR_MUTED
-            draw_chip(draw, (x, y, x + w, y + 30), text, bg, fg, ft)
-            x += w + 12
-
-
-def draw_step2_badge(canvas, rect, cfg):
-    draw = ImageDraw.Draw(canvas)
-    x0, y0, x1, y1 = rect
-    badge = rounded_overlay(canvas.size, (x1 - 70, y1 + 16, x1 + 126, y1 + 64), 24, (255, 253, 247, 238), shadow=(0, 10, 16, (94, 64, 19, 40)), stroke=(241, 223, 194, 255))
-    canvas.alpha_composite(badge)
-    draw_text(draw, (x1 + 28, y1 + 46), cfg['step2_badge'], font(cfg, 'badge'), ACCENTS[1], anchor='mm')
-
-
-def draw_step3_modal(canvas, cfg):
-    modal = rounded_overlay(canvas.size, (626, 184, 1030, 430), 28, (255, 253, 247, 246), shadow=(0, 18, 24, (71, 49, 19, 55)), stroke=(241, 223, 194, 255))
-    canvas.alpha_composite(modal)
-    draw = ImageDraw.Draw(canvas)
-
-    draw_chip(draw, (652, 206, 744, 238), cfg['modal_chip'], ACCENTS[2], (245, 247, 250, 255), font(cfg, 'step_chip'))
-    draw_text(draw, (652, 284), cfg['modal_title'], font(cfg, 'modal_title'), COLOR_TEXT)
-    draw_text(draw, (652, 318), cfg['modal_sub'], font(cfg, 'modal_body'), COLOR_MUTED)
-    draw.rounded_rectangle((652, 346, 930, 392), radius=18, fill=(250, 247, 239, 255), outline=(229, 207, 165, 255), width=2)
-    draw_text(draw, (676, 376), '123456', font(cfg, 'modal_input'), COLOR_TEXT)
-    draw.rounded_rectangle((944, 346, 1000, 392), radius=18, fill=ACCENTS[0])
-    draw_text(draw, (972, 376), cfg['modal_button'], font(cfg, 'modal_button'), (247, 240, 223, 255), anchor='mm')
+            bg = accent if selected else (241, 236, 228, 255)
+            fg = (255, 255, 255, 255) if selected else COLOR_MUTED
+            draw_chip(draw, (x, y, x + width, y + 30), text, bg, fg, chip_font)
+            x += width + 10
 
 
 def draw_step1_helper(canvas, cfg):
+    helper = rounded_overlay(
+        canvas.size,
+        (620, 208, 1068, 430),
+        30,
+        COLOR_PANEL,
+        shadow=(0, 18, 24, (17, 17, 17, 30)),
+        stroke=COLOR_PANEL_STROKE,
+    )
+    canvas.alpha_composite(helper)
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle((646, 212, 1038, 420), radius=30, fill=(255, 253, 247, 232), outline=(241, 223, 194, 255), width=2)
-    draw_text(draw, (676, 258), cfg['step1_helper_title'], font(cfg, 'helper_title'), COLOR_TEXT)
-    y = 298
+    draw_text(draw, (650, 250), cfg['step1_helper_title'], font(cfg, 'helper_title'), COLOR_TEXT)
+    y = 292
     for line in cfg['step1_helper_lines']:
-        draw_text(draw, (676, y), line, font(cfg, 'helper_body'), COLOR_MUTED)
-        y += 28
-    x = 676
-    y = 360
-    ft = font(cfg, 'helper_chip')
-    for label in cfg['step1_helper_chips']:
-        w = int(draw.textlength(label, font=ft) + 34)
-        if x + w > 992:
-            x = 676
-            y += 48
-        draw_chip(draw, (x, y, x + w, y + 34), label, (27, 77, 62, 255) if label == cfg['step1_helper_chips'][0] else (238, 228, 208, 230), (247, 240, 223, 255) if label == cfg['step1_helper_chips'][0] else COLOR_MUTED, ft)
-        x += w + 12
+        draw_text(draw, (650, y), line, font(cfg, 'helper_body'), COLOR_MUTED)
+        y += 30
+    x = 650
+    y = 358
+    helper_chip_font = font(cfg, 'helper_chip')
+    for idx, label in enumerate(cfg['step1_helper_chips']):
+        width = int(draw.textlength(label, font=helper_chip_font) + 34)
+        if x + width > 1024:
+            x = 650
+            y += 42
+        selected = idx == 0
+        draw_chip(
+            draw,
+            (x, y, x + width, y + 30),
+            label,
+            ACCENTS[0] if selected else (241, 236, 228, 255),
+            (255, 255, 255, 255) if selected else COLOR_MUTED,
+            helper_chip_font,
+        )
+        x += width + 10
 
 
-def prepare_base():
-    base = Image.open(INPUT).convert('RGBA').resize(TARGET, Image.LANCZOS)
-    tint = Image.new('RGBA', TARGET, (248, 234, 198, 28))
-    return Image.alpha_composite(base, tint)
+def draw_step2_badge(canvas, rect, cfg):
+    x0, y0, x1, y1 = rect
+    badge = rounded_overlay(
+        canvas.size,
+        (x1 - 56, y1 + 14, x1 + 146, y1 + 60),
+        23,
+        COLOR_PANEL,
+        shadow=(0, 10, 16, (17, 17, 17, 24)),
+        stroke=COLOR_PANEL_STROKE,
+    )
+    canvas.alpha_composite(badge)
+    draw = ImageDraw.Draw(canvas)
+    draw_text(draw, (x1 + 45, y1 + 38), cfg['step2_badge'], font(cfg, 'step_chip'), ACCENTS[1], anchor='mm')
+
+
+def draw_step3_modal(canvas, cfg):
+    modal = rounded_overlay(
+        canvas.size,
+        (620, 208, 1062, 442),
+        30,
+        COLOR_PANEL,
+        shadow=(0, 18, 24, (17, 17, 17, 32)),
+        stroke=COLOR_PANEL_STROKE,
+    )
+    canvas.alpha_composite(modal)
+    draw = ImageDraw.Draw(canvas)
+    draw_chip(draw, (648, 230, 754, 262), cfg['modal_chip'], ACCENTS[2], (255, 255, 255, 255), font(cfg, 'step_chip'))
+    draw_text(draw, (648, 316), cfg['modal_title'], font(cfg, 'modal_title'), COLOR_TEXT)
+    draw_text(draw, (648, 350), cfg['modal_sub'], font(cfg, 'modal_body'), COLOR_MUTED)
+    draw.rounded_rectangle((648, 376, 948, 422), radius=20, fill=(251, 248, 242, 255), outline=(226, 211, 184, 255), width=2)
+    draw_text(draw, (672, 402), cfg['modal_input_value'], font(cfg, 'modal_input'), COLOR_TEXT)
+    draw.rounded_rectangle((962, 376, 1026, 422), radius=20, fill=ACCENTS[0])
+    draw_text(draw, (994, 401), cfg['modal_button'], font(cfg, 'modal_button'), (255, 255, 255, 255), anchor='mm')
+
+
+def prepare_base(cfg):
+    base = Image.open(cfg['input']).convert('RGBA')
+    sx = TARGET[0] / base.size[0]
+    sy = TARGET[1] / base.size[1]
+    resized = base.resize(TARGET, Image.LANCZOS)
+    tint = Image.new('RGBA', TARGET, (248, 242, 228, 18))
+    return Image.alpha_composite(resized, tint), sx, sy
 
 
 def build_frame(base, scene_index, pulse, cfg, highlight_rects):
     canvas = base.copy()
-    canvas = Image.alpha_composite(canvas, Image.new('RGBA', canvas.size, (246, 222, 176, 18)))
+    canvas = Image.alpha_composite(canvas, Image.new('RGBA', canvas.size, (255, 248, 238, 12)))
 
     if highlight_rects:
-        ov, glow = highlight_overlay(canvas.size, highlight_rects, pulse=pulse)
-        canvas = Image.alpha_composite(canvas, ov)
+        overlay, glow = highlight_overlay(canvas.size, highlight_rects, pulse=pulse)
+        canvas = Image.alpha_composite(canvas, overlay)
         canvas = Image.alpha_composite(canvas, glow)
 
     draw_header(canvas, cfg)
@@ -322,23 +399,24 @@ def build_frame(base, scene_index, pulse, cfg, highlight_rects):
 
 
 def main():
-    base = prepare_base()
-    sync_rect = scale_rect((182, 0, 132, 46))
-    board_rect = scale_rect((290, 60, 620, 648))
-    chart_rect = scale_rect((0, 58, 244, 650))
-    list_rect = scale_rect((1200, 280, 292, 620))
-    modal_rect = scale_rect((640, 180, 398, 250))
-    highlights = [[], [sync_rect], [modal_rect], [board_rect, chart_rect, list_rect]]
-
     for cfg in LOCALES.values():
+        base, sx, sy = prepare_base(cfg)
+        sync_rect = scale_rect((18, 1318, 138, 48), sx, sy)
+        board_rect = scale_rect((454, 108, 1144, 1180), sx, sy)
+        chart_rect = scale_rect((0, 100, 446, 1212), sx, sy)
+        list_rect = scale_rect((1625, 288, 500, 1048), sx, sy)
+        modal_rect = scale_rect((640, 180, 398, 250), sx, sy)
+        highlights = [[], [sync_rect], [modal_rect], [board_rect, chart_rect, list_rect]]
+
         cfg['gif'].parent.mkdir(parents=True, exist_ok=True)
         frames = []
         durations = []
         for idx in range(4):
-            for pulse, duration in ((0.72, 850), (1.0, 1250)):
+            for pulse, duration in ((0.72, 820), (1.0, 1180)):
                 frame = build_frame(base, idx, pulse, cfg, highlights[idx])
                 frames.append(frame.convert('P', palette=Image.ADAPTIVE, colors=160, dither=Image.Dither.FLOYDSTEINBERG))
                 durations.append(duration)
+
         cover = build_frame(base, 2, 1.0, cfg, highlights[2])
         cover.save(cfg['cover'])
         frames[0].save(
