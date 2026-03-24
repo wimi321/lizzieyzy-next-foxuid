@@ -79,6 +79,7 @@ cp readme_cn.pdf readme_en.pdf "$INPUT_DIR/"
 copy_bundle_engine_assets
 
 APP_NAME="LizzieYzy Next"
+APP_DESCRIPTION="Maintained LizzieYzy build with Fox nickname fetch and easier KataGo setup"
 MAIN_JAR="$(basename "$JAR_PATH")"
 ICON_PATH="$ROOT_DIR/packaging/icons/app-icon.icns"
 IDENTIFIER="com.wimi321.lizzieyzy.next"
@@ -92,7 +93,7 @@ jpackage \
   --dest "$APP_IMAGE_DIR" \
   --app-version "$APP_VERSION" \
   --vendor "wimi321" \
-  --description "LizzieYzy maintained fork with restored Fox nickname sync" \
+  --description "$APP_DESCRIPTION" \
   --icon "$ICON_PATH" \
   --java-options "-Xmx4096m"
 
@@ -105,7 +106,7 @@ jpackage \
   --dest "$DMG_DIR" \
   --app-version "$APP_VERSION" \
   --vendor "wimi321" \
-  --description "LizzieYzy maintained fork with restored Fox nickname sync" \
+  --description "$APP_DESCRIPTION" \
   --icon "$ICON_PATH" \
   --mac-package-identifier "$IDENTIFIER" \
   --java-options "-Xmx4096m"
