@@ -137,9 +137,12 @@ public class Utils {
     String currentValue =
         Lizzie.config.txtKataEngineThreads == null ? "" : Lizzie.config.txtKataEngineThreads.trim();
     boolean hasValidValue = isPositiveInteger(currentValue);
+    boolean shouldInitializeAutoLoad = force || Lizzie.config.firstLoadKataGo;
     String resolvedValue = currentValue;
-    if (force || !hasValidValue) {
-      resolvedValue = String.valueOf(getRecommendedKataGoThreads());
+    if (force
+        || (!hasValidValue
+            && (shouldInitializeAutoLoad || Lizzie.config.autoLoadKataEngineThreads))) {
+      resolvedValue = resolveKataGoThreadsValue(currentValue);
     }
 
     boolean changed = false;
@@ -148,7 +151,7 @@ public class Utils {
       Lizzie.config.uiConfig.put("txt-kata-engine-threads", resolvedValue);
       changed = true;
     }
-    if (!Lizzie.config.autoLoadKataEngineThreads) {
+    if (shouldInitializeAutoLoad && !Lizzie.config.autoLoadKataEngineThreads) {
       Lizzie.config.autoLoadKataEngineThreads = true;
       Lizzie.config.uiConfig.put("autoload-kata-engine-threads", true);
       changed = true;
@@ -167,6 +170,14 @@ public class Utils {
       return processors;
     }
     return Math.max(2, Math.min(MAX_AUTO_KATAGO_THREADS, processors - 1));
+  }
+
+  public static String resolveKataGoThreadsValue(String value) {
+    String trimmed = value == null ? "" : value.trim();
+    if (isPositiveInteger(trimmed)) {
+      return trimmed;
+    }
+    return String.valueOf(getRecommendedKataGoThreads());
   }
 
   public static void persistConfigQuietly() {

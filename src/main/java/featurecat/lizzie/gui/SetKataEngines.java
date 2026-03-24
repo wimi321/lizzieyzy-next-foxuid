@@ -4,6 +4,7 @@ import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.analysis.EngineManager;
 import featurecat.lizzie.gui.LizzieFrame.HtmlKit;
+import featurecat.lizzie.util.Utils;
 import java.awt.Color;
 import java.awt.Desktop;
 import java.awt.Dimension;
@@ -120,7 +121,12 @@ public class SetKataEngines extends JDialog {
 
             Lizzie.config.chkKataEngineThreads = chkEditThreads.isSelected();
             Lizzie.config.autoLoadKataEngineThreads = chkAutoLoadThreads.isSelected();
-            Lizzie.config.txtKataEngineThreads = txtThreads.getText();
+            String threadsValue = txtThreads.getText();
+            if (Lizzie.config.chkKataEngineThreads || Lizzie.config.autoLoadKataEngineThreads) {
+              threadsValue = Utils.resolveKataGoThreadsValue(threadsValue);
+              txtThreads.setText(threadsValue);
+            }
+            Lizzie.config.txtKataEngineThreads = threadsValue;
             Lizzie.config.uiConfig.put(
                 "txt-kata-engine-threads", Lizzie.config.txtKataEngineThreads);
             Lizzie.config.uiConfig.put(
