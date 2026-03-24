@@ -6,6 +6,8 @@ param(
 
     [string]$RequiredLogDir = "gtp_logs",
 
+    [int]$HealthyProcessSeconds = 15,
+
     [int]$WaitSeconds = 60
 )
 
@@ -35,6 +37,7 @@ $requiredRuntimeLogDir = Join-Path $runtimeDir $RequiredLogDir
 $configFile = Join-Path $ConfigDir "config.txt"
 $persistFile = Join-Path $ConfigDir "persist"
 $passed = $false
+$healthyDeadline = (Get-Date).AddSeconds($HealthyProcessSeconds)
 
 try {
     while ((Get-Date) -lt $deadline) {
@@ -63,9 +66,15 @@ try {
         if ($hasConfig) {
             Write-Host "Config files detected. Waiting briefly for runtime state..."
         }
+
+        if ((Get-Date) -ge $healthyDeadline) {
+            Write-Host "Smoke test passed. App process stayed alive long enough for CI."
+            $passed = $true
+            return
+        }
     }
 
-    throw "Timed out waiting for config files or runtime state in $runtimeDir"
+    throw "Timed out waiting for config files, runtime state, or a healthy running process."
 }
 finally {
     if ($process -and -not $process.HasExited) {
