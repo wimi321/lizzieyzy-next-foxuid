@@ -51,6 +51,7 @@ public final class KataGoRuntimeHelper {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
   private static final String NVIDIA_ENGINE_DIR = "windows-x64-nvidia";
+  private static final String ENGINE_BACKEND_MARKER_NAME = "lizzieyzy-next-engine-backend.txt";
   private static final String NVIDIA_RUNTIME_ROOT = "nvidia-runtime";
   private static final String CUDA_MANIFEST_URL =
       "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_12.1.1.json";
@@ -247,7 +248,23 @@ public final class KataGoRuntimeHelper {
       return false;
     }
     String normalized = enginePath.toAbsolutePath().normalize().toString().replace('\\', '/');
-    return normalized.toLowerCase(Locale.ROOT).contains("/" + NVIDIA_ENGINE_DIR + "/");
+    if (normalized.toLowerCase(Locale.ROOT).contains("/" + NVIDIA_ENGINE_DIR + "/")) {
+      return true;
+    }
+    Path engineDir = enginePath.toAbsolutePath().normalize().getParent();
+    if (engineDir == null) {
+      return false;
+    }
+    Path markerPath = engineDir.resolve(ENGINE_BACKEND_MARKER_NAME);
+    if (!Files.isRegularFile(markerPath)) {
+      return false;
+    }
+    try {
+      String backend = Files.readString(markerPath, StandardCharsets.UTF_8).trim();
+      return "nvidia".equalsIgnoreCase(backend);
+    } catch (IOException e) {
+      return false;
+    }
   }
 
   public static void ensureBundledRuntimeReady(Path enginePath, Window owner) throws IOException {

@@ -35,6 +35,7 @@ DIST_DIR="$ROOT_DIR/dist/windows"
 RELEASE_DIR="$ROOT_DIR/dist/release"
 META_DIR="$ROOT_DIR/dist/release-meta"
 WINDOWS_UPGRADE_UUID_NVIDIA="${WINDOWS_UPGRADE_UUID_NVIDIA:-14a4599e-6d5b-4b86-9895-7748266f0c25}"
+ENGINE_BACKEND_MARKER_NAME="lizzieyzy-next-engine-backend.txt"
 
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR" "$RELEASE_DIR" "$META_DIR"
@@ -104,6 +105,7 @@ copy_bundle_engine_assets() {
   local input_dir="$1"
   local engine_source_dir="${2:-$STANDARD_ENGINE_PLATFORM_DIR}"
   local engine_target_dir="${3:-$STANDARD_ENGINE_PLATFORM_DIR}"
+  local engine_backend="${4:-}"
 
   mkdir -p "$input_dir/engines/katago" "$input_dir/weights"
   cp -R "$ROOT_DIR/engines/katago/$engine_source_dir" \
@@ -113,6 +115,10 @@ copy_bundle_engine_assets() {
   fi
   if [[ -f "$ROOT_DIR/engines/katago/VERSION.txt" ]]; then
     cp "$ROOT_DIR/engines/katago/VERSION.txt" "$input_dir/engines/katago/"
+  fi
+  if [[ -n "$engine_backend" ]]; then
+    printf '%s\n' "$engine_backend" \
+      >"$input_dir/engines/katago/$engine_target_dir/$ENGINE_BACKEND_MARKER_NAME"
   fi
   cp "$ROOT_DIR/weights/default.bin.gz" "$input_dir/weights/default.bin.gz"
 }
@@ -133,13 +139,14 @@ build_app_image() {
   local app_description="${4:-$APP_DESCRIPTION}"
   local engine_source_dir="${5:-$STANDARD_ENGINE_PLATFORM_DIR}"
   local engine_target_dir="${6:-$STANDARD_ENGINE_PLATFORM_DIR}"
+  local engine_backend="${7:-}"
   local input_dir="$DIST_DIR/input-$flavor"
   local app_image_dir="$DIST_DIR/app-image-$flavor"
 
   rm -rf "$input_dir" "$app_image_dir"
   copy_common_inputs "$input_dir"
   if [[ "$include_katago" == "true" ]]; then
-    copy_bundle_engine_assets "$input_dir" "$engine_source_dir" "$engine_target_dir"
+    copy_bundle_engine_assets "$input_dir" "$engine_source_dir" "$engine_target_dir" "$engine_backend"
   fi
 
   jpackage \
@@ -165,14 +172,15 @@ build_installer() {
   local app_description="${4:-$APP_DESCRIPTION}"
   local engine_source_dir="${5:-$STANDARD_ENGINE_PLATFORM_DIR}"
   local engine_target_dir="${6:-$STANDARD_ENGINE_PLATFORM_DIR}"
-  local upgrade_uuid="${7:-$WINDOWS_UPGRADE_UUID}"
+  local engine_backend="${7:-}"
+  local upgrade_uuid="${8:-$WINDOWS_UPGRADE_UUID}"
   local input_dir="$DIST_DIR/input-$flavor"
   local installer_dir="$DIST_DIR/installer-$flavor"
 
   rm -rf "$installer_dir"
   copy_common_inputs "$input_dir"
   if [[ "$include_katago" == "true" ]]; then
-    copy_bundle_engine_assets "$input_dir" "$engine_source_dir" "$engine_target_dir"
+    copy_bundle_engine_assets "$input_dir" "$engine_source_dir" "$engine_target_dir" "$engine_backend"
   fi
 
   jpackage \
@@ -299,8 +307,9 @@ build_release_variant() {
   local app_description="$4"
   local engine_source_dir="$5"
   local engine_target_dir="$6"
-  local release_basename="$7"
-  local upgrade_uuid="$8"
+  local engine_backend="$7"
+  local release_basename="$8"
+  local upgrade_uuid="$9"
 
   local app_root
   local installer_path
@@ -312,7 +321,8 @@ build_release_variant() {
     "$app_name" \
     "$app_description" \
     "$engine_source_dir" \
-    "$engine_target_dir")"
+    "$engine_target_dir" \
+    "$engine_backend")"
   create_portable_zip "$release_basename" "$app_root"
   installer_path="$(build_installer \
     "$flavor" \
@@ -321,6 +331,7 @@ build_release_variant() {
     "$app_description" \
     "$engine_source_dir" \
     "$engine_target_dir" \
+    "$engine_backend" \
     "$upgrade_uuid")"
   final_installer="$RELEASE_DIR/${DATE_TAG}-${release_basename}.installer.exe"
   cp "$installer_path" "$final_installer"
@@ -341,6 +352,7 @@ if has_bundled_katago "$STANDARD_ENGINE_PLATFORM_DIR"; then
     "$APP_DESCRIPTION" \
     "$STANDARD_ENGINE_PLATFORM_DIR" \
     "$STANDARD_ENGINE_PLATFORM_DIR" \
+    "opencl" \
     "${ARCH_TAG}.with-katago" \
     "$WINDOWS_UPGRADE_UUID"
 else
@@ -356,6 +368,7 @@ if has_bundled_katago "$NVIDIA_ENGINE_PLATFORM_DIR"; then
     "$NVIDIA_APP_DESCRIPTION" \
     "$NVIDIA_ENGINE_PLATFORM_DIR" \
     "$STANDARD_ENGINE_PLATFORM_DIR" \
+    "nvidia" \
     "$NVIDIA_ARCH_TAG" \
     "$WINDOWS_UPGRADE_UUID_NVIDIA"
 else
@@ -369,6 +382,7 @@ build_release_variant \
   "$APP_DESCRIPTION" \
   "$STANDARD_ENGINE_PLATFORM_DIR" \
   "$STANDARD_ENGINE_PLATFORM_DIR" \
+  "" \
   "${ARCH_TAG}.without.engine" \
   "$WINDOWS_UPGRADE_UUID"
 

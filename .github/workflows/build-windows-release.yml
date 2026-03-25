@@ -104,6 +104,7 @@ jobs:
           test -f "dist/windows/app-image-with-katago/LizzieYzy Next/LizzieYzy Next.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/LizzieYzy Next NVIDIA.exe"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/katago.exe"
+          grep -qx "nvidia" "dist/windows/input-nvidia/engines/katago/windows-x64/lizzieyzy-next-engine-backend.txt"
 
       - name: Smoke test bundled Windows app image
         shell: powershell
