@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / 'engines' / 'katago' / 'VERSION.txt'
+PREPARE_BUNDLED_KATAGO_SCRIPT = ROOT / 'scripts' / 'prepare_bundled_katago.sh'
 
 ASSET_SPECS = [
     ('windows_installer', 'windows64.with-katago.installer.exe', 'Windows 64 位', 'Windows x64'),
@@ -42,25 +44,41 @@ def load_bundle_metadata() -> dict[str, str]:
         'windows_bundle': 'Unknown',
         'windows_nvidia_bundle': 'Unknown',
     }
-    if not VERSION_FILE.exists():
-        return metadata
+    if VERSION_FILE.exists():
+        for raw_line in VERSION_FILE.read_text(encoding='utf-8').splitlines():
+            if ':' not in raw_line:
+                continue
+            key, value = raw_line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if key == 'katago release':
+                metadata['katago_version'] = value
+            elif key == 'windows bundle':
+                metadata['windows_bundle'] = value
+            elif key == 'windows nvidia bundle':
+                metadata['windows_nvidia_bundle'] = value
+            elif key == 'model source':
+                metadata['model_source'] = value
 
-    for raw_line in VERSION_FILE.read_text(encoding='utf-8').splitlines():
-        if ':' not in raw_line:
-            continue
-        key, value = raw_line.split(':', 1)
-        key = key.strip().lower()
-        value = value.strip()
-        if key == 'katago release':
-            metadata['katago_version'] = value
-        elif key == 'windows bundle':
-            metadata['windows_bundle'] = value
-        elif key == 'windows nvidia bundle':
-            metadata['windows_nvidia_bundle'] = value
-        elif key == 'model source':
-            metadata['model_source'] = value
+    if PREPARE_BUNDLED_KATAGO_SCRIPT.exists():
+        script_text = PREPARE_BUNDLED_KATAGO_SCRIPT.read_text(encoding='utf-8')
+        pattern_map = {
+            'katago_version': r'KATAGO_TAG="\$\{KATAGO_TAG:-([^"]+)\}"',
+            'windows_bundle': r'WINDOWS_ASSET="\$\{WINDOWS_ASSET:-([^"]+)\}"',
+            'windows_nvidia_bundle': r'WINDOWS_NVIDIA_ASSET="\$\{WINDOWS_NVIDIA_ASSET:-([^"]+)\}"',
+            'model_source': r'PREFERRED_MODEL_NAME="\$\{PREFERRED_MODEL_NAME:-([^"]+)\}"',
+        }
+        for key, pattern in pattern_map.items():
+            if metadata[key] != 'Unknown':
+                continue
+            match = re.search(pattern, script_text)
+            if match:
+                metadata[key] = match.group(1).strip()
 
     katago_version = metadata['katago_version']
+    if katago_version != 'Unknown':
+        metadata['windows_bundle'] = metadata['windows_bundle'].replace('${KATAGO_TAG}', katago_version)
+        metadata['windows_nvidia_bundle'] = metadata['windows_nvidia_bundle'].replace('${KATAGO_TAG}', katago_version)
     if katago_version != 'Unknown':
         if metadata['windows_bundle'] == 'Unknown':
             metadata['windows_bundle'] = f'katago-{katago_version}-opencl-windows-x64.zip'
