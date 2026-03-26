@@ -159,6 +159,7 @@ public final class KataGoRuntimeHelper {
     private final JLabel statusLabel = new JLabel();
     private final JProgressBar progressBar = new JProgressBar();
     private final javax.swing.JButton cancelButton = new javax.swing.JButton();
+    private long firstMeasuredAtMillis = 0L;
 
     private BootstrapDialog(Window owner, DownloadSession session) {
       super(owner);
@@ -206,9 +207,21 @@ public final class KataGoRuntimeHelper {
     private void updateProgress(String statusText, long downloadedBytes, long totalBytes) {
       statusLabel.setText(statusText);
       if (totalBytes > 0) {
+        long now = System.currentTimeMillis();
+        if (downloadedBytes > 0 && firstMeasuredAtMillis <= 0L) {
+          firstMeasuredAtMillis = now;
+        }
         progressBar.setIndeterminate(false);
         progressBar.setMaximum(1000);
         progressBar.setValue((int) Math.min(1000, (downloadedBytes * 1000L) / totalBytes));
+        String etaText = "";
+        if (firstMeasuredAtMillis > 0L && downloadedBytes > 0 && downloadedBytes < totalBytes) {
+          long elapsedMillis = Math.max(1000L, now - firstMeasuredAtMillis);
+          long bytesPerSecond = Math.max(1L, (downloadedBytes * 1000L) / elapsedMillis);
+          long remainingMillis =
+              Math.max(0L, ((totalBytes - downloadedBytes) * 1000L) / bytesPerSecond);
+          etaText = "  ETA " + formatDuration(remainingMillis);
+        }
         progressBar.setString(
             statusText
                 + "  "
@@ -216,7 +229,8 @@ public final class KataGoRuntimeHelper {
                 + "%  "
                 + formatBytes(downloadedBytes)
                 + " / "
-                + formatBytes(totalBytes));
+                + formatBytes(totalBytes)
+                + etaText);
       } else if (downloadedBytes > 0) {
         progressBar.setIndeterminate(true);
         progressBar.setString(statusText + "  " + formatBytes(downloadedBytes));
@@ -395,6 +409,10 @@ public final class KataGoRuntimeHelper {
                 listener.onProgress(statusText, base + downloadedBytes, totalDownloadBytes);
               }
             });
+        if (listener != null) {
+          listener.onProgress(
+              spec.displayName + " (extracting)", downloadedBytesBase, totalDownloadBytes);
+        }
         extractRuntimePackage(spec, archivePath, runtimeDir, licenseDir);
         downloadedBytesBase += Math.max(0L, spec.sizeBytes);
         if (listener != null) {
@@ -752,7 +770,7 @@ public final class KataGoRuntimeHelper {
       }
       boolean allPresent = true;
       for (String dllName : REQUIRED_RUNTIME_DLLS) {
-        if (!Files.isRegularFile(dir.resolve(dllName))) {
+        if (!hasFile(Arrays.asList(dir), dllName)) {
           allPresent = false;
           break;
         }
@@ -1058,6 +1076,21 @@ public final class KataGoRuntimeHelper {
       return String.format(Locale.ROOT, "%.0f MB", mb);
     }
     return String.format(Locale.ROOT, "%.1f MB", mb);
+  }
+
+  private static String formatDuration(long millis) {
+    long seconds = Math.max(0L, millis / 1000L);
+    long minutes = seconds / 60L;
+    long remainSeconds = seconds % 60L;
+    if (minutes <= 0L) {
+      return remainSeconds + "s";
+    }
+    if (minutes < 60L) {
+      return minutes + "m " + remainSeconds + "s";
+    }
+    long hours = minutes / 60L;
+    long remainMinutes = minutes % 60L;
+    return hours + "h " + remainMinutes + "m";
   }
 
   public static String formatBenchmarkResult(BenchmarkResult result) {

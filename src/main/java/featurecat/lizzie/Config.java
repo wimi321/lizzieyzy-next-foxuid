@@ -10,7 +10,9 @@ import java.awt.Toolkit;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.stream.Stream;
 import javax.swing.*;
 import org.jdesktop.swingx.util.OS;
 import org.json.*;
@@ -130,6 +132,7 @@ public class Config {
 
   private static final String USER_WORK_DIR_NAME = ".lizzieyzy-next";
   private static final String LEGACY_USER_WORK_DIR_NAME = ".lizzieyzy-next-foxuid";
+  private static final String WINDOWS_SHARED_WORK_DIR_NAME = "LizzieYzyNext";
   private static final String WORK_DIR = resolveWorkDir();
   private static final String RUNTIME_WORK_DIR = "runtime";
   private static final String BUNDLED_ENGINE_NAME = "KataGo Bundled";
@@ -243,6 +246,24 @@ public class Config {
   }
 
   private static String resolveWorkDir() {
+    if (OS.isWindows()) {
+      try {
+        Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        if (shouldUsePortableWindowsWorkDir(cwd)) {
+          return cwd.toString();
+        }
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+      try {
+        Path fallback = resolveWritableFallbackDir();
+        System.out.println("Config dir fallback: " + fallback);
+        return fallback.toString();
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+    }
+
     try {
       Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
       if (Files.isWritable(cwd)) {
@@ -263,6 +284,10 @@ public class Config {
   }
 
   public static Path resolveWritableFallbackDir() throws IOException {
+    if (OS.isWindows()) {
+      return resolveWindowsWorkDir();
+    }
+
     Path preferred = Path.of(System.getProperty("user.home"), USER_WORK_DIR_NAME);
     Path legacy = Path.of(System.getProperty("user.home"), LEGACY_USER_WORK_DIR_NAME);
 
@@ -279,6 +304,161 @@ public class Config {
 
     Files.createDirectories(preferred.resolve("save"));
     return preferred;
+  }
+
+  private static Path resolveWindowsWorkDir() throws IOException {
+    Path preferred = Path.of(System.getProperty("user.home"), USER_WORK_DIR_NAME);
+    Path legacy = Path.of(System.getProperty("user.home"), LEGACY_USER_WORK_DIR_NAME);
+    Path target = resolveWindowsSharedWorkDirCandidate();
+
+    migrateWorkDirIfNeeded(target, preferred, legacy);
+
+    try {
+      Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+      if (!target.equals(cwd)) {
+        migrateWorkDirIfNeeded(target, cwd);
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+    Files.createDirectories(target.resolve("save"));
+    return target;
+  }
+
+  private static Path resolveWindowsSharedWorkDirCandidate() throws IOException {
+    List<Path> candidates = new ArrayList<Path>();
+    addWindowsWorkDirCandidate(
+        candidates, System.getenv("PUBLIC"), "Documents", WINDOWS_SHARED_WORK_DIR_NAME);
+    addWindowsWorkDirCandidate(candidates, System.getenv("PUBLIC"), WINDOWS_SHARED_WORK_DIR_NAME);
+    addWindowsWorkDirCandidate(
+        candidates, System.getenv("PROGRAMDATA"), WINDOWS_SHARED_WORK_DIR_NAME);
+
+    for (Path candidate : candidates) {
+      if (candidate == null || !isAsciiSafePath(candidate)) {
+        continue;
+      }
+      try {
+        Files.createDirectories(candidate.resolve("save"));
+        if (Files.isWritable(candidate)) {
+          return candidate;
+        }
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    }
+
+    Path preferred = Path.of(System.getProperty("user.home"), USER_WORK_DIR_NAME);
+    Files.createDirectories(preferred.resolve("save"));
+    return preferred;
+  }
+
+  private static void addWindowsWorkDirCandidate(
+      List<Path> candidates, String root, String... children) {
+    if (root == null || root.trim().isEmpty()) {
+      return;
+    }
+    try {
+      Path candidate = Path.of(root, children).toAbsolutePath().normalize();
+      candidates.add(candidate);
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private static boolean shouldUsePortableWindowsWorkDir(Path cwd) {
+    if (cwd == null || !Files.isDirectory(cwd) || !Files.isWritable(cwd) || !isAsciiSafePath(cwd)) {
+      return false;
+    }
+    return hasBundledAssets(cwd) || hasExistingWorkDirData(cwd);
+  }
+
+  private static boolean hasBundledAssets(Path dir) {
+    return dir != null
+        && Files.isDirectory(dir.resolve(BUNDLED_ENGINE_ROOT))
+        && Files.isDirectory(dir.resolve(BUNDLED_WEIGHT_ROOT));
+  }
+
+  private static boolean hasExistingWorkDirData(Path dir) {
+    if (dir == null) {
+      return false;
+    }
+    if (Files.isRegularFile(dir.resolve("config.txt"))
+        || Files.isRegularFile(dir.resolve("persist"))) {
+      return true;
+    }
+    Path saveDir = dir.resolve("save");
+    if (!Files.isDirectory(saveDir)) {
+      return false;
+    }
+    try (Stream<Path> stream = Files.list(saveDir)) {
+      return stream.findFirst().isPresent();
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private static void migrateWorkDirIfNeeded(Path target, Path... sources) throws IOException {
+    if (target == null || hasExistingWorkDirData(target)) {
+      return;
+    }
+    for (Path source : sources) {
+      if (source == null) {
+        continue;
+      }
+      Path normalizedSource = source.toAbsolutePath().normalize();
+      if (normalizedSource.equals(target) || !hasExistingWorkDirData(normalizedSource)) {
+        continue;
+      }
+      copyWorkDirFiles(normalizedSource, target);
+      System.out.println("Migrated config dir to " + target + " from " + normalizedSource);
+      return;
+    }
+  }
+
+  private static void copyWorkDirFiles(Path source, Path target) throws IOException {
+    Files.createDirectories(target);
+    copyIfExists(source.resolve("config.txt"), target.resolve("config.txt"));
+    copyIfExists(source.resolve("persist"), target.resolve("persist"));
+    Path sourceSave = source.resolve("save");
+    if (Files.isDirectory(sourceSave)) {
+      copyDirectoryContents(sourceSave, target.resolve("save"));
+    }
+  }
+
+  private static void copyDirectoryContents(Path source, Path target) throws IOException {
+    Files.createDirectories(target);
+    try (Stream<Path> stream = Files.list(source)) {
+      for (Path child : (Iterable<Path>) stream::iterator) {
+        Path destination = target.resolve(child.getFileName().toString());
+        if (Files.isDirectory(child)) {
+          copyDirectoryContents(child, destination);
+        } else {
+          copyIfExists(child, destination);
+        }
+      }
+    }
+  }
+
+  private static void copyIfExists(Path source, Path destination) throws IOException {
+    if (!Files.exists(source) || Files.isDirectory(source)) {
+      return;
+    }
+    Files.createDirectories(destination.getParent());
+    Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
+  }
+
+  private static boolean isAsciiSafePath(Path path) {
+    if (path == null) {
+      return false;
+    }
+    String text = path.toAbsolutePath().normalize().toString();
+    for (int i = 0; i < text.length(); i++) {
+      if (text.charAt(i) > 127) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static Optional<Path> findBundledAppRoot() {
@@ -2814,6 +2994,8 @@ public class Config {
     if (!runtimeDir.exists()) {
       runtimeDir.mkdirs();
     }
+    new File(runtimeDir, "gtp_logs").mkdirs();
+    new File(runtimeDir, "analysis_logs").mkdirs();
     return runtimeDir;
   }
 
