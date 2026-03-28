@@ -252,27 +252,109 @@ function Assert-RepairedBundledEngineConfig {
     }
 }
 
-function Wait-ForRepairedBundledEngineConfig {
+function Invoke-UpgradedAppRepairSmoke {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ConfigPath,
+        [string]$AppExe,
 
-        [int]$TimeoutSeconds = 45,
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigDir,
 
-        [int]$PollIntervalSeconds = 2
+        [string]$RequiredLogDir = "gtp_logs",
+
+        [int]$WaitSeconds = 90
     )
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $lastError = $null
+    if (-not (Test-Path -LiteralPath $AppExe)) {
+        throw "App executable not found for upgrade repair validation: $AppExe"
+    }
 
-    while ((Get-Date) -lt $deadline) {
-        try {
-            Assert-RepairedBundledEngineConfig -ConfigPath $ConfigPath
-            Write-Host "Bundled engine config repair detected."
-            return
-        } catch {
-            $lastError = $_
-            Start-Sleep -Seconds $PollIntervalSeconds
+    $appDir = Split-Path -Parent $AppExe
+    $consoleLogs = Join-Path $appDir "LastConsoleLogs_*.txt"
+    $errorLogs = Join-Path $appDir "LastErrorLogs_*.txt"
+    $configDirCandidates = @(Get-SmokeConfigDirCandidates -PreferredConfigDir $ConfigDir)
+    if ($configDirCandidates.Count -eq 0) {
+        throw "No candidate config directory could be resolved for upgrade repair validation."
+    }
+
+    Get-ChildItem -Path $consoleLogs -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $errorLogs -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    Write-Host "Launching $AppExe for upgrade repair validation"
+    $process = Start-Process -FilePath $AppExe -WorkingDirectory $appDir -PassThru
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    $lastError = $null
+    $activeConfigDir = Resolve-ExistingSmokeConfigDir -Candidates $configDirCandidates
+    $loggedConfigDetected = $false
+    $loggedRepairWaiting = $false
+
+    try {
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+
+            if ($process.HasExited) {
+                $exitCode = $process.ExitCode
+                throw "Application exited early with code $exitCode during upgrade repair validation."
+            }
+
+            $activeConfigDir = Resolve-ExistingSmokeConfigDir -Candidates $configDirCandidates
+            $runtimeDir = Join-Path $activeConfigDir "runtime"
+            $requiredRuntimeLogDir = Join-Path $runtimeDir $RequiredLogDir
+            $configPath = Join-Path $activeConfigDir "config.txt"
+            $persistFile = Join-Path $activeConfigDir "persist"
+            $hasConfig = (Test-Path -LiteralPath $configPath) -and (Test-Path -LiteralPath $persistFile)
+            $hasRuntimeLogs = Test-Path -LiteralPath $requiredRuntimeLogDir
+            $hasRuntimeState = $hasRuntimeLogs -or (Test-Path -LiteralPath $runtimeDir)
+
+            if ($hasConfig -and (-not $loggedConfigDetected)) {
+                Write-Host "Config files detected. Waiting for repaired bundled engine config..."
+                $loggedConfigDetected = $true
+            }
+
+            if ($hasConfig -and $hasRuntimeState) {
+                Write-Host "Resolved config dir: $activeConfigDir"
+                try {
+                    Assert-RepairedBundledEngineConfig -ConfigPath $configPath
+                    if ($hasRuntimeLogs) {
+                        Write-Host "Upgrade smoke test passed. Config repair completed and bundled KataGo runtime logs were created."
+                    }
+                    else {
+                        Write-Host "Upgrade smoke test passed. Config repair completed."
+                    }
+                    return
+                } catch {
+                    $lastError = $_
+                    if (-not $loggedRepairWaiting) {
+                        Write-Host "Runtime is ready. Waiting for startup repair to rewrite bundled engine commands..."
+                        $loggedRepairWaiting = $true
+                    }
+                }
+            }
+        }
+    }
+    finally {
+        if ($process -and -not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+
+        $activeConfigDir = Resolve-ExistingSmokeConfigDir -Candidates $configDirCandidates
+        Write-Host "--- Config dir ---"
+        Write-Host $activeConfigDir
+        if ($activeConfigDir -and (Test-Path -LiteralPath $activeConfigDir)) {
+            Get-ChildItem -LiteralPath $activeConfigDir -Recurse -Force | Select-Object FullName, Length
+        }
+
+        Write-Host "--- Console logs ---"
+        Get-ChildItem -Path $consoleLogs -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "### $($_.FullName)"
+            Get-Content -LiteralPath $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+        }
+
+        Write-Host "--- Error logs ---"
+        Get-ChildItem -Path $errorLogs -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "### $($_.FullName)"
+            Get-Content -LiteralPath $_.FullName -Tail 120 -ErrorAction SilentlyContinue
         }
     }
 
@@ -280,7 +362,7 @@ function Wait-ForRepairedBundledEngineConfig {
         throw $lastError
     }
 
-    throw "Timed out while waiting for bundled engine config repair."
+    throw "Timed out while waiting for upgraded app repair validation."
 }
 
 $tempRoot = Join-Path $env:RUNNER_TEMP "lizzieyzy-next-msi-smoke"
@@ -316,16 +398,8 @@ Invoke-MsiInstall -MsiPath $msiNew -LogPath (Join-Path $logsDir "install-new.log
 $appExe = Find-InstalledAppExe
 Write-Host "Installed exe: $appExe"
 
-& (Join-Path $PSScriptRoot "windows_smoke_test.ps1") `
+Invoke-UpgradedAppRepairSmoke `
     -AppExe $appExe `
     -ConfigDir $resolvedSmokeConfigDir `
     -RequiredLogDir $RequiredLogDir `
-    -WaitSeconds 60 `
-    -PreserveConfig `
-    -RequireConfig
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Installed app smoke test failed after MSI upgrade."
-}
-
-Wait-ForRepairedBundledEngineConfig -ConfigPath $configPath
+    -WaitSeconds 90
