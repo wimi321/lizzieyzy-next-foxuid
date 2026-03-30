@@ -131,7 +131,9 @@ public class KataEstimate {
           return;
         }
       }
-      ProcessBuilder processBuilder = new ProcessBuilder(commands);
+      List<String> launchCommands =
+          KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
+      ProcessBuilder processBuilder = new ProcessBuilder(launchCommands);
       KataGoRuntimeHelper.configureBundledProcessBuilder(processBuilder, engineExecutable);
       processBuilder.redirectErrorStream(true);
       try {

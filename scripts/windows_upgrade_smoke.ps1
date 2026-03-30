@@ -73,6 +73,36 @@ function Resolve-ExistingSmokeConfigDir {
     return ""
 }
 
+function Assert-NoBundledEngineStartupFailure {
+    param(
+        [string]$RuntimeLogDir
+    )
+
+    if (-not $RuntimeLogDir -or -not (Test-Path -LiteralPath $RuntimeLogDir)) {
+        return
+    }
+
+    $patterns = @(
+        'Error creating directory',
+        'Could not create file',
+        'Uncaught exception'
+    )
+
+    $logFiles = Get-ChildItem -LiteralPath $RuntimeLogDir -Filter *.log -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    foreach ($logFile in $logFiles) {
+        $content = Get-Content -LiteralPath $logFile.FullName -Raw -ErrorAction SilentlyContinue
+        if (-not $content) {
+            continue
+        }
+        foreach ($pattern in $patterns) {
+            if ($content -match $pattern) {
+                throw "Bundled KataGo startup log contains '$pattern': $($logFile.FullName)"
+            }
+        }
+    }
+}
+
 function Invoke-JPackageMsiBuild {
     param(
         [string]$Version,
@@ -314,6 +344,10 @@ function Invoke-UpgradedAppRepairSmoke {
             if ($hasConfig -and $hasRuntimeState) {
                 Write-Host "Resolved config dir: $activeConfigDir"
                 try {
+                    if ($hasRuntimeLogs) {
+                        Start-Sleep -Seconds 2
+                        Assert-NoBundledEngineStartupFailure -RuntimeLogDir $requiredRuntimeLogDir
+                    }
                     Assert-RepairedBundledEngineConfig -ConfigPath $configPath
                     if ($hasRuntimeLogs) {
                         Write-Host "Upgrade smoke test passed. Config repair completed and bundled KataGo runtime logs were created."

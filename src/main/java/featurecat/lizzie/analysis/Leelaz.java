@@ -382,7 +382,9 @@ public class Leelaz {
                 ? "First launch on the NVIDIA package may take a little longer."
                 : "First launch may take a little longer.");
       }
-      ProcessBuilder processBuilder = new ProcessBuilder(commands);
+      List<String> launchCommands =
+          KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
+      ProcessBuilder processBuilder = new ProcessBuilder(launchCommands);
       KataGoRuntimeHelper.configureBundledProcessBuilder(processBuilder, engineExecutable);
       processBuilder.redirectErrorStream(false);
       try {

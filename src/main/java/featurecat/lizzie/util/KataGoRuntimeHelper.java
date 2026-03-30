@@ -1,5 +1,6 @@
 package featurecat.lizzie.util;
 
+import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.util.KataGoAutoSetupHelper.DownloadCancelledException;
 import featurecat.lizzie.util.KataGoAutoSetupHelper.DownloadSession;
@@ -54,6 +55,7 @@ public final class KataGoRuntimeHelper {
   private static final String NVIDIA_ENGINE_DIR = "windows-x64-nvidia";
   private static final String ENGINE_BACKEND_MARKER_NAME = "lizzieyzy-next-engine-backend.txt";
   private static final String NVIDIA_RUNTIME_ROOT = "nvidia-runtime";
+  private static final String BUNDLED_HOME_DATA_DIR = "katago-home";
   private static final String CUDA_MANIFEST_URL =
       "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_12.1.1.json";
   private static final String CUDNN_MANIFEST_URL =
@@ -316,6 +318,34 @@ public final class KataGoRuntimeHelper {
     }
   }
 
+  public static List<String> prepareBundledLaunchCommand(
+      List<String> originalCommand, Path enginePath) {
+    if (originalCommand == null) {
+      return null;
+    }
+    List<String> launchCommand = new ArrayList<String>(originalCommand);
+    if (enginePath == null || Lizzie.config == null) {
+      return launchCommand;
+    }
+    if (!Config.isBundledKataGoCommand(enginePath.toAbsolutePath().normalize().toString())) {
+      return launchCommand;
+    }
+
+    Path homeDataDir = getBundledHomeDataDir();
+    if (homeDataDir == null) {
+      return launchCommand;
+    }
+    try {
+      Files.createDirectories(homeDataDir);
+    } catch (IOException e) {
+      e.printStackTrace();
+      return launchCommand;
+    }
+
+    appendOverrideConfig(launchCommand, "homeDataDir=" + homeDataDir.toString());
+    return launchCommand;
+  }
+
   public static NvidiaRuntimeStatus inspectNvidiaRuntime(SetupSnapshot snapshot) {
     return inspectNvidiaRuntime(snapshot == null ? null : snapshot.enginePath);
   }
@@ -436,6 +466,8 @@ public final class KataGoRuntimeHelper {
     command.add(String.valueOf(benchmarkTime));
     command.add("-override-config");
     command.add("logToStderr=false,logAllGTPCommunication=false,logSearchInfo=false");
+
+    command = prepareBundledLaunchCommand(command, snapshot.enginePath);
 
     ProcessBuilder processBuilder = new ProcessBuilder(command);
     processBuilder.redirectErrorStream(true);
@@ -647,6 +679,49 @@ public final class KataGoRuntimeHelper {
       rebuilt.append(trimmed);
     }
     processBuilder.environment().put("PATH", rebuilt.toString());
+  }
+
+  private static Path getBundledHomeDataDir() {
+    if (Lizzie.config == null) {
+      return null;
+    }
+    return Lizzie.config
+        .getRuntimeWorkDirectory()
+        .toPath()
+        .resolve(BUNDLED_HOME_DATA_DIR)
+        .toAbsolutePath()
+        .normalize();
+  }
+
+  private static void appendOverrideConfig(List<String> command, String keyValue) {
+    if (command == null || keyValue == null || keyValue.trim().isEmpty()) {
+      return;
+    }
+
+    for (int i = 0; i < command.size(); i++) {
+      if (!"-override-config".equals(command.get(i))) {
+        continue;
+      }
+
+      if (i + 1 >= command.size()) {
+        command.add(keyValue);
+        return;
+      }
+
+      String existing = command.get(i + 1);
+      if (existing != null && existing.toLowerCase(Locale.ROOT).contains("homedatadir=")) {
+        return;
+      }
+      if (existing == null || existing.trim().isEmpty()) {
+        command.set(i + 1, keyValue);
+      } else {
+        command.set(i + 1, existing + "," + keyValue);
+      }
+      return;
+    }
+
+    command.add("-override-config");
+    command.add(keyValue);
   }
 
   private static List<Path> collectRuntimeSearchDirs(Path enginePath, Path runtimeDir) {
