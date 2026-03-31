@@ -28,8 +28,9 @@
 </p>
 
 > [!IMPORTANT]
-> Start with these 4 points:
-> - Most Windows users should download `windows64.with-katago.installer.exe`
+> Start with these 5 points:
+> - Most Windows users should download `windows64.with-katago.installer.exe`, the recommended **CPU build**
+> - If you specifically want to try OpenCL GPU acceleration, download `windows64.opencl.installer.exe`
 > - If your PC has an **NVIDIA GPU** and you want faster analysis, download `windows64.nvidia.installer.exe`
 > - You can now enter a **Fox nickname** directly. The app resolves the account and fetches recent public games automatically.
 > - The recommended bundles already include KataGo and try to finish the first-launch setup automatically.
@@ -54,12 +55,13 @@ This repository stays focused on a few practical goals:
 
 If you are on **Windows**:
 
-- Most users should start with **`windows64.with-katago.installer.exe`**
+- Most users should start with **`windows64.with-katago.installer.exe`**, the more stable **CPU build**
+- If you specifically want to try **OpenCL GPU acceleration**, choose **`windows64.opencl.installer.exe`**
 - If your PC has an **NVIDIA GPU** and you care about speed first, choose **`windows64.nvidia.installer.exe`**
 
-The first one is the main beginner-friendly build. The NVIDIA package is the faster Windows option for NVIDIA graphics users.
+These give you a CPU build, an OpenCL build, and an NVIDIA-specific build.
 On first launch, the NVIDIA bundle now prepares the required official NVIDIA runtime files automatically in the user folder before starting accelerated analysis.
-Both the regular Windows bundle and the NVIDIA bundle can use `KataGo Auto Setup -> Smart Optimize`. The regular bundle just does not need the extra NVIDIA runtime step.
+The CPU build, the OpenCL build, and the NVIDIA build can all use `KataGo Auto Setup -> Smart Optimize`.
 
 ## What To Download
 
@@ -71,10 +73,12 @@ If you prefer a visual chooser first, start with this:
 
 | Your computer | Download this |
 | --- | --- |
-| Windows x64 | `windows64.with-katago.installer.exe` |
+| Windows x64, CPU build, recommended | `windows64.with-katago.installer.exe` |
+| Windows x64, CPU build, no installer | `windows64.with-katago.portable.zip` |
+| Windows x64, OpenCL build, try GPU acceleration | `windows64.opencl.installer.exe` |
+| Windows x64, OpenCL build, no installer | `windows64.opencl.portable.zip` |
 | Windows x64, NVIDIA GPU, faster analysis | `windows64.nvidia.installer.exe` |
 | Windows x64, NVIDIA GPU, no installer | `windows64.nvidia.portable.zip` |
-| Windows x64, no installer | `windows64.with-katago.portable.zip` |
 | Windows x64, your own engine with installer | `windows64.without.engine.installer.exe` |
 | Windows x64, your own engine | `windows64.without.engine.portable.zip` |
 | macOS Apple Silicon | `mac-arm64.with-katago.dmg` |
@@ -83,16 +87,18 @@ If you prefer a visual chooser first, start with this:
 
 Quick rule:
 
-- Windows: if you are not sure whether your PC has an NVIDIA GPU, choose `windows64.with-katago.installer.exe`
+- Windows: if you are not sure what to choose, use `windows64.with-katago.installer.exe`
 - Mac: choose Apple Silicon or Intel first
 - Linux: choose `with-katago.zip`
 
 At a glance:
 
-- `installer.exe`: best default choice for most Windows users
+- `with-katago.installer.exe`: recommended CPU build for most Windows users
+- `opencl.installer.exe`: OpenCL build for people who specifically want to try OpenCL GPU acceleration
 - `nvidia.installer.exe`: Windows NVIDIA bundle for higher KataGo speed
+- `opencl.portable.zip`: unzip-and-run OpenCL build
 - `nvidia.portable.zip`: unzip-and-run NVIDIA build
-- `portable.zip`: for people who want unzip-and-run without installing
+- `with-katago.portable.zip`: unzip-and-run CPU build
 - `without.engine.installer.exe`: for people who want installer flow but their own engine
 - `without.engine.portable.zip`: for people who already manage their own engine and do not want installation
 

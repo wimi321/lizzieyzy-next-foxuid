@@ -16,6 +16,8 @@ PREPARE_BUNDLED_KATAGO_SCRIPT = ROOT / 'scripts' / 'prepare_bundled_katago.sh'
 ASSET_SPECS = [
     ('windows_installer', 'windows64.with-katago.installer.exe', 'Windows 64 位', 'Windows x64'),
     ('windows_portable', 'windows64.with-katago.portable.zip', 'Windows 64 位，想免安装', 'Windows x64, no installer'),
+    ('windows_opencl_installer', 'windows64.opencl.installer.exe', 'Windows 64 位，OpenCL 版', 'Windows x64, OpenCL'),
+    ('windows_opencl_portable', 'windows64.opencl.portable.zip', 'Windows 64 位，OpenCL 版，免安装', 'Windows x64, OpenCL, no installer'),
     ('windows_nvidia_installer', 'windows64.nvidia.installer.exe', 'Windows 64 位，英伟达显卡', 'Windows x64, NVIDIA GPU'),
     ('windows_nvidia_portable', 'windows64.nvidia.portable.zip', 'Windows 64 位，英伟达显卡，免安装', 'Windows x64, NVIDIA GPU, no installer'),
     ('windows_no_engine_installer', 'windows64.without.engine.installer.exe', 'Windows 64 位，想自己配引擎，也想安装器', 'Windows x64, your own engine with installer'),
@@ -42,6 +44,7 @@ def load_bundle_metadata() -> dict[str, str]:
         'katago_version': 'Unknown',
         'model_source': 'Unknown',
         'windows_bundle': 'Unknown',
+        'windows_opencl_bundle': 'Unknown',
         'windows_nvidia_bundle': 'Unknown',
     }
     if VERSION_FILE.exists():
@@ -55,6 +58,8 @@ def load_bundle_metadata() -> dict[str, str]:
                 metadata['katago_version'] = value
             elif key == 'windows bundle':
                 metadata['windows_bundle'] = value
+            elif key == 'windows opencl bundle':
+                metadata['windows_opencl_bundle'] = value
             elif key == 'windows nvidia bundle':
                 metadata['windows_nvidia_bundle'] = value
             elif key == 'model source':
@@ -65,6 +70,7 @@ def load_bundle_metadata() -> dict[str, str]:
         pattern_map = {
             'katago_version': r'KATAGO_TAG="\$\{KATAGO_TAG:-([^"]+)\}"',
             'windows_bundle': r'WINDOWS_ASSET="\$\{WINDOWS_ASSET:-([^"]+)\}"',
+            'windows_opencl_bundle': r'WINDOWS_OPENCL_ASSET="\$\{WINDOWS_OPENCL_ASSET:-([^"]+)\}"',
             'windows_nvidia_bundle': r'WINDOWS_NVIDIA_ASSET="\$\{WINDOWS_NVIDIA_ASSET:-([^"]+)\}"',
             'model_source': r'PREFERRED_MODEL_NAME="\$\{PREFERRED_MODEL_NAME:-([^"]+)\}"',
         }
@@ -78,17 +84,20 @@ def load_bundle_metadata() -> dict[str, str]:
             if metadata[key] == 'Unknown' and key in script_metadata:
                 metadata[key] = script_metadata[key]
 
-        for key in ('windows_bundle', 'windows_nvidia_bundle'):
+        for key in ('windows_bundle', 'windows_opencl_bundle', 'windows_nvidia_bundle'):
             if key in script_metadata:
                 metadata[key] = script_metadata[key]
 
     katago_version = metadata['katago_version']
     if katago_version != 'Unknown':
         metadata['windows_bundle'] = metadata['windows_bundle'].replace('${KATAGO_TAG}', katago_version)
+        metadata['windows_opencl_bundle'] = metadata['windows_opencl_bundle'].replace('${KATAGO_TAG}', katago_version)
         metadata['windows_nvidia_bundle'] = metadata['windows_nvidia_bundle'].replace('${KATAGO_TAG}', katago_version)
     if katago_version != 'Unknown':
         if metadata['windows_bundle'] == 'Unknown':
             metadata['windows_bundle'] = f'katago-{katago_version}-eigen-windows-x64.zip'
+        if metadata['windows_opencl_bundle'] == 'Unknown':
+            metadata['windows_opencl_bundle'] = f'katago-{katago_version}-opencl-windows-x64.zip'
         if metadata['windows_nvidia_bundle'] == 'Unknown':
             metadata['windows_nvidia_bundle'] = (
                 f'katago-{katago_version}-cuda12.1-cudnn8.9.7-windows-x64.zip'
@@ -157,6 +166,8 @@ def format_asset_en(asset_name: str | None, repo: str, release_tag: str | None) 
 def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str], repo: str, release_tag: str | None) -> str:
     windows_installer = format_asset(asset_map['windows_installer'], repo, release_tag)
     windows_portable = format_asset(asset_map['windows_portable'], repo, release_tag)
+    windows_opencl_installer = format_asset(asset_map['windows_opencl_installer'], repo, release_tag)
+    windows_opencl_portable = format_asset(asset_map['windows_opencl_portable'], repo, release_tag)
     windows_nvidia_installer = format_asset(asset_map['windows_nvidia_installer'], repo, release_tag)
     windows_nvidia_portable = format_asset(asset_map['windows_nvidia_portable'], repo, release_tag)
     windows_no_engine_installer = format_asset(asset_map['windows_no_engine_installer'], repo, release_tag)
@@ -166,6 +177,8 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
     linux64 = format_asset(asset_map['linux64'], repo, release_tag)
 
     windows_installer_en = format_asset_en(asset_map['windows_installer'], repo, release_tag)
+    windows_opencl_installer_en = format_asset_en(asset_map['windows_opencl_installer'], repo, release_tag)
+    windows_opencl_portable_en = format_asset_en(asset_map['windows_opencl_portable'], repo, release_tag)
     windows_nvidia_installer_en = format_asset_en(asset_map['windows_nvidia_installer'], repo, release_tag)
     windows_nvidia_portable_en = format_asset_en(asset_map['windows_nvidia_portable'], repo, release_tag)
     windows_no_engine_installer_en = format_asset_en(asset_map['windows_no_engine_installer'], repo, release_tag)
@@ -176,6 +189,7 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 
     katago_version = bundle['katago_version']
     model_source = bundle['model_source']
+    windows_opencl_bundle = bundle['windows_opencl_bundle']
     windows_nvidia_bundle = bundle['windows_nvidia_bundle']
 
     return f"""# LizzieYzy Next
@@ -186,22 +200,26 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 
 ### 下载前先看这几句
 
-- Windows 普通用户直接下载 {windows_installer}
+- Windows 普通用户直接下载 {windows_installer}，这是 **CPU 版（推荐）**
+- 如果你想试 OpenCL 显卡加速，可以下载 {windows_opencl_installer}
 - 如果你的电脑是 **英伟达显卡**，优先下载 {windows_nvidia_installer}
 - 抓谱时直接输入 **野狐昵称**，程序会自动匹配账号并获取最近公开棋谱
 - 主推荐整合包已内置 KataGo `{katago_version}` 和默认权重 `{model_source}`
 - Windows 普通整合包也支持 **智能优化**，可以自动写入更合适的线程设置
 - Windows 普通整合包现在默认使用兼容性更稳的官方 CPU 版 KataGo，减少老显卡 / OpenCL 兼容问题
+- 另外单独提供 OpenCL 版，适合明确想试 OpenCL GPU 加速的用户
 - Windows NVIDIA 整合包已内置官方运行库，首启可离线使用
 
 ### 下载建议
 
 | 你的电脑 | 直接下载这个 |
 | --- | --- |
-| Windows 64 位 | {windows_installer} |
+| Windows 64 位，CPU 版，推荐稳定 | {windows_installer} |
+| Windows 64 位，CPU 版，想免安装 | {windows_portable} |
+| Windows 64 位，OpenCL 版，想试 GPU 加速 | {windows_opencl_installer} |
+| Windows 64 位，OpenCL 版，免安装 | {windows_opencl_portable} |
 | Windows 64 位，英伟达显卡，想更快 | {windows_nvidia_installer} |
 | Windows 64 位，英伟达显卡，想免安装 | {windows_nvidia_portable} |
-| Windows 64 位，想免安装 | {windows_portable} |
 | Windows 64 位，想自己配引擎，也想安装器 | {windows_no_engine_installer} |
 | Windows 64 位，想自己配引擎 | {windows_no_engine_portable} |
 | macOS Apple Silicon | {mac_arm64} |
@@ -213,8 +231,10 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 - 原版已经失效的野狐抓谱链路，现在重新可用
 - 现在直接输入“野狐昵称”，程序会自动找到账号再抓最近公开棋谱
 - Windows 继续把 `.installer.exe` 放在最前面，普通用户更容易直接开始用
-- Windows 普通整合包也支持智能优化，测速后会自动保存推荐线程数
-- Windows 普通整合包默认改为兼容性更稳的官方 CPU 版 KataGo，老显卡机器更不容易出问题
+- Windows 现在同时提供 CPU 版和 OpenCL 版，下载时更容易按自己的机器来选
+- Windows CPU 版也支持智能优化，测速后会自动保存推荐线程数
+- Windows CPU 版默认改为兼容性更稳的官方 CPU KataGo，老显卡机器更不容易出问题
+- Windows OpenCL 版单独提供，适合想尝试 OpenCL GPU 加速的用户
 - 对有 NVIDIA 独显的 Windows 用户，额外提供官方 CUDA 版 KataGo 的极速整合包，并且把官方运行库一起打进包里
 - macOS 继续提供 Apple Silicon / Intel 两种 `.dmg`
 - 整合包继续内置 KataGo 与默认权重，打开后更快进入分析
@@ -227,8 +247,10 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 
 This maintained release keeps LizzieYzy practical again for normal users: Fox game fetching works again, download choices stay easy to understand, and first launch needs less manual setup.
 
-- Windows first choice: {windows_installer_en}
+- Windows first choice: {windows_installer_en} for the recommended CPU build
+- Windows OpenCL option: {windows_opencl_installer_en}
 - Windows NVIDIA choice: {windows_nvidia_installer_en}
+- Windows OpenCL portable: {windows_opencl_portable_en}
 - Windows NVIDIA portable: {windows_nvidia_portable_en}
 - Windows custom-engine installer: {windows_no_engine_installer_en}
 - Windows custom-engine portable: {windows_no_engine_portable_en}
@@ -236,7 +258,9 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 - The recommended bundles include KataGo `{katago_version}` and the default weight `{model_source}`.
 - The regular Windows bundle also supports **Smart Optimize** to benchmark and save a better thread setting automatically.
 - The regular Windows bundle now defaults to the more compatibility-focused official CPU KataGo build, avoiding many old OpenCL GPU issues.
+- A separate OpenCL Windows bundle is also published for users who specifically want to try OpenCL GPU acceleration.
 - The NVIDIA package uses the official KataGo CUDA build `{windows_nvidia_bundle}`.
+- The OpenCL package uses the official KataGo OpenCL build `{windows_opencl_bundle}`.
 - The NVIDIA bundle now includes the official NVIDIA runtime files, so supported PCs can start offline on first launch.
 - First launch tries to prepare the bundled analysis setup automatically.
 - macOS downloads: Apple Silicon {mac_arm64_en}, Intel {mac_amd64_en}
@@ -248,11 +272,13 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 この保守版は、元の `lizzieyzy` をまだ使いたい利用者向けに、壊れていた野狐棋譜取得を復旧し、ダウンロード後すぐ使いやすい形に整えた継続保守版です。
 
 - Windows 利用者の多くは {windows_installer_en} を選べば始めやすいです
+- OpenCL GPU 加速を試したい場合は {windows_opencl_installer_en} も選べます
 - NVIDIA GPU を使っていて、より速い解析を求める場合は {windows_nvidia_installer_en} を選べます
 - 自分のエンジンを使いたい場合は {windows_no_engine_installer_en} または {windows_no_engine_portable_en} を選べます
 - 棋譜取得では **野狐のニックネーム** を入力します。アプリが一致するアカウントを自動で探します
 - 通常の Windows 同梱版でも **Smart Optimize** により、推奨スレッド数を保存しやすくなりました
 - 通常の Windows 同梱版は、古い OpenCL GPU の相性問題を避けやすい公式 CPU 版 KataGo を標準採用しました
+- OpenCL GPU 加速を試したい利用者向けに、OpenCL 版の Windows パッケージも別途用意しました
 - 初回起動では、内蔵の解析環境を自動で準備する流れを優先します
 - NVIDIA 同梱版は、必要な公式ランタイムも同梱するため、対応 PC なら初回起動をオフラインで始めやすくなりました
 - 主な整合パッケージには KataGo `{katago_version}` と既定の重み `{model_source}` が含まれています
@@ -262,11 +288,13 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 이 유지보수판은 아직 `lizzieyzy` 를 쓰고 싶은 사용자를 위해, 고장난 Fox 공개 기보 가져오기를 복구하고 다운로드 후 바로 쓰기 쉬운 형태로 정리한 지속 유지보수 포크입니다.
 
 - 대부분의 Windows 사용자는 {windows_installer_en} 를 먼저 받으면 가장 쉽습니다
+- OpenCL GPU 가속을 직접 써 보고 싶다면 {windows_opencl_installer_en} 도 고를 수 있습니다
 - NVIDIA 그래픽카드가 있고 더 빠른 분석을 원하면 {windows_nvidia_installer_en} 를 고를 수 있습니다
 - 직접 엔진을 쓰고 싶다면 {windows_no_engine_installer_en} 또는 {windows_no_engine_portable_en} 를 고를 수 있습니다
 - 기보를 가져올 때는 **Fox 닉네임** 을 입력하면 앱이 맞는 계정을 자동으로 찾아 줍니다
 - 일반 Windows 통합판도 **Smart Optimize** 로 더 알맞은 스레드 값을 저장할 수 있습니다
 - 일반 Windows 통합판은 오래된 OpenCL GPU 호환 문제를 줄이기 위해 공식 CPU KataGo 빌드를 기본으로 사용합니다
+- OpenCL GPU 가속을 직접 써 보고 싶은 사용자를 위해 OpenCL Windows 패키지도 따로 제공합니다
 - 첫 실행에서는 내장 분석 환경을 자동으로 준비하는 흐름을 먼저 시도합니다
 - NVIDIA 통합판은 필요한 공식 런타임도 함께 포함하므로, 지원되는 PC에서는 첫 실행을 오프라인으로 시작하기 쉽습니다
 - 주요 통합 패키지에는 KataGo `{katago_version}` 와 기본 가중치 `{model_source}` 가 포함되어 있습니다

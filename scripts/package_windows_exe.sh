@@ -23,18 +23,23 @@ fi
 
 APP_NAME="LizzieYzy Next"
 APP_DESCRIPTION="Maintained LizzieYzy build with Fox nickname fetch and easier KataGo setup"
+OPENCL_APP_NAME="LizzieYzy Next OpenCL"
+OPENCL_APP_DESCRIPTION="Maintained LizzieYzy build with Fox nickname fetch and bundled OpenCL KataGo"
 NVIDIA_APP_NAME="LizzieYzy Next NVIDIA"
 NVIDIA_APP_DESCRIPTION="Maintained LizzieYzy build with bundled NVIDIA CUDA KataGo"
 MAIN_JAR="$(basename "$JAR_PATH")"
 ICON_PATH="$ROOT_DIR/packaging/icons/app-icon.ico"
 ARCH_TAG="windows64"
 STANDARD_ENGINE_PLATFORM_DIR="windows-x64"
+OPENCL_ENGINE_PLATFORM_DIR="${WINDOWS_OPENCL_ENGINE_PLATFORM_DIR:-windows-x64-opencl}"
 NVIDIA_ENGINE_PLATFORM_DIR="${WINDOWS_NVIDIA_ENGINE_PLATFORM_DIR:-windows-x64-nvidia}"
+OPENCL_ARCH_TAG="${ARCH_TAG}.opencl"
 NVIDIA_ARCH_TAG="${ARCH_TAG}.nvidia"
 DIST_DIR="$ROOT_DIR/dist/windows"
 RELEASE_DIR="$ROOT_DIR/dist/release"
 META_DIR="$ROOT_DIR/dist/release-meta"
 WINDOWS_UPGRADE_UUID_NVIDIA="${WINDOWS_UPGRADE_UUID_NVIDIA:-14a4599e-6d5b-4b86-9895-7748266f0c25}"
+WINDOWS_UPGRADE_UUID_OPENCL="${WINDOWS_UPGRADE_UUID_OPENCL:-0ec8b17f-06b0-4f6a-9246-cf61953743cf}"
 ENGINE_BACKEND_MARKER_NAME="lizzieyzy-next-engine-backend.txt"
 NVIDIA_RUNTIME_PREPARE_SCRIPT="$ROOT_DIR/scripts/prepare_bundled_nvidia_runtime.py"
 NVIDIA_RUNTIME_STAGE_DIR="$DIST_DIR/nvidia-runtime"
@@ -259,8 +264,9 @@ build_installer() {
 
 write_windows_install_note() {
   local has_with_katago="$1"
-  local has_nvidia_katago="$2"
-  local has_no_engine_installer="$3"
+  local has_opencl_katago="$2"
+  local has_nvidia_katago="$3"
+  local has_no_engine_installer="$4"
   local note_file="$META_DIR/${DATE_TAG}-${ARCH_TAG}-install.txt"
 
   cat >"$note_file" <<EOF
@@ -273,9 +279,18 @@ EOF
   if [[ "$has_with_katago" == "true" ]]; then
     cat >>"$note_file" <<EOF
 - ${DATE_TAG}-${ARCH_TAG}.with-katago.installer.exe
-  Recommended for most users. Run the installer, finish setup, then launch from Start Menu or desktop.
+  Recommended CPU build for most users. Best stability. Run the installer, finish setup, then launch from Start Menu or desktop.
 - ${DATE_TAG}-${ARCH_TAG}.with-katago.portable.zip
-  Use this if you do not want the installer. Unzip it and open ${APP_NAME}.exe.
+  Recommended CPU portable build. Use this if you do not want the installer. Unzip it and open ${APP_NAME}.exe.
+EOF
+  fi
+
+  if [[ "$has_opencl_katago" == "true" ]]; then
+    cat >>"$note_file" <<EOF
+- ${DATE_TAG}-${OPENCL_ARCH_TAG}.installer.exe
+  Optional OpenCL build for PCs where OpenCL GPU acceleration works well. Choose this only if you specifically want the OpenCL engine.
+- ${DATE_TAG}-${OPENCL_ARCH_TAG}.portable.zip
+  OpenCL portable build. Unzip it and open ${OPENCL_APP_NAME}.exe.
 EOF
   fi
 
@@ -323,6 +338,14 @@ EOF
   else
     cat >>"$note_file" <<'EOF'
 - Bundled KataGo is not included in this build. Configure your own engine after launch.
+EOF
+  fi
+
+  if [[ "$has_opencl_katago" == "true" ]]; then
+    cat >>"$note_file" <<'EOF'
+- The OpenCL assets include the official KataGo OpenCL Windows build.
+- Choose the OpenCL package only if you want GPU acceleration through OpenCL and know your PC handles OpenCL reliably.
+- If you are not sure, use the regular CPU package instead.
 EOF
   fi
 
@@ -397,6 +420,7 @@ build_release_variant() {
 artifacts=()
 build_no_engine_installer="true"
 has_with_katago_assets="false"
+has_opencl_katago_assets="false"
 has_nvidia_katago_assets="false"
 
 if has_bundled_katago "$STANDARD_ENGINE_PLATFORM_DIR"; then
@@ -408,11 +432,27 @@ if has_bundled_katago "$STANDARD_ENGINE_PLATFORM_DIR"; then
     "$APP_DESCRIPTION" \
     "$STANDARD_ENGINE_PLATFORM_DIR" \
     "$STANDARD_ENGINE_PLATFORM_DIR" \
-    "opencl" \
+    "cpu" \
     "${ARCH_TAG}.with-katago" \
     "$WINDOWS_UPGRADE_UUID"
 else
   has_with_katago_assets="false"
+fi
+
+if has_bundled_katago "$OPENCL_ENGINE_PLATFORM_DIR"; then
+  has_opencl_katago_assets="true"
+  build_release_variant \
+    "opencl" \
+    "true" \
+    "$OPENCL_APP_NAME" \
+    "$OPENCL_APP_DESCRIPTION" \
+    "$OPENCL_ENGINE_PLATFORM_DIR" \
+    "$STANDARD_ENGINE_PLATFORM_DIR" \
+    "opencl" \
+    "$OPENCL_ARCH_TAG" \
+    "$WINDOWS_UPGRADE_UUID_OPENCL"
+else
+  has_opencl_katago_assets="false"
 fi
 
 if has_bundled_katago "$NVIDIA_ENGINE_PLATFORM_DIR"; then
@@ -447,6 +487,7 @@ install_note="$META_DIR/${DATE_TAG}-${ARCH_TAG}-install.txt"
 checksum_file="$META_DIR/${DATE_TAG}-${ARCH_TAG}-sha256.txt"
 write_windows_install_note \
   "$has_with_katago_assets" \
+  "$has_opencl_katago_assets" \
   "$has_nvidia_katago_assets" \
   "$build_no_engine_installer"
 write_sha256_file "$checksum_file" "${artifacts[@]}" "$install_note"
@@ -456,6 +497,7 @@ ls -lh "${artifacts[@]}"
 echo
 echo "Windows installer version: $WINDOWS_APP_VERSION"
 echo "Windows upgrade UUID: $WINDOWS_UPGRADE_UUID"
+echo "Windows OpenCL upgrade UUID: $WINDOWS_UPGRADE_UUID_OPENCL"
 echo "Windows NVIDIA upgrade UUID: $WINDOWS_UPGRADE_UUID_NVIDIA"
 echo
 echo "Maintainer metadata:"
