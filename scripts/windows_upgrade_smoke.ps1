@@ -83,6 +83,7 @@ function Assert-NoBundledEngineStartupFailure {
     }
 
     $patterns = @(
+        'Got nonfinite for policy sum',
         'Error creating directory',
         'Could not create file',
         'Uncaught exception'

@@ -101,6 +101,8 @@ jobs:
           test -f "$note_file"
           grep -q "Smart Optimize" "$note_file"
           grep -q "first launch should work offline" "$note_file"
+          test -f "dist/windows/input-with-katago/engines/katago/windows-x64/katago.exe"
+          grep -Eq '^Windows bundle: katago-v[0-9.]+-eigen-windows-x64\.zip$' "dist/windows/input-with-katago/engines/katago/VERSION.txt"
           test -f "dist/windows/app-image-with-katago/LizzieYzy Next/LizzieYzy Next.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/LizzieYzy Next NVIDIA.exe"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/katago.exe"

@@ -317,6 +317,7 @@ EOF
     cat >>"$note_file" <<'EOF'
 - The with-katago assets also include bundled KataGo and a default weight.
 - First launch should auto-configure the bundled engine for most users.
+- The regular Windows bundle now uses the official CPU KataGo build by default for better compatibility on mixed Windows hardware.
 - The regular Windows bundle also supports Smart Optimize and can save a better thread setting automatically after benchmarking.
 EOF
   else

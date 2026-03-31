@@ -68,12 +68,19 @@ def load_bundle_metadata() -> dict[str, str]:
             'windows_nvidia_bundle': r'WINDOWS_NVIDIA_ASSET="\$\{WINDOWS_NVIDIA_ASSET:-([^"]+)\}"',
             'model_source': r'PREFERRED_MODEL_NAME="\$\{PREFERRED_MODEL_NAME:-([^"]+)\}"',
         }
+        script_metadata: dict[str, str] = {}
         for key, pattern in pattern_map.items():
-            if metadata[key] != 'Unknown':
-                continue
             match = re.search(pattern, script_text)
             if match:
-                metadata[key] = match.group(1).strip()
+                script_metadata[key] = match.group(1).strip()
+
+        for key in ('katago_version', 'model_source'):
+            if metadata[key] == 'Unknown' and key in script_metadata:
+                metadata[key] = script_metadata[key]
+
+        for key in ('windows_bundle', 'windows_nvidia_bundle'):
+            if key in script_metadata:
+                metadata[key] = script_metadata[key]
 
     katago_version = metadata['katago_version']
     if katago_version != 'Unknown':
@@ -81,7 +88,7 @@ def load_bundle_metadata() -> dict[str, str]:
         metadata['windows_nvidia_bundle'] = metadata['windows_nvidia_bundle'].replace('${KATAGO_TAG}', katago_version)
     if katago_version != 'Unknown':
         if metadata['windows_bundle'] == 'Unknown':
-            metadata['windows_bundle'] = f'katago-{katago_version}-opencl-windows-x64.zip'
+            metadata['windows_bundle'] = f'katago-{katago_version}-eigen-windows-x64.zip'
         if metadata['windows_nvidia_bundle'] == 'Unknown':
             metadata['windows_nvidia_bundle'] = (
                 f'katago-{katago_version}-cuda12.1-cudnn8.9.7-windows-x64.zip'
@@ -184,6 +191,7 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 - 抓谱时直接输入 **野狐昵称**，程序会自动匹配账号并获取最近公开棋谱
 - 主推荐整合包已内置 KataGo `{katago_version}` 和默认权重 `{model_source}`
 - Windows 普通整合包也支持 **智能优化**，可以自动写入更合适的线程设置
+- Windows 普通整合包现在默认使用兼容性更稳的官方 CPU 版 KataGo，减少老显卡 / OpenCL 兼容问题
 - Windows NVIDIA 整合包已内置官方运行库，首启可离线使用
 
 ### 下载建议
@@ -206,6 +214,7 @@ def build_release_notes(asset_map: dict[str, str | None], bundle: dict[str, str]
 - 现在直接输入“野狐昵称”，程序会自动找到账号再抓最近公开棋谱
 - Windows 继续把 `.installer.exe` 放在最前面，普通用户更容易直接开始用
 - Windows 普通整合包也支持智能优化，测速后会自动保存推荐线程数
+- Windows 普通整合包默认改为兼容性更稳的官方 CPU 版 KataGo，老显卡机器更不容易出问题
 - 对有 NVIDIA 独显的 Windows 用户，额外提供官方 CUDA 版 KataGo 的极速整合包，并且把官方运行库一起打进包里
 - macOS 继续提供 Apple Silicon / Intel 两种 `.dmg`
 - 整合包继续内置 KataGo 与默认权重，打开后更快进入分析
@@ -226,6 +235,7 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 - Fox fetch now starts from a **Fox nickname** and resolves the matching account automatically.
 - The recommended bundles include KataGo `{katago_version}` and the default weight `{model_source}`.
 - The regular Windows bundle also supports **Smart Optimize** to benchmark and save a better thread setting automatically.
+- The regular Windows bundle now defaults to the more compatibility-focused official CPU KataGo build, avoiding many old OpenCL GPU issues.
 - The NVIDIA package uses the official KataGo CUDA build `{windows_nvidia_bundle}`.
 - The NVIDIA bundle now includes the official NVIDIA runtime files, so supported PCs can start offline on first launch.
 - First launch tries to prepare the bundled analysis setup automatically.
@@ -242,6 +252,7 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 - 自分のエンジンを使いたい場合は {windows_no_engine_installer_en} または {windows_no_engine_portable_en} を選べます
 - 棋譜取得では **野狐のニックネーム** を入力します。アプリが一致するアカウントを自動で探します
 - 通常の Windows 同梱版でも **Smart Optimize** により、推奨スレッド数を保存しやすくなりました
+- 通常の Windows 同梱版は、古い OpenCL GPU の相性問題を避けやすい公式 CPU 版 KataGo を標準採用しました
 - 初回起動では、内蔵の解析環境を自動で準備する流れを優先します
 - NVIDIA 同梱版は、必要な公式ランタイムも同梱するため、対応 PC なら初回起動をオフラインで始めやすくなりました
 - 主な整合パッケージには KataGo `{katago_version}` と既定の重み `{model_source}` が含まれています
@@ -255,6 +266,7 @@ This maintained release keeps LizzieYzy practical again for normal users: Fox ga
 - 직접 엔진을 쓰고 싶다면 {windows_no_engine_installer_en} 또는 {windows_no_engine_portable_en} 를 고를 수 있습니다
 - 기보를 가져올 때는 **Fox 닉네임** 을 입력하면 앱이 맞는 계정을 자동으로 찾아 줍니다
 - 일반 Windows 통합판도 **Smart Optimize** 로 더 알맞은 스레드 값을 저장할 수 있습니다
+- 일반 Windows 통합판은 오래된 OpenCL GPU 호환 문제를 줄이기 위해 공식 CPU KataGo 빌드를 기본으로 사용합니다
 - 첫 실행에서는 내장 분석 환경을 자동으로 준비하는 흐름을 먼저 시도합니다
 - NVIDIA 통합판은 필요한 공식 런타임도 함께 포함하므로, 지원되는 PC에서는 첫 실행을 오프라인으로 시작하기 쉽습니다
 - 주요 통합 패키지에는 KataGo `{katago_version}` 와 기본 가중치 `{model_source}` 가 포함되어 있습니다

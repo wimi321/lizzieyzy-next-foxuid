@@ -71,6 +71,7 @@ function Assert-NoBundledEngineStartupFailure {
     }
 
     $patterns = @(
+        'Got nonfinite for policy sum',
         'Error creating directory',
         'Could not create file',
         'Uncaught exception'
@@ -88,6 +89,126 @@ function Assert-NoBundledEngineStartupFailure {
                 throw "Bundled KataGo startup log contains '$pattern': $($logFile.FullName)"
             }
         }
+    }
+}
+
+function Get-BundledKataGoProbeAssets {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppExe
+    )
+
+    $appDir = Split-Path -Parent $AppExe
+    $appRoot = Join-Path $appDir "app"
+    if (-not (Test-Path -LiteralPath $appRoot)) {
+        return $null
+    }
+
+    $engineRoot = Join-Path $appRoot "engines\katago"
+    $weightPath = Join-Path $appRoot "weights\default.bin.gz"
+    $configPath = Join-Path $engineRoot "configs\gtp.cfg"
+
+    if (-not (Test-Path -LiteralPath $engineRoot) -or `
+        -not (Test-Path -LiteralPath $weightPath) -or `
+        -not (Test-Path -LiteralPath $configPath)) {
+        return $null
+    }
+
+    $engineCandidates = Get-ChildItem -LiteralPath $engineRoot -Filter "katago.exe" -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName
+    if (-not $engineCandidates) {
+        return $null
+    }
+
+    $engine = $engineCandidates |
+        Where-Object { $_.FullName -notmatch '[\\/]windows-x64-nvidia[\\/]' } |
+        Select-Object -First 1
+    if (-not $engine) {
+        $engine = $engineCandidates | Select-Object -First 1
+    }
+
+    return [pscustomobject]@{
+        EnginePath = $engine.FullName
+        EngineDir = $engine.Directory.FullName
+        WeightPath = $weightPath
+        ConfigPath = $configPath
+    }
+}
+
+function Invoke-BundledKataGoBenchmarkProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppExe,
+
+        [string]$ConfigDir = ""
+    )
+
+    $assets = Get-BundledKataGoProbeAssets -AppExe $AppExe
+    if (-not $assets) {
+        throw "Bundled KataGo probe assets were not found under $AppExe"
+    }
+
+    $probeHome = if ($ConfigDir -and $ConfigDir.Trim()) {
+        Join-Path $ConfigDir "runtime\katago-home-smoke"
+    }
+    elseif ($env:TEMP) {
+        Join-Path $env:TEMP "LizzieYzyNext\katago-home-smoke"
+    }
+    else {
+        Join-Path $assets.EngineDir "katago-home-smoke"
+    }
+
+    New-Item -ItemType Directory -Force -Path $probeHome | Out-Null
+
+    $arguments = @(
+        "benchmark",
+        "-config", $assets.ConfigPath,
+        "-model", $assets.WeightPath,
+        "-n", "1",
+        "-v", "32",
+        "-time", "1",
+        "-override-config", "homeDataDir=$probeHome,logToStderr=false,logAllGTPCommunication=false,logSearchInfo=false"
+    )
+
+    $originalPath = $env:PATH
+    try {
+        $env:PATH = "$($assets.EngineDir);$originalPath"
+        Push-Location $assets.EngineDir
+        Write-Host "Running bundled KataGo benchmark probe: $($assets.EnginePath)"
+        $output = & $assets.EnginePath @arguments 2>&1
+        $exitCode = $LASTEXITCODE
+        $joined = (($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine)
+        if ($joined) {
+            Write-Host $joined
+        }
+
+        $patterns = @(
+            'Got nonfinite for policy sum',
+            'Error creating directory',
+            'Could not create file',
+            'Uncaught exception'
+        )
+        foreach ($pattern in $patterns) {
+            if ($joined -match [regex]::Escape($pattern)) {
+                throw "Bundled KataGo benchmark probe output contains '$pattern'"
+            }
+        }
+
+        if ($exitCode -ne 0) {
+            throw "Bundled KataGo benchmark probe exited with code $exitCode"
+        }
+
+        if (-not $joined -or $joined -notmatch 'numSearchThreads|KataGo v') {
+            throw "Bundled KataGo benchmark probe did not produce the expected benchmark output."
+        }
+    }
+    finally {
+        try {
+            Pop-Location
+        }
+        catch {
+        }
+        $env:PATH = $originalPath
     }
 }
 
@@ -147,6 +268,7 @@ try {
                 Start-Sleep -Seconds 2
                 Assert-NoBundledEngineStartupFailure -RuntimeLogDir $requiredRuntimeLogDir
             }
+            Invoke-BundledKataGoBenchmarkProbe -AppExe $AppExe -ConfigDir $activeConfigDir
             if ($hasRuntimeLogs) {
                 Write-Host "Smoke test passed. Config files and bundled KataGo runtime logs were created."
             }
