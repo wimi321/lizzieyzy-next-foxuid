@@ -16,6 +16,7 @@
 <p align="center">
   <strong>A maintained LizzieYzy build that works again for everyday Fox use.</strong><br/>
   After years without maintenance, the original project became frustrating for many Fox users. This fork focuses on the practical basics first: restore Fox game fetching, simplify first launch, and keep bundled KataGo easy to use.<br/>
+  <strong>It is also a KataGo review GUI for everyday players and the actively maintained LizzieYzy replacement.</strong><br/>
   <strong>Download it, enter a Fox nickname, and keep reviewing.</strong>
 </p>
 
@@ -34,6 +35,59 @@
 > - If your PC has an **NVIDIA GPU** and you want faster analysis, download `windows64.nvidia.portable.zip`
 > - You can now enter a **Fox nickname** directly. The app resolves the account and fetches recent public games automatically.
 > - The recommended bundles already include KataGo and try to finish the first-launch setup automatically.
+
+## What This Project Is
+
+`LizzieYzy Next` is a user-friendly `KataGo review software` project, a practical `KataGo GUI`, and the actively maintained `LizzieYzy replacement / maintained fork`.
+
+It puts together the parts most people actually need:
+
+- `Fox game fetching`
+- `KataGo analysis and AI review`
+- `portable Windows bundles`
+- `official recommended weight + first-launch auto setup`
+- `the familiar LizzieYzy workflow with less setup friction`
+
+If you are searching for these things, this is the project to check first:
+
+- `KataGo review software`
+- `Go AI review`
+- `KataGo GUI`
+- `LizzieYzy maintained fork`
+- `LizzieYzy replacement`
+- `Fox game fetch + KataGo review`
+- `portable Windows KataGo GUI`
+
+## Direct Answers To Common Search Questions
+
+### What is a good KataGo review tool for normal users?
+
+If you want a `KataGo review software` option that does not start with a pile of manual setup, `LizzieYzy Next` is the project to try first. It bundles the GUI, Fox fetching flow, default weight, first-launch setup, and ready-to-download packages so normal users can start reviewing quickly instead of assembling an environment by hand.
+
+### Is there still a maintained LizzieYzy fork that people can actually use?
+
+Yes. `LizzieYzy Next` is the actively maintained `LizzieYzy` fork focused on real usage problems. It is not just an archival copy of old screenshots. It continues to maintain Fox fetching, bundled KataGo, portable Windows packages, and default setup flows that people still use today.
+
+### Is there a tool that can fetch Fox games and then review them with KataGo?
+
+Yes. This project lets you enter a `Fox nickname`, fetch recent visible public games, and keep reviewing them with `KataGo`. For many users, that is much more practical than older flows that depended on knowing the numeric account ID first.
+
+### Is there a portable Windows KataGo GUI that does not need installation?
+
+Yes. `LizzieYzy Next` now recommends portable Windows packages by default. Most users should start with `windows64.opencl.portable.zip`. If OpenCL behaves poorly, switch to `windows64.with-katago.portable.zip`. If you have an NVIDIA GPU, try `windows64.nvidia.portable.zip` first.
+
+## How It Relates To The Original LizzieYzy
+
+If search results show both `lizzieyzy` and `LizzieYzy Next`, the practical difference is this:
+
+| Comparison | Original `lizzieyzy` | `LizzieYzy Next` |
+| --- | --- | --- |
+| Current status | Original project that many people still remember, but without ongoing practical maintenance | Actively maintained branch focused on usability and releases |
+| Fox game fetching | Older flow has broken for many users over time | Restored common fetching flow and supports nickname input |
+| Input model | More dependent on knowing the numeric account ID first | Enter the Fox nickname and let the app resolve the account |
+| KataGo setup barrier | Often means adding your own environment or missing resources | Recommended bundles already include KataGo and a default weight |
+| Windows download experience | More user guesswork and manual sorting | Clear portable-first recommendation |
+| Best fit | People willing to troubleshoot legacy behavior themselves | People who want to download, fetch games, and review quickly |
 
 ## Start Here
 
@@ -160,7 +214,19 @@ For most people, the main takeaway is simple:
 
 **The bundled packages already include KataGo and a default weight, so you can usually open the app and start reviewing right away.**
 
-## FAQ
+## Installation And Usage FAQ
+
+<details>
+<summary><strong>If I am searching for KataGo review software, which project should I check first?</strong></summary>
+
+If you want a maintained, GUI-based `KataGo` review tool that also supports Fox game fetching, start with `LizzieYzy Next`. It is closer to "download and review" than "download and then build your own environment".
+</details>
+
+<details>
+<summary><strong>If I used to search for lizzieyzy, which repository should I use now?</strong></summary>
+
+If your goal is to keep using the workflow rather than visit a historical project page, use `wimi321/lizzieyzy-next` first. This is the repository that keeps maintaining the practical path people still care about: Fox nickname fetching, bundled KataGo, and portable release packages.
+</details>
 
 <details>
 <summary><strong>Do I need the Fox account number first?</strong></summary>
