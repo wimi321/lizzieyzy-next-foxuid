@@ -104,6 +104,14 @@ public class ReadBoard {
       }
       List<String> jvmArgs = new ArrayList<String>();
       jvmArgs.add("-Dsun.java2d.uiScale=1.0");
+      if (Lizzie.javaVersion >= 17) {
+        jvmArgs.add("--add-opens");
+        jvmArgs.add("java.desktop/sun.awt=ALL-UNNAMED");
+        jvmArgs.add("--add-opens");
+        jvmArgs.add("java.desktop/java.awt=ALL-UNNAMED");
+        jvmArgs.add("--add-opens");
+        jvmArgs.add("java.base/java.lang=ALL-UNNAMED");
+      }
       List<String> appArgs = new ArrayList<String>();
       appArgs.add(Lizzie.resourceBundle.getString("ReadBoard.language"));
       appArgs.add(Lizzie.config.useJavaLooks ? "true" : "false");

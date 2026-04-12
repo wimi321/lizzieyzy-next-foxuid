@@ -671,7 +671,8 @@ public class Config {
   public int openingEndMove = 60;
   public int middleEndMove = 160;
 
-  public boolean checkRandomVisits = false;;
+  public boolean checkRandomVisits = false;
+  ;
   public double percentsRandomVisits = 10;
 
   public int suggestionColorRatio = 2;
@@ -2399,6 +2400,7 @@ public class Config {
     uiConfig.put("show-next-moves", showNextMoves);
     Lizzie.frame.refresh();
   }
+
   // public void toggleHandicapInsteadOfWinrate() {
   // this.handicapInsteadOfWinrate = !this.handicapInsteadOfWinrate;
   // }

@@ -41,7 +41,8 @@ import javax.swing.table.TableModel;
 import org.json.JSONArray;
 
 public class AnalysisFrame extends JFrame {
-  private final ResourceBundle resourceBundle = Lizzie.resourceBundle;;
+  private final ResourceBundle resourceBundle = Lizzie.resourceBundle;
+  ;
   TableModel dataModel;
   JScrollPane scrollpane;
   JPanel topPanel;

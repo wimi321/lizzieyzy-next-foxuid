@@ -116,8 +116,11 @@ public class GIBParser {
     gameInfo.setPlayerBlack(blackPlayer);
     gameInfo.setPlayerWhite(whitePlayer);
     // Rewind to game start
-    while (Lizzie.board.previousMove(false)) ;
-    if (Lizzie.config.loadSgfLast) while (Lizzie.board.nextMove(false)) ;
+    while (Lizzie.board.previousMove(false))
+      ;
+    if (Lizzie.config.loadSgfLast)
+      while (Lizzie.board.nextMove(false))
+        ;
     Lizzie.board.clearAfterMove();
     Lizzie.frame.refresh();
     Lizzie.config.playSound = oriPlaySound;

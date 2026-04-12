@@ -93,10 +93,17 @@ public class Lizzie {
     // -Dsun.java2d.uiScale=1.0
     javaVersionString = System.getProperty("java.version");
     try {
-      javaVersion =
-          Math.max(
-              8, Integer.parseInt(javaVersionString.substring(0, javaVersionString.indexOf('.'))));
+      int majorVersion;
+      if (javaVersionString.startsWith("1.")) {
+        majorVersion =
+            Integer.parseInt(javaVersionString.substring(2, javaVersionString.indexOf('.', 2)));
+      } else {
+        majorVersion =
+            Integer.parseInt(javaVersionString.substring(0, javaVersionString.indexOf('.')));
+      }
+      javaVersion = Math.max(8, majorVersion);
     } catch (Exception e) {
+      javaVersion = 8;
     }
     System.out.println("java version:" + javaVersionString);
     installApplicationIcon();

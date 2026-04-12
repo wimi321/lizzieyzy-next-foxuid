@@ -3524,7 +3524,8 @@ public class LizzieFrame extends JFrame {
       File file2 = new File("save" + File.separator + "autoGame2.sgf");
       if (file2.exists()) loadFile(file2, true, true);
     }
-    while (Lizzie.board.nextMove(false)) ;
+    while (Lizzie.board.nextMove(false))
+      ;
     Lizzie.board.clearAfterMove();
     refresh();
   }
@@ -5306,6 +5307,7 @@ public class LizzieFrame extends JFrame {
   }
 
   public GaussianFilter filter20 = new GaussianFilter(Lizzie.config.backgroundFilter);
+
   // private GaussianFilter filter10 = new GaussianFilter(10);
 
   /** Display the controls */
@@ -6941,6 +6943,7 @@ public class LizzieFrame extends JFrame {
       refresh();
     }
   }
+
   /**
    * Create comment cached image
    *
@@ -7954,7 +7957,8 @@ public class LizzieFrame extends JFrame {
             if (reStoreMainListHead.isPass && reStoreMainListHead.previous.isPresent())
               reStoreMainListHead = reStoreMainListHead.previous.get();
           }
-          while (Lizzie.board.previousMove(false)) ;
+          while (Lizzie.board.previousMove(false))
+            ;
           MoveLinkedList listHead =
               Lizzie.board.getMoveLinkedListAfter(
                   Lizzie.board.getHistory().getCurrentHistoryNode());
@@ -7979,7 +7983,8 @@ public class LizzieFrame extends JFrame {
             listHead.needSkip = true;
             Lizzie.board.placeLinkedList(listHead, null, false, -1);
             // 返回原点
-            while (Lizzie.board.previousMove(false)) ;
+            while (Lizzie.board.previousMove(false))
+              ;
             if (reStoreMainListHead != null)
               Lizzie.board.placeLinkedListReverse(reStoreMainListHead);
           }
@@ -9507,7 +9512,8 @@ public class LizzieFrame extends JFrame {
   }
 
   public void setAsMain() {
-    while (Lizzie.board.setAsMainBranch()) ;
+    while (Lizzie.board.setAsMainBranch())
+      ;
     renderVarTree(0, 0, false, false);
     refresh();
   }

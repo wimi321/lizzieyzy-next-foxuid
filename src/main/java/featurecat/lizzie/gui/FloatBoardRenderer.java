@@ -174,6 +174,7 @@ public class FloatBoardRenderer {
     if (Lizzie.leelaz != null) return Lizzie.leelaz.getInterval();
     else return Lizzie.config.analyzeUpdateIntervalCentisec;
   }
+
   /**
    * Return the best move of Leelaz's suggestions
    *
@@ -2256,6 +2257,7 @@ public class FloatBoardRenderer {
   private int cachedR;
   private int cachedShadowSize;
   private int cachedStoneCenter;
+
   // public float factor;
 
   private void drawShadowCache() {
@@ -2518,7 +2520,9 @@ public class FloatBoardRenderer {
     drawString(g, x, y, fontBase, Font.BOLD, string, maximumFontHeight, maximumFontWidth, 0);
   }
 
-  /** @return a font with kerning enabled */
+  /**
+   * @return a font with kerning enabled
+   */
   private Font makeFont(Font fontBase, int style) {
     Font font = fontBase.deriveFont(style, 100);
     Map<TextAttribute, Object> atts = new HashMap<>();

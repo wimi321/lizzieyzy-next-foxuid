@@ -513,6 +513,7 @@ public class BoardRenderer {
     if (Lizzie.leelaz != null) return Lizzie.leelaz.getInterval();
     else return Lizzie.config.analyzeUpdateIntervalCentisec;
   }
+
   /**
    * Return the best move of Leelaz's suggestions
    *
@@ -777,6 +778,7 @@ public class BoardRenderer {
     cachedWhiteStoneImage = emptyImage;
     cachedIsBigMargin = !cachedIsBigMargin;
   }
+
   /**
    * Draw the green background and go board with lines. We cache the image for a performance boost.
    */
@@ -1805,6 +1807,7 @@ public class BoardRenderer {
     g.drawImage(cachedStonesImage, x, y, null);
     g.drawImage(branchStonesImage, x, y, null);
   }
+
   /** Render the shadows and stones in correct background-foreground order */
   private void renderImages(Graphics2D g) {
     g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_OFF);
@@ -4187,7 +4190,9 @@ public class BoardRenderer {
     drawString(g, x, y, fontBase, Font.BOLD, string, maximumFontHeight, maximumFontWidth, 0);
   }
 
-  /** @return a font with kerning enabled */
+  /**
+   * @return a font with kerning enabled
+   */
   private Font makeFont(Font fontBase, int style) {
     Font font = fontBase.deriveFont(style, 100);
     Map<TextAttribute, Object> atts = new HashMap<>();

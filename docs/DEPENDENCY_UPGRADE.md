@@ -104,61 +104,91 @@
 
 ---
 
-## 阶段四：Java版本升级（待规划）
+## 阶段四：Java版本升级 ✅ 已完成
 
-### 当前状态
-- **当前版本**: Java 8
+### 升级结果
+- **原版本**: Java 8
+- **新版本**: Java 17 LTS
 - **Java 8 商业支持结束**: 2025年1月14日
 
-### 推荐升级路径
-- **首选**: Java 17 LTS
-- **可选**: Java 21 LTS
+### 兼容性分析结果
 
-### 升级前置条件
+#### ✅ 代码兼容性 - 良好
 
-1. **fmt-maven-plugin升级**
-   - 当前版本2.5.1不支持Java 11+
-   - 需要升级到2.13+版本
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| `sun.*` 内部API | ✅ 无问题 | 仅在注释和JVM参数中使用 |
+| `javax.xml.bind` | ✅ 无问题 | 未使用 |
+| `SecurityManager` | ✅ 无问题 | 未使用 |
+| `URLClassLoader` 强转 | ✅ 无问题 | 未使用 |
+| 反射访问私有字段 | ✅ 无问题 | 未使用 |
+| 已移除API | ✅ 无问题 | 未使用 |
 
-2. **代码兼容性检查**
-   - 使用 `jdeps` 工具分析依赖
-   - 检查内部API使用情况
-   - 评估第三方库兼容性
+#### 依赖兼容性
 
-3. **可能需要的JVM参数**
-```
---add-opens java.base/java.lang=ALL-UNNAMED
---add-opens java.desktop/java.awt=ALL-UNNAMED
-```
+| 依赖 | 版本 | Java 17 兼容性 | 说明 |
+|------|------|----------------|------|
+| `jcefmaven` | 127.3.1 | ✅ 支持 | 需要添加JVM参数 |
+| `fmt-maven-plugin` | 2.29 (Spotify) | ✅ 支持 | 从 com.coveo 迁移到 com.spotify.fmt |
+| `socket.io-client` | 1.0.0 | ✅ 支持 | 无问题 |
+| `ganymed-ssh2` | 262 | ✅ 支持 | 无问题 |
+| `Java-WebSocket` | 1.6.0 | ✅ 支持 | 无问题 |
 
-### Java升级步骤
+### 已执行的变更
 
-1. **准备阶段**
-   - 运行 `jdeps --jdk-internals` 分析代码
-   - 检查所有依赖的Java 17兼容性
-   - 创建测试分支
+#### 1. pom.xml 编译配置更新
 
-2. **编译配置更新**
 ```xml
-<plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-compiler-plugin</artifactId>
-    <version>3.13.0</version>
-    <configuration>
-        <source>17</source>
-        <target>17</target>
-    </configuration>
-</plugin>
+<source>17</source>
+<target>17</target>
 ```
 
-3. **fmt-maven-plugin升级**
-```xml
-<plugin>
-    <groupId>com.coveo</groupId>
-    <artifactId>fmt-maven-plugin</artifactId>
-    <version>2.13</version>
-</plugin>
+#### 2. fmt-maven-plugin 迁移
+
+从 `com.coveo:fmt-maven-plugin:2.5.1` 迁移到 `com.spotify.fmt:fmt-maven-plugin:2.29`
+
+原因：com.coveo 版本 2.13 在 Java 17 上因模块访问限制无法运行（`jdk.compiler` 不导出 `com.sun.tools.javac.parser`），Spotify 维护的版本 2.29 使用 fork 模式运行 google-java-format，原生支持 Java 17。
+
+#### 3. Java 版本解析修复
+
+[Lizzie.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/Lizzie.java) 中的版本解析逻辑已更新，支持 Java 9+ 的新版本号格式（如 `17.0.1` 而非 `1.8.0_xxx`）。
+
+#### 4. JVM 启动参数添加
+
+在 [CaptureTsumeGo.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/analysis/CaptureTsumeGo.java) 和 [ReadBoard.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/analysis/ReadBoard.java) 中添加了条件性 JVM 参数：
+
+```java
+if (Lizzie.javaVersion >= 17) {
+    jvmArgs.add("--add-opens");
+    jvmArgs.add("java.desktop/sun.awt=ALL-UNNAMED");
+    jvmArgs.add("--add-opens");
+    jvmArgs.add("java.desktop/java.awt=ALL-UNNAMED");
+    jvmArgs.add("--add-opens");
+    jvmArgs.add("java.base/java.lang=ALL-UNNAMED");
+}
 ```
+
+### 应用启动要求
+
+使用 JDK 17 运行应用时，需要添加以下 JVM 参数：
+
+```bash
+java --add-opens java.desktop/sun.awt=ALL-UNNAMED \
+     --add-opens java.desktop/java.awt=ALL-UNNAMED \
+     --add-opens java.base/java.lang=ALL-UNNAMED \
+     -jar lizzie-yzy2.5.3-shaded.jar
+```
+
+### 验证结果
+
+- [x] 使用 JDK 17 编译成功
+- [x] 使用 JDK 17 打包成功
+- [ ] 应用启动正常（需手动验证）
+- [ ] JCEF 浏览器功能正常（需手动验证）
+- [ ] 所有 GUI 功能正常（需手动验证）
+- [ ] WebSocket 连接正常（需手动验证）
+- [ ] SSH 连接正常（需手动验证）
+- [ ] 跨平台测试 (Windows/macOS/Linux)（需手动验证）
 
 ---
 

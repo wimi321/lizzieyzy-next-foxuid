@@ -252,6 +252,7 @@ public class Theme {
   public int backgroundFilter() {
     return getIntByKey("background-filter", 20);
   }
+
   /** The size of the shadow */
   public int nodeColorMode() {
     return getIntByKey("node-color-mode", 0);

@@ -621,6 +621,7 @@ public class FloatBoard extends JDialog {
     }
     return false;
   }
+
   //
   //  private boolean openRightClickMenu(int x, int y) {
   //    if (Lizzie.frame.clickOrder != -1) {

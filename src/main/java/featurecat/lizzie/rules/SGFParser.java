@@ -41,6 +41,7 @@ public class SGFParser {
   private static boolean islz2loaded = false;
 
   private static boolean isExtraMode2 = false;
+
   // static boolean oriEmpty = false;
 
   public static boolean load(String filename, boolean showHint) throws IOException {
@@ -88,7 +89,9 @@ public class SGFParser {
     SwingUtilities.invokeLater(
         new Runnable() {
           public void run() {
-            if (Lizzie.config.loadSgfLast) while (Lizzie.board.nextMove(false)) ;
+            if (Lizzie.config.loadSgfLast)
+              while (Lizzie.board.nextMove(false))
+                ;
             Lizzie.board.clearAfterMove();
             if (isExtraMode2
                 && !Lizzie.config.isDoubleEngineMode()
@@ -116,7 +119,9 @@ public class SGFParser {
     isExtraMode2 = false;
     Lizzie.board.isLoadingFile = true;
     boolean result = parse(sgfString);
-    if (Lizzie.config.loadSgfLast) while (Lizzie.board.nextMove(false)) ;
+    if (Lizzie.config.loadSgfLast)
+      while (Lizzie.board.nextMove(false))
+        ;
     if (Lizzie.board.hasStartStone) {
       int lenth2 = Lizzie.board.startStonelist.size();
       for (int i = 0; i < lenth2; i++) {
@@ -826,7 +831,8 @@ public class SGFParser {
     gameInfo.setPlayerWhite(whitePlayer);
     gameInfo.setResult(result);
     // Rewind to game start
-    while (Lizzie.board.previousMove(false)) ;
+    while (Lizzie.board.previousMove(false))
+      ;
     // Set AW/AB Comment
     if (!headComment.isEmpty()) {
       Lizzie.board.comment(headComment);
@@ -1006,6 +1012,7 @@ public class SGFParser {
       else startNode.getData().comment += "\n" + infoString;
     }
   }
+
   //
   //  public static void appendTimeAndPlayouts() {
   //    appendGameTime();
@@ -1426,6 +1433,7 @@ public class SGFParser {
                 + Lizzie.resourceBundle.getString("SGFParse.seconds");
     }
   }
+
   //
   //  public static void appendCommentForPk() {
   //	  appendComment();
@@ -3138,7 +3146,8 @@ public class SGFParser {
       }
 
       // Rewind to game start
-      while (history.previous().isPresent()) ;
+      while (history.previous().isPresent())
+        ;
 
       // Set AW/AB Comment
       if (!headComment.isEmpty()) {

@@ -227,6 +227,7 @@ public class Leelaz {
   private boolean endGetCommandList = false;
   private int currentTotalPlayouts;
   public boolean supportMovesOwnership = false;
+
   // private int refreshNumber=0;
   // private boolean isEstimating=true;
   /**
@@ -2559,6 +2560,7 @@ public class Leelaz {
       } else this.pda = pdaBeforeGame;
     }
   }
+
   /**
    * Sends a command to command queue for leelaz to execute
    *

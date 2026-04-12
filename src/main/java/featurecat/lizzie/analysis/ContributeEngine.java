@@ -197,6 +197,7 @@ public class ContributeEngine {
     isNormalEnd = false;
     setTip(Lizzie.resourceBundle.getString("ContributeView.lblTip"));
   }
+
   // }
 
   private void readError() {
