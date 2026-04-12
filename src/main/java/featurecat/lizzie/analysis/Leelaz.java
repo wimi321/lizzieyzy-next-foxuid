@@ -65,6 +65,8 @@ public class Leelaz {
   private BufferedReader inputStream;
   private BufferedOutputStream outputStream;
   private BufferedReader errorStream;
+  private final ArrayDeque<String> recentStdoutLines = new ArrayDeque<String>();
+  private final ArrayDeque<String> recentStderrLines = new ArrayDeque<String>();
 
   // public Board board;
   private List<MoveData> bestMoves;
@@ -135,6 +137,7 @@ public class Leelaz {
   public boolean autoAnalysed = false;
   private static final long BUNDLED_ENGINE_START_TIMEOUT_MS = 90000L;
   private static final long NVIDIA_ENGINE_START_TIMEOUT_MS = 180000L;
+  private static final int ENGINE_DIAGNOSTIC_TAIL_LINES = 40;
   //	private boolean isSaving = false;
   public boolean isResigning = false;
   //	public boolean isClosingAutoAna = false;
@@ -2047,6 +2050,7 @@ public class Leelaz {
     String line = "";
     try {
       while ((line = errorStream.readLine()) != null) {
+        rememberRecentLine(recentStderrLines, line);
         try {
           parseLineForError(line);
         } catch (Exception e) {
@@ -2408,6 +2412,7 @@ public class Leelaz {
     try {
       String line = "";
       while ((line = inputStream.readLine()) != null) {
+        rememberRecentLine(recentStdoutLines, line);
         if (getRcentLine) {
           if (line.startsWith("= {")) {
             recentRulesLine = line;
@@ -2525,7 +2530,9 @@ public class Leelaz {
       started = false;
       isDownWithError = true;
       // isLoaded=false;
-      tryToDignostic(Lizzie.resourceBundle.getString("Leelaz.engineEndUnormalHint"), false);
+      tryToDignostic(
+          buildEngineExitDiagnostic(Lizzie.resourceBundle.getString("Leelaz.engineEndUnormalHint")),
+          false);
       // ("打开Gtp窗口(快捷键E)查看报错信息");
       // LizzieFrame.openMoreEngineDialog();
     }
@@ -2742,7 +2749,13 @@ public class Leelaz {
         outputStream.write((command + "\n").getBytes());
         outputStream.flush();
       } catch (Exception e) {
-        //  e.printStackTrace();
+        String detail = e.getLocalizedMessage();
+        if (detail == null || detail.trim().isEmpty()) {
+          detail = e.getClass().getSimpleName();
+        }
+        rememberRecentLine(
+            recentStderrLines, "Failed to send GTP command '" + command + "': " + detail);
+        System.err.println("Failed to send GTP command '" + command + "': " + detail);
       }
       if (EngineManager.isEngineGame()) {
         Lizzie.gtpConsole.addCommandForEngineGame(
@@ -2758,6 +2771,65 @@ public class Leelaz {
       canSetNotPlayed = false;
       played = false;
     }
+  }
+
+  private void rememberRecentLine(ArrayDeque<String> lines, String line) {
+    if (lines == null || line == null) {
+      return;
+    }
+    synchronized (lines) {
+      while (lines.size() >= ENGINE_DIAGNOSTIC_TAIL_LINES) {
+        lines.removeFirst();
+      }
+      lines.addLast(line);
+    }
+  }
+
+  private String buildEngineExitDiagnostic(String baseMessage) {
+    StringBuilder builder = new StringBuilder(baseMessage == null ? "" : baseMessage);
+    appendExitCode(builder);
+    appendRecentLines(builder, "Recent stderr", recentStderrLines);
+    appendRecentLines(builder, "Recent stdout", recentStdoutLines);
+    return builder.toString();
+  }
+
+  private void appendExitCode(StringBuilder builder) {
+    if (builder == null || process == null) {
+      return;
+    }
+    try {
+      int exitCode = process.exitValue();
+      builder.append("\nExit code: ").append(exitCode);
+    } catch (IllegalThreadStateException e) {
+    }
+  }
+
+  private void appendRecentLines(
+      StringBuilder builder, String title, ArrayDeque<String> recentLines) {
+    if (builder == null || recentLines == null) {
+      return;
+    }
+    String tail = snapshotRecentLines(recentLines);
+    if (tail.isEmpty()) {
+      return;
+    }
+    builder.append("\n").append(title).append(":\n").append(tail);
+  }
+
+  private String snapshotRecentLines(ArrayDeque<String> lines) {
+    StringBuilder builder = new StringBuilder();
+    synchronized (lines) {
+      for (String line : lines) {
+        if (line == null || line.trim().isEmpty()) {
+          continue;
+        }
+        if (builder.length() > 0) {
+          builder.append('\n');
+        }
+        builder.append(line);
+      }
+    }
+    return builder.toString();
   }
 
   /** Check whether leelaz is responding to the last command */
