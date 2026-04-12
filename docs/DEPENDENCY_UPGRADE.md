@@ -9,7 +9,7 @@
 | 阶段一：安全修复 | ✅ 已完成 | 2026-04-12 |
 | 阶段二：Maven插件升级 | ✅ 已完成 | 2026-04-12 |
 | 阶段三：核心依赖升级 | ✅ 已完成 | 2026-04-12 |
-| 阶段四：Java版本升级 | 📋 待规划 | - |
+| 阶段四：Java版本升级 | ✅ 已完成 | 2026-04-12 |
 
 ---
 
@@ -47,11 +47,11 @@
 | `maven-shade-plugin` | 3.1.0 | **3.6.2** | 增强稳定性，修复安全问题 |
 | `maven-surefire-plugin` | 2.9 | **3.5.2** | 测试框架更新 |
 
-### 未升级的插件
+### 阶段二未升级、阶段四已完成迁移的插件
 
 | 插件 | 当前版本 | 最新版本 | 原因 |
 |------|----------|----------|------|
-| `fmt-maven-plugin` | 2.5.1 | 2.13 | 需要Java 11+，当前项目使用Java 8 |
+| `fmt-maven-plugin` | 2.5.1 | 2.29 | 阶段二暂缓，已在阶段四随 Java 17 升级迁移到 `com.spotify.fmt:fmt-maven-plugin:2.29` |
 
 ---
 
@@ -151,11 +151,11 @@
 
 #### 3. Java 版本解析修复
 
-[Lizzie.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/Lizzie.java) 中的版本解析逻辑已更新，支持 Java 9+ 的新版本号格式（如 `17.0.1` 而非 `1.8.0_xxx`）。
+[Lizzie.java](../src/main/java/featurecat/lizzie/Lizzie.java) 中的版本解析逻辑已更新，支持 Java 9+ 的新版本号格式（如 `17.0.1` 而非 `1.8.0_xxx`）。
 
 #### 4. JVM 启动参数添加
 
-在 [CaptureTsumeGo.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/analysis/CaptureTsumeGo.java) 和 [ReadBoard.java](file:///e:/project/lizzieyzy-next/src/main/java/featurecat/lizzie/analysis/ReadBoard.java) 中添加了条件性 JVM 参数：
+在 [CaptureTsumeGo.java](../src/main/java/featurecat/lizzie/analysis/CaptureTsumeGo.java) 和 [ReadBoard.java](../src/main/java/featurecat/lizzie/analysis/ReadBoard.java) 中添加了条件性 JVM 参数：
 
 ```java
 if (Lizzie.javaVersion >= 17) {

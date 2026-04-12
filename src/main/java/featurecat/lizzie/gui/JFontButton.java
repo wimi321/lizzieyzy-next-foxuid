@@ -15,6 +15,8 @@ public class JFontButton extends JButton {
   private static final Color DEFAULT_BG = MorandiPalette.TOOLBAR_BUTTON_BG;
   private static final Color HOVER_BG = MorandiPalette.TOOLBAR_BUTTON_HOVER;
   private static final Color PRESSED_BG = MorandiPalette.TOOLBAR_BUTTON_PRESSED;
+  private Color normalBackground = DEFAULT_BG;
+  private boolean internalBackgroundChange = false;
 
   public JFontButton() {
     super();
@@ -49,30 +51,47 @@ public class JFontButton extends JButton {
           @Override
           public void mouseEntered(MouseEvent e) {
             if (isEnabled()) {
-              setBackground(HOVER_BG);
+              setInteractionBackground(HOVER_BG);
             }
           }
 
           @Override
           public void mouseExited(MouseEvent e) {
-            setBackground(DEFAULT_BG);
+            setInteractionBackground(normalBackground);
           }
 
           @Override
           public void mousePressed(MouseEvent e) {
             if (isEnabled()) {
-              setBackground(PRESSED_BG);
+              setInteractionBackground(PRESSED_BG);
             }
           }
 
           @Override
           public void mouseReleased(MouseEvent e) {
             if (getModel().isRollover()) {
-              setBackground(HOVER_BG);
+              setInteractionBackground(HOVER_BG);
             } else {
-              setBackground(DEFAULT_BG);
+              setInteractionBackground(normalBackground);
             }
           }
         });
+  }
+
+  @Override
+  public void setBackground(Color bg) {
+    super.setBackground(bg);
+    if (!internalBackgroundChange && bg != null) {
+      normalBackground = bg;
+    }
+  }
+
+  private void setInteractionBackground(Color bg) {
+    internalBackgroundChange = true;
+    try {
+      super.setBackground(bg);
+    } finally {
+      internalBackgroundChange = false;
+    }
   }
 }
