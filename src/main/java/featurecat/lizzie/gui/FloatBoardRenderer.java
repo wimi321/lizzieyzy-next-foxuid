@@ -29,7 +29,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.ResourceBundle;
-import java.util.concurrent.CountDownLatch;
 
 public class FloatBoardRenderer {
   // Percentage of the boardLength to offset before drawing black lines
@@ -3122,34 +3121,15 @@ public class FloatBoardRenderer {
       g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_ON);
       gShadow.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_ON);
       drawShadowCache();
-      if (Lizzie.config.usePureStone) {
-        for (int i = 0; i < Board.boardWidth; i++) {
-          for (int j = 0; j < Board.boardHeight; j++) {
-            int stoneX = scaledMarginWidth + squareWidth * i;
-            int stoneY = scaledMarginHeight + squareHeight * j;
+      for (int i = 0; i < Board.boardWidth; i++) {
+        for (int j = 0; j < Board.boardHeight; j++) {
+          int stoneX = scaledMarginWidth + squareWidth * i;
+          int stoneY = scaledMarginHeight + squareHeight * j;
+          if (Lizzie.config.usePureStone) {
             drawStoneSimple(g, gShadow, stoneX, stoneY, stones[Board.getIndex(i, j)]);
+          } else {
+            drawStone(g, gShadow, stoneX, stoneY, stones[Board.getIndex(i, j)]);
           }
-        }
-      } else {
-        final CountDownLatch latch = new CountDownLatch(Board.boardWidth);
-        for (int i = 0; i < Board.boardWidth; i++) {
-          final Integer threadI = i;
-          new Thread() {
-            public void run() {
-              for (int j = 0; j < Board.boardHeight; j++) {
-                int stoneX = scaledMarginWidth + squareWidth * threadI;
-                int stoneY = scaledMarginHeight + squareHeight * j;
-                drawStone(g, gShadow, stoneX, stoneY, stones[Board.getIndex(threadI, j)]);
-              }
-              latch.countDown();
-            }
-          }.start();
-        }
-        try {
-          latch.await();
-        } catch (InterruptedException e) {
-          // TODO Auto-generated catch block
-          e.printStackTrace();
         }
       }
       cachedDisplayedBranchLength = displayedBranchLength;
