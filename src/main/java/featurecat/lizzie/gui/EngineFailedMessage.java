@@ -123,16 +123,11 @@ public class EngineFailedMessage extends JDialog {
                       "@echo " + Lizzie.resourceBundle.getString("EngineFailedMessage.batTips"));
                   bw.newLine();
                 }
-                if (commands != null && commands.size() > 1) {
-                  bw.write(
-                      "\""
-                          + commands.get(0).trim()
-                          + "\""
-                          + " "
-                          + command.substring(command.indexOf(commands.get(1))).trim());
-                } else if (commands.size() == 1) {
-                  bw.write("\"" + commands.get(0).trim() + "\"");
-                } else bw.write(command.trim());
+                if (commands != null && !commands.isEmpty()) {
+                  bw.write(buildCommandLine(commands));
+                } else {
+                  bw.write(command.trim());
+                }
                 if (isGtpEngine) {
                   bw.write(" < test_commands.txt");
                   BufferedWriter bw2 = new BufferedWriter(new FileWriter("test_commands.txt"));
@@ -202,5 +197,30 @@ public class EngineFailedMessage extends JDialog {
     setLocationRelativeTo(Lizzie.frame != null ? Lizzie.frame : null);
     setVisible(true);
     setVisible(false);
+  }
+
+  private String buildCommandLine(List<String> commands) {
+    StringBuilder builder = new StringBuilder();
+    for (int i = 0; i < commands.size(); i++) {
+      if (i > 0) {
+        builder.append(' ');
+      }
+      builder.append(quoteForCmd(commands.get(i)));
+    }
+    return builder.toString();
+  }
+
+  private String quoteForCmd(String token) {
+    if (token == null) {
+      return "\"\"";
+    }
+    String trimmed = token.trim();
+    if (trimmed.isEmpty()) {
+      return "\"\"";
+    }
+    if (trimmed.indexOf(' ') >= 0 || trimmed.indexOf('\t') >= 0 || trimmed.indexOf('"') >= 0) {
+      return "\"" + trimmed.replace("\"", "\\\"") + "\"";
+    }
+    return trimmed;
   }
 }

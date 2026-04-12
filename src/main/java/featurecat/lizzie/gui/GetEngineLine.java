@@ -1,6 +1,7 @@
 package featurecat.lizzie.gui;
 
 import featurecat.lizzie.Lizzie;
+import featurecat.lizzie.util.CommandLaunchHelper;
 import java.awt.Component;
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -215,9 +216,10 @@ public class GetEngineLine {
     List<String> commands = new ArrayList<String>();
     commands.add(enginePath);
     commands.add("-h");
+    CommandLaunchHelper.LaunchSpec launchSpec = CommandLaunchHelper.prepare(commands);
 
-    ProcessBuilder processBuilder = new ProcessBuilder(commands);
-    processBuilder.directory();
+    ProcessBuilder processBuilder = new ProcessBuilder(launchSpec.getCommandParts());
+    CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
     processBuilder.redirectErrorStream(true);
     try {
       Process process = processBuilder.start();

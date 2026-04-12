@@ -9,6 +9,7 @@ import featurecat.lizzie.gui.SetEstimateParam;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.Movelist;
 import featurecat.lizzie.rules.Stone;
+import featurecat.lizzie.util.CommandLaunchHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.Utils;
 import java.io.BufferedOutputStream;
@@ -97,7 +98,9 @@ public class KataEstimate {
   public void startEngine(String engineCommand) {
     currentEnginename = engineCommand;
     // isShuttingdown = false;
-    commands = Utils.splitCommand(engineCommand);
+    CommandLaunchHelper.LaunchSpec launchSpec =
+        CommandLaunchHelper.prepare(Utils.splitCommand(engineCommand));
+    commands = launchSpec.getCommandParts();
 
     if (this.useJavaSSH) {
       this.javaSSH = new EstimateEngineSSHController(this, this.ip, this.port, this.isPreLoad);
@@ -134,6 +137,7 @@ public class KataEstimate {
       List<String> launchCommands =
           KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
       ProcessBuilder processBuilder = new ProcessBuilder(launchCommands);
+      CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
       KataGoRuntimeHelper.configureBundledProcessBuilder(processBuilder, engineExecutable);
       processBuilder.redirectErrorStream(true);
       try {

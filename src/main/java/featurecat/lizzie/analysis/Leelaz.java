@@ -13,6 +13,7 @@ import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.Stone;
+import featurecat.lizzie.util.CommandLaunchHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.Utils;
 import java.awt.Component;
@@ -302,7 +303,9 @@ public class Leelaz {
     currentEngineN = index;
     canRestoreDymPda = false;
     supportMovesOwnership = false;
-    commands = Utils.splitCommand(engineCommand);
+    CommandLaunchHelper.LaunchSpec launchSpec =
+        CommandLaunchHelper.prepare(Utils.splitCommand(engineCommand));
+    commands = launchSpec.getCommandParts();
     pda = 0;
     // Get weight name
     //	Pattern wPattern = Pattern.compile("(?s).*?(--weights |-w |-model )([^'\" ]+)(?s).*");
@@ -385,6 +388,7 @@ public class Leelaz {
       List<String> launchCommands =
           KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
       ProcessBuilder processBuilder = new ProcessBuilder(launchCommands);
+      CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
       KataGoRuntimeHelper.configureBundledProcessBuilder(processBuilder, engineExecutable);
       processBuilder.redirectErrorStream(false);
       try {

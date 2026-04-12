@@ -8,6 +8,7 @@ import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.SGFParser;
 import featurecat.lizzie.rules.Stone;
+import featurecat.lizzie.util.CommandLaunchHelper;
 import featurecat.lizzie.util.Utils;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
@@ -133,7 +134,9 @@ public class ContributeEngine {
         errorTimes = 0;
       }
     }
-    commands = Utils.splitCommand(engineCommand);
+    CommandLaunchHelper.LaunchSpec launchSpec =
+        CommandLaunchHelper.prepare(Utils.splitCommand(engineCommand));
+    commands = launchSpec.getCommandParts();
     if (this.useJavaSSH) {
       this.javaSSH = new ContributeSSHController(this, this.ip, this.port);
       boolean loginStatus = false;
@@ -176,6 +179,7 @@ public class ContributeEngine {
 
       // if (!started) {
       ProcessBuilder processBuilder = new ProcessBuilder(commands);
+      CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
       processBuilder.redirectErrorStream(false);
       try {
         process = processBuilder.start();
