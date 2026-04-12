@@ -7,6 +7,7 @@ import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.MoveData;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardHistoryNode;
+import featurecat.lizzie.theme.MorandiPalette;
 import featurecat.lizzie.util.Utils;
 import java.awt.*;
 import java.awt.event.ActionEvent;
@@ -628,37 +629,75 @@ public class AnalysisFrame extends JFrame {
           if (isSelect) {
             if (diff <= Lizzie.config.winLossThreshold5
                 || scoreDiff <= Lizzie.config.scoreLossThreshold5)
-              setBackground(new Color(85, 25, 80, 120));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_BLUNDER_ALPHA
+                      : new Color(85, 25, 80, 120));
             else if (diff <= Lizzie.config.winLossThreshold4
                 || scoreDiff <= Lizzie.config.scoreLossThreshold4)
-              setBackground(new Color(208, 16, 19, 100));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_MISTAKE_ALPHA
+                      : new Color(208, 16, 19, 100));
             else if (diff <= Lizzie.config.winLossThreshold3
                 || scoreDiff <= Lizzie.config.scoreLossThreshold3)
-              setBackground(new Color(200, 140, 50, 100));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_SLOW_ALPHA
+                      : new Color(200, 140, 50, 100));
             else if (diff <= Lizzie.config.winLossThreshold2
                 || scoreDiff <= Lizzie.config.scoreLossThreshold2)
-              setBackground(new Color(180, 180, 0, 100));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_CAUTION_ALPHA
+                      : new Color(180, 180, 0, 100));
             else if (diff <= Lizzie.config.winLossThreshold1
                 || scoreDiff <= Lizzie.config.scoreLossThreshold1)
-              setBackground(new Color(140, 202, 34, 100));
-            else setBackground(new Color(0, 180, 0, 100));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_GOOD_ALPHA
+                      : new Color(140, 202, 34, 100));
+            else
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_BEST_ALPHA
+                      : new Color(0, 180, 0, 100));
           } else {
             if (diff <= Lizzie.config.winLossThreshold5
                 || scoreDiff <= Lizzie.config.scoreLossThreshold5)
-              setBackground(new Color(85, 25, 80, 70));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_BLUNDER_LIGHT
+                      : new Color(85, 25, 80, 70));
             else if (diff <= Lizzie.config.winLossThreshold4
                 || scoreDiff <= Lizzie.config.scoreLossThreshold4)
-              setBackground(new Color(208, 16, 19, 50));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_MISTAKE_LIGHT
+                      : new Color(208, 16, 19, 50));
             else if (diff <= Lizzie.config.winLossThreshold3
                 || scoreDiff <= Lizzie.config.scoreLossThreshold3)
-              setBackground(new Color(200, 140, 50, 50));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_SLOW_LIGHT
+                      : new Color(200, 140, 50, 50));
             else if (diff <= Lizzie.config.winLossThreshold2
                 || scoreDiff <= Lizzie.config.scoreLossThreshold2)
-              setBackground(new Color(180, 180, 0, 50));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_CAUTION_LIGHT
+                      : new Color(180, 180, 0, 50));
             else if (diff <= Lizzie.config.winLossThreshold1
                 || scoreDiff <= Lizzie.config.scoreLossThreshold1)
-              setBackground(new Color(140, 202, 34, 50));
-            else setBackground(new Color(0, 180, 0, 60));
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_GOOD_LIGHT
+                      : new Color(140, 202, 34, 50));
+            else
+              setBackground(
+                  Lizzie.config.useMorandiColors
+                      ? MorandiPalette.SUGGESTION_BEST_LIGHT
+                      : new Color(0, 180, 0, 60));
           }
         } else if (!isSelect && !isChanged) {
           setForeground(Color.BLACK);

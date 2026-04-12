@@ -98,6 +98,11 @@ public class Config {
   public boolean isShowingWinrateGraph = true;
   public boolean isShowingMoveList = true;
   public int moveListSelectedBranch = 0;
+  public boolean useMorandiColors = true;
+  public int glassEffectLevel = 1;
+  public boolean showStoneHighlight = true;
+  public boolean showBoardLightGradient = true;
+  public boolean showHoverGlow = true;
   // public double matchAiTemperature = 1;
   public boolean showMoveListGraph = true;
   public boolean whiteSuggestionWhite = false;
@@ -1595,6 +1600,11 @@ public class Config {
     moveListTopCurNode = uiConfig.optBoolean("movelist-top-curnode", false);
     showMoveListGraph = uiConfig.optBoolean("show-movelist-graph", true);
     showBlueRing = uiConfig.optBoolean("show-blue-ring", true);
+    useMorandiColors = uiConfig.optBoolean("use-morandi-colors", true);
+    glassEffectLevel = uiConfig.optInt("glass-effect-level", 1);
+    showStoneHighlight = uiConfig.optBoolean("show-stone-highlight", true);
+    showBoardLightGradient = uiConfig.optBoolean("show-board-light-gradient", true);
+    showHoverGlow = uiConfig.optBoolean("show-hover-glow", true);
 
     showEditbar = uiConfig.optBoolean("show-edit-bar", true);
     showForceMenu = uiConfig.optBoolean("show-force-menu", true);

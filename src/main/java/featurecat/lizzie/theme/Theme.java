@@ -426,4 +426,70 @@ public class Theme {
   private int getIntByKey(String key, int defaultValue) {
     return config.optInt(key, uiConfig.optInt(key, defaultValue));
   }
+
+  public Color morandiSuggestionColor(int level) {
+    if (!Lizzie.config.useMorandiColors) {
+      return null;
+    }
+    return MorandiPalette.getSuggestionColor(level);
+  }
+
+  public Color morandiSuggestionAlphaColor(int level) {
+    if (!Lizzie.config.useMorandiColors) {
+      return null;
+    }
+    return MorandiPalette.getSuggestionAlphaColor(level);
+  }
+
+  public Color morandiSuggestionLightColor(int level) {
+    if (!Lizzie.config.useMorandiColors) {
+      return null;
+    }
+    return MorandiPalette.getSuggestionLightColor(level);
+  }
+
+  public Color morandiPanelBackground() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.PANEL_BACKGROUND;
+  }
+
+  public Color morandiPanelBackgroundLight() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.PANEL_BACKGROUND_LIGHT;
+  }
+
+  public Color morandiTableHeader() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.TABLE_HEADER;
+  }
+
+  public Color morandiTableRowEven() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.TABLE_ROW_EVEN;
+  }
+
+  public Color morandiTableRowOdd() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.TABLE_ROW_ODD;
+  }
+
+  public Color morandiTextPrimary() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.TEXT_PRIMARY;
+  }
+
+  public Color morandiTextSecondary() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.TEXT_SECONDARY;
+  }
+
+  public Color morandiControlsOverlay() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.CONTROLS_OVERLAY;
+  }
+
+  public Color morandiControlsBorder() {
+    if (!Lizzie.config.useMorandiColors) return null;
+    return MorandiPalette.CONTROLS_BORDER;
+  }
 }

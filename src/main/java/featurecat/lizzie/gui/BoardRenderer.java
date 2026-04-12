@@ -20,6 +20,7 @@ import featurecat.lizzie.rules.NodeInfo;
 import featurecat.lizzie.rules.SGFParser;
 import featurecat.lizzie.rules.Stone;
 import featurecat.lizzie.rules.Zobrist;
+import featurecat.lizzie.theme.MorandiPalette;
 import featurecat.lizzie.util.Utils;
 import java.awt.*;
 import java.awt.font.FontRenderContext;
@@ -452,23 +453,41 @@ public class BoardRenderer {
     float radiusF = 0.1f;
     if (winrateDiff <= Lizzie.config.winLossThreshold5
         || scoreDiff <= Lizzie.config.scoreLossThreshold5) {
-      g.setColor(new Color(155, 25, 150));
+      g.setColor(
+          Lizzie.config.useMorandiColors
+              ? MorandiPalette.SUGGESTION_BLUNDER
+              : new Color(155, 25, 150));
       radiusF = 0.19f;
     } else if (winrateDiff <= Lizzie.config.winLossThreshold4
         || scoreDiff <= Lizzie.config.scoreLossThreshold4) {
-      g.setColor(new Color(208, 16, 19));
+      g.setColor(
+          Lizzie.config.useMorandiColors
+              ? MorandiPalette.SUGGESTION_MISTAKE
+              : new Color(208, 16, 19));
       radiusF = 0.1675f;
     } else if (winrateDiff <= Lizzie.config.winLossThreshold3
         || scoreDiff <= Lizzie.config.scoreLossThreshold3) {
-      g.setColor(new Color(200, 140, 50));
+      g.setColor(
+          Lizzie.config.useMorandiColors
+              ? MorandiPalette.SUGGESTION_SLOW
+              : new Color(200, 140, 50));
       radiusF = 0.145f;
     } else if (winrateDiff <= Lizzie.config.winLossThreshold2
         || scoreDiff <= Lizzie.config.scoreLossThreshold2) {
-      g.setColor(new Color(180, 180, 0));
+      g.setColor(
+          Lizzie.config.useMorandiColors
+              ? MorandiPalette.SUGGESTION_CAUTION
+              : new Color(180, 180, 0));
       radiusF = 0.1225f;
     } else if (winrateDiff <= Lizzie.config.winLossThreshold1
-        || scoreDiff <= Lizzie.config.scoreLossThreshold1) g.setColor(new Color(140, 202, 34));
-    else g.setColor(new Color(0, 180, 0));
+        || scoreDiff <= Lizzie.config.scoreLossThreshold1)
+      g.setColor(
+          Lizzie.config.useMorandiColors
+              ? MorandiPalette.SUGGESTION_GOOD
+              : new Color(140, 202, 34));
+    else
+      g.setColor(
+          Lizzie.config.useMorandiColors ? MorandiPalette.SUGGESTION_BEST : new Color(0, 180, 0));
 
     if (isLastMove) {
       switch (Lizzie.config.stoneIndicatorType) {
@@ -998,8 +1017,12 @@ public class BoardRenderer {
     selectImage = new BufferedImage(boardWidth, boardHeight, TYPE_INT_ARGB);
     Graphics2D g = selectImage.createGraphics();
     g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_ON);
-    if (isAllow) g.setColor(new Color(0, 0, 120, 45));
-    else g.setColor(new Color(120, 0, 0, 45));
+    if (isAllow)
+      g.setColor(
+          Lizzie.config.useMorandiColors ? new Color(120, 168, 168, 45) : new Color(0, 0, 120, 45));
+    else
+      g.setColor(
+          Lizzie.config.useMorandiColors ? new Color(176, 112, 112, 45) : new Color(120, 0, 0, 45));
     Optional<int[]> coordsOpt =
         convertScreenToCoordinatesForSelect(
             Math.min(x1, x2), Math.max(x1, x2), Math.min(y1, y2), Math.max(y1, y2));
@@ -1023,7 +1046,8 @@ public class BoardRenderer {
     Graphics2D g = selectImageAll.createGraphics();
     g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_ON);
     if (isAllow) {
-      g.setColor(new Color(0, 0, 120, 45));
+      g.setColor(
+          Lizzie.config.useMorandiColors ? new Color(120, 168, 168, 45) : new Color(0, 0, 120, 45));
       String[] coords = coordsName.split(",");
       for (String coordName : coords) {
         int[] coordinates = Board.convertNameToCoordinates(coordName);
@@ -1032,7 +1056,8 @@ public class BoardRenderer {
         g.fillRect(stoneX - squareWidth / 2, stoneY - squareWidth / 2, squareWidth, squareWidth);
       }
     } else {
-      g.setColor(new Color(120, 0, 0, 45));
+      g.setColor(
+          Lizzie.config.useMorandiColors ? new Color(176, 112, 112, 45) : new Color(120, 0, 0, 45));
       String[] coords = coordsName.split(",");
       for (String coordName : coords) {
         int[] coordinates = Board.convertNameToCoordinates(coordName);
@@ -1647,13 +1672,17 @@ public class BoardRenderer {
             if (i == Lizzie.frame.mouseOverCoordinate[0]
                 && j == Lizzie.frame.mouseOverCoordinate[1]) isMouseOver = true;
           }
-          if (isMouseOver) isMouseOverStoneBlack = stone.isBlackColor();
+          if (isMouseOver) {
+            isMouseOverStoneBlack = stone.isBlackColor();
+            if (Lizzie.config.showHoverGlow) {
+              GlassEffectRenderer.drawHoverGlow(g, stoneX, stoneY, stoneRadius);
+            }
+          }
         }
       }
     } else {
       for (int i = 0; i < Board.boardWidth; i++) {
         for (int j = 0; j < Board.boardHeight; j++) {
-          // Display latest stone for ghost dead stone
           int index = Board.getIndex(i, j);
           Stone stone = branch.data.stones[index];
           if (!Lizzie.config.removeDeadChainInVariation && !shouldShowPreviousBestMoves())
@@ -1666,16 +1695,21 @@ public class BoardRenderer {
 
           if (isCaptured) drawCapturedStone(g, stoneX, stoneY, stone, moveNumber > 0);
           else drawStone(g, gShadow, stoneX, stoneY, stone);
-          boolean isMouseOver = false;
+          boolean isMouseOver2 = false;
           if (isIndependBoard) {
             if (i == Lizzie.frame.independentMainBoard.mouseOverCoordinate[0]
                 && j == Lizzie.frame.independentMainBoard.mouseOverCoordinate[1])
-              isMouseOver = true;
+              isMouseOver2 = true;
           } else {
             if (i == Lizzie.frame.mouseOverCoordinate[0]
-                && j == Lizzie.frame.mouseOverCoordinate[1]) isMouseOver = true;
+                && j == Lizzie.frame.mouseOverCoordinate[1]) isMouseOver2 = true;
           }
-          if (isMouseOver) isMouseOverStoneBlack = stone.isBlackColor();
+          if (isMouseOver2) {
+            isMouseOverStoneBlack = stone.isBlackColor();
+            if (Lizzie.config.showHoverGlow) {
+              GlassEffectRenderer.drawHoverGlow(g, stoneX, stoneY, stoneRadius);
+            }
+          }
         }
       }
     }
@@ -3510,20 +3544,22 @@ public class BoardRenderer {
 
   private void drawWoodenBoard(Graphics2D g) {
     if (Lizzie.config.usePureBoard) {
-      // simple version
       isFancyBoard = false;
       g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_OFF);
       noFancyColor = Lizzie.config.pureBoardColor;
       g.setColor(noFancyColor);
       g.fillRect(0, 0, boardWidth, boardHeight);
     } else {
-      // fancy version
       isFancyBoard = true;
       if (cachedBoardImage == emptyImage) {
         cachedBoardImage = Lizzie.config.theme.board();
       }
 
       drawTextureImage(g, cachedBoardImage, 0, 0, boardWidth, boardHeight, true);
+      if (Lizzie.config.showBoardLightGradient) {
+        GlassEffectRenderer.drawBoardLightGradient(g, boardWidth, boardHeight);
+        GlassEffectRenderer.drawBoardInnerShadow(g, boardWidth, boardHeight);
+      }
       g.setStroke(new BasicStroke(1));
     }
   }
@@ -3679,29 +3715,44 @@ public class BoardRenderer {
       cachedStoneCenter = stoneRadius + cachedShadowSize;
 
       final int fartherShadowSize = (int) (cachedR * 0.17) == 0 ? 1 : (int) (cachedR * 0.17);
-      final int width = 2 * (stoneRadius + cachedShadowSize) + cachedShadowSize;
+      final int aoShadowSize = (int) (cachedR * 0.25) == 0 ? 1 : (int) (cachedR * 0.25);
+      final int width = 2 * (stoneRadius + cachedShadowSize + aoShadowSize) + cachedShadowSize;
 
       cachedShadow = new BufferedImage(width, width, TYPE_INT_ARGB);
 
-      Paint TOP_GRADIENT_PAINT;
-      Paint LOWER_RIGHT_GRADIENT_PAINT;
-
       {
         Graphics2D g = (Graphics2D) cachedShadow.getGraphics();
-        TOP_GRADIENT_PAINT =
+
+        Paint AO_GRADIENT_PAINT =
+            new RadialGradientPaint(
+                new Point2D.Float(
+                    cachedStoneCenter + aoShadowSize / 2, cachedStoneCenter + aoShadowSize / 2),
+                stoneRadius + cachedShadowSize + aoShadowSize,
+                new float[] {0.5f, 0.8f, 1.0f},
+                new Color[] {new Color(0, 0, 0, 0), new Color(0, 0, 0, 30), new Color(0, 0, 0, 0)});
+
+        Paint TOP_GRADIENT_PAINT =
             new RadialGradientPaint(
                 new Point2D.Float(cachedStoneCenter, cachedStoneCenter),
                 stoneRadius + cachedShadowSize,
                 new float[] {0.3f, 1.0f},
-                new Color[] {new Color(50, 50, 50, 150), new Color(0, 0, 0, 0)});
-        LOWER_RIGHT_GRADIENT_PAINT =
+                new Color[] {new Color(50, 50, 50, 160), new Color(0, 0, 0, 0)});
+
+        Paint LOWER_RIGHT_GRADIENT_PAINT =
             new RadialGradientPaint(
                 new Point2D.Float(
                     cachedStoneCenter + cachedShadowSize, cachedStoneCenter + cachedShadowSize),
                 stoneRadius + fartherShadowSize,
-                new float[] {0.6f, 1.0f},
-                new Color[] {new Color(0, 0, 0, 140), new Color(0, 0, 0, 0)});
+                new float[] {0.5f, 1.0f},
+                new Color[] {new Color(0, 0, 0, 150), new Color(0, 0, 0, 0)});
         Paint originalPaint = g.getPaint();
+
+        g.setPaint(AO_GRADIENT_PAINT);
+        fillCircle(
+            g,
+            cachedStoneCenter + aoShadowSize / 2,
+            cachedStoneCenter + aoShadowSize / 2,
+            stoneRadius + cachedShadowSize + aoShadowSize);
 
         g.setPaint(TOP_GRADIENT_PAINT);
         fillCircle(g, cachedStoneCenter, cachedStoneCenter, stoneRadius + cachedShadowSize);
@@ -3737,6 +3788,9 @@ public class BoardRenderer {
           size,
           size,
           null);
+      if (Lizzie.config.showStoneHighlight) {
+        GlassEffectRenderer.drawStoneHighlight(g, centerX, centerY, stoneRadius, isBlack);
+      }
     }
   }
 
