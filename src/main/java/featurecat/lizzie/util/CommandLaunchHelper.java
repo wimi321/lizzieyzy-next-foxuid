@@ -68,7 +68,84 @@ public final class CommandLaunchHelper {
         bestRoot = candidateRoot;
       }
     }
-    return bestScore > 0 ? bestRoot : null;
+    if (bestScore > 0) {
+      return bestRoot;
+    }
+    return inferWorkingDirectoryFromAbsolutePaths(commandParts);
+  }
+
+  private static Path inferWorkingDirectoryFromAbsolutePaths(List<String> commandParts) {
+    List<Path> referencedDirectories = new ArrayList<Path>();
+    addAbsoluteReferenceDirectory(referencedDirectories, commandParts.get(0));
+
+    for (int i = 0; i < commandParts.size() - 1; i++) {
+      if (matchesOption(commandParts.get(i), FILE_PATH_OPTIONS)
+          || "-jar".equals(commandParts.get(i))) {
+        addAbsoluteReferenceDirectory(referencedDirectories, commandParts.get(i + 1));
+      }
+    }
+
+    if (referencedDirectories.isEmpty()) {
+      return null;
+    }
+
+    Path commonDirectory = referencedDirectories.get(0);
+    for (int i = 1; i < referencedDirectories.size(); i++) {
+      commonDirectory = commonAncestor(commonDirectory, referencedDirectories.get(i));
+      if (commonDirectory == null) {
+        break;
+      }
+    }
+
+    if (commonDirectory != null && Files.isDirectory(commonDirectory)) {
+      return commonDirectory;
+    }
+    return referencedDirectories.get(0);
+  }
+
+  private static void addAbsoluteReferenceDirectory(List<Path> directories, String token) {
+    Path directory = toAbsoluteReferenceDirectory(token);
+    if (directory != null && Files.isDirectory(directory) && !directories.contains(directory)) {
+      directories.add(directory);
+    }
+  }
+
+  private static Path toAbsoluteReferenceDirectory(String token) {
+    if (token == null) {
+      return null;
+    }
+    try {
+      Path path = Paths.get(token.trim());
+      if (!path.isAbsolute()) {
+        return null;
+      }
+      Path normalized = path.toAbsolutePath().normalize();
+      if (Files.isDirectory(normalized)) {
+        return normalized;
+      }
+      Path parent = normalized.getParent();
+      if (parent != null && Files.isDirectory(parent)) {
+        return parent;
+      }
+    } catch (Exception e) {
+      return null;
+    }
+    return null;
+  }
+
+  private static Path commonAncestor(Path left, Path right) {
+    if (left == null || right == null) {
+      return null;
+    }
+    Path current = left.toAbsolutePath().normalize();
+    Path other = right.toAbsolutePath().normalize();
+    while (current != null) {
+      if (other.startsWith(current)) {
+        return current;
+      }
+      current = current.getParent();
+    }
+    return null;
   }
 
   private static int scoreCandidate(List<String> commandParts, Path root) {
