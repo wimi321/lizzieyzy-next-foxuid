@@ -3763,6 +3763,7 @@ public class BoardRenderer {
             cachedStoneCenter + cachedShadowSize,
             stoneRadius + fartherShadowSize);
         g.setPaint(originalPaint);
+        g.dispose();
       }
     }
   }

@@ -10181,11 +10181,11 @@ public class LizzieFrame extends JFrame {
 
       } else {
         if (isSelect) {
-          setForeground(Color.BLUE);
+          setForeground(Lizzie.config.useMorandiColors ? MorandiPalette.MUDED_TEAL : Color.BLUE);
           setBackground(new Color(0, 0, 0, 70));
         }
         if (isChanged) {
-          setForeground(Color.RED);
+          setForeground(Lizzie.config.useMorandiColors ? MorandiPalette.MUDED_RED : Color.RED);
         }
         if (isNextMove) {
           if (isSelect) {
@@ -11905,7 +11905,10 @@ public class LizzieFrame extends JFrame {
       String coordStr = table.getValueAt(row, 1).toString();
       int[] coords = Board.convertNameToCoordinates(coordStr);
       if (coords[0] == Lizzie.frame.clickbadmove[0] && coords[1] == Lizzie.frame.clickbadmove[1]) {
-        setBackground(new Color(238, 221, 130));
+        setBackground(
+            Lizzie.config.useMorandiColors
+                ? MorandiPalette.MUDED_YELLOW
+                : new Color(238, 221, 130));
       } else setBackground(blunderBackground);
       try {
         double diffWinrate =

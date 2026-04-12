@@ -21,8 +21,8 @@ public class GlassEffectRenderer {
     LIQUID
   }
 
-  private static GaussianFilter glassBlurFilter = new GaussianFilter(25);
-  private static GaussianFilter liquidBlurFilter = new GaussianFilter(30);
+  private static GaussianFilter glassBlurFilter = new GaussianFilter(10);
+  private static GaussianFilter liquidBlurFilter = new GaussianFilter(15);
 
   private static long lastHighlightTime = 0;
   private static float highlightPhase = 0f;
@@ -45,8 +45,32 @@ public class GlassEffectRenderer {
       return;
     }
 
-    BufferedImage blurSource = cachedBackground.getSubimage(vx, vy, vw, vh);
-    BufferedImage blurred = new BufferedImage(vw, vh, TYPE_INT_ARGB);
+    int maxDim = 800;
+    float scaleX = 1f, scaleY = 1f;
+    int srcW = vw, srcH = vh;
+    if (vw > maxDim || vh > maxDim) {
+      scaleX = (float) vw / maxDim;
+      scaleY = (float) vh / maxDim;
+      float scale = Math.max(scaleX, scaleY);
+      srcW = Math.max((int) (vw / scale), 1);
+      srcH = Math.max((int) (vh / scale), 1);
+    }
+
+    BufferedImage blurSource;
+    if (srcW != vw || srcH != vh) {
+      BufferedImage subImg = cachedBackground.getSubimage(vx, vy, vw, vh);
+      blurSource = new BufferedImage(srcW, srcH, TYPE_INT_ARGB);
+      Graphics2D sg = blurSource.createGraphics();
+      sg.setRenderingHint(
+          java.awt.RenderingHints.KEY_INTERPOLATION,
+          java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+      sg.drawImage(subImg, 0, 0, srcW, srcH, null);
+      sg.dispose();
+    } else {
+      blurSource = cachedBackground.getSubimage(vx, vy, vw, vh);
+    }
+
+    BufferedImage blurred = new BufferedImage(srcW, srcH, TYPE_INT_ARGB);
 
     if (level == GlassLevel.LIQUID) {
       liquidBlurFilter.filter(blurSource, blurred);
@@ -54,7 +78,7 @@ public class GlassEffectRenderer {
       glassBlurFilter.filter(blurSource, blurred);
     }
 
-    g.drawImage(blurred, vx, vy, null);
+    g.drawImage(blurred, vx, vy, vw, vh, null);
 
     Color overlayColor = MorandiPalette.GLASS_OVERLAY;
     g.setColor(overlayColor);

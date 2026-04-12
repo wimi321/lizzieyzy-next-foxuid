@@ -619,11 +619,11 @@ public class AnalysisFrame extends JFrame {
 
       } else {
         if (isSelect) {
-          setForeground(Color.BLUE);
+          setForeground(Lizzie.config.useMorandiColors ? MorandiPalette.MUDED_TEAL : Color.BLUE);
           setBackground(new Color(0, 0, 0, 35));
         }
         if (isChanged) {
-          setForeground(Color.RED);
+          setForeground(Lizzie.config.useMorandiColors ? MorandiPalette.MUDED_RED : Color.RED);
         }
         if (isNextMove) {
           if (isSelect) {
