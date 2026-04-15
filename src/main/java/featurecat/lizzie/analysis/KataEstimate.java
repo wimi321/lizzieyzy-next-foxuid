@@ -138,7 +138,7 @@ public class KataEstimate {
       List<String> launchCommands =
           KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
       ProcessBuilder processBuilder = new ProcessBuilder(launchCommands);
-      CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
+      CommandLaunchHelper.configureProcessBuilder(processBuilder, launchSpec);
       KataGoRuntimeHelper.configureBundledProcessBuilder(processBuilder, engineExecutable);
       processBuilder.redirectErrorStream(true);
       try {

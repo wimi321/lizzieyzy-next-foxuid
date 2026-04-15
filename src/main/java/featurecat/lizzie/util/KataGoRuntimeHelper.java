@@ -45,7 +45,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
-import org.jdesktop.swingx.util.OS;
 import org.json.JSONObject;
 
 public final class KataGoRuntimeHelper {
@@ -83,6 +82,11 @@ public final class KataGoRuntimeHelper {
   private static final int BENCHMARK_MAX_TIME_SECONDS = 8;
 
   private KataGoRuntimeHelper() {}
+
+  private static boolean isWindowsPlatform() {
+    String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+    return !osName.contains("darwin") && osName.contains("win");
+  }
 
   public static final class NvidiaRuntimeStatus {
     public final boolean applicable;
@@ -302,6 +306,9 @@ public final class KataGoRuntimeHelper {
     if (processBuilder == null || enginePath == null) {
       return;
     }
+    if (!Config.isBundledKataGoCommand(enginePath.toAbsolutePath().normalize().toString())) {
+      return;
+    }
     if (Lizzie.config != null) {
       processBuilder.directory(Lizzie.config.getRuntimeWorkDirectory());
     }
@@ -310,7 +317,7 @@ public final class KataGoRuntimeHelper {
       return;
     }
     prependPath(processBuilder, engineDir);
-    if (OS.isWindows() && isNvidiaBundledPath(enginePath)) {
+    if (isWindowsPlatform() && isNvidiaBundledPath(enginePath)) {
       Path runtimeDir = getNvidiaRuntimeDir();
       if (Files.isDirectory(runtimeDir)) {
         prependPath(processBuilder, runtimeDir);
@@ -352,7 +359,7 @@ public final class KataGoRuntimeHelper {
 
   public static NvidiaRuntimeStatus inspectNvidiaRuntime(Path enginePath) {
     Path runtimeDir = getNvidiaRuntimeDir();
-    if (!OS.isWindows() || !isNvidiaBundledPath(enginePath)) {
+    if (!isWindowsPlatform() || !isNvidiaBundledPath(enginePath)) {
       return new NvidiaRuntimeStatus(
           false,
           false,
@@ -445,7 +452,7 @@ public final class KataGoRuntimeHelper {
     }
 
     DownloadSession activeSession = session != null ? session : new DownloadSession();
-    if (OS.isWindows() && isNvidiaBundledPath(snapshot.enginePath)) {
+    if (isWindowsPlatform() && isNvidiaBundledPath(snapshot.enginePath)) {
       ensureBundledRuntimeReady(snapshot.enginePath, null);
     }
 

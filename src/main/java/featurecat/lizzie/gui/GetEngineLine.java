@@ -219,7 +219,7 @@ public class GetEngineLine {
     CommandLaunchHelper.LaunchSpec launchSpec = CommandLaunchHelper.prepare(commands);
 
     ProcessBuilder processBuilder = new ProcessBuilder(launchSpec.getCommandParts());
-    CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
+    CommandLaunchHelper.configureProcessBuilder(processBuilder, launchSpec);
     processBuilder.redirectErrorStream(true);
     try {
       Process process = processBuilder.start();

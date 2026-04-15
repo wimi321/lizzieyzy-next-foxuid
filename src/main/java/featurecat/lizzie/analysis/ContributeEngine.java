@@ -179,7 +179,7 @@ public class ContributeEngine {
 
       // if (!started) {
       ProcessBuilder processBuilder = new ProcessBuilder(commands);
-      CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
+      CommandLaunchHelper.configureProcessBuilder(processBuilder, launchSpec);
       processBuilder.redirectErrorStream(false);
       try {
         process = processBuilder.start();

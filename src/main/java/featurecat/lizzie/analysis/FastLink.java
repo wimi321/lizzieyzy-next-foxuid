@@ -12,7 +12,7 @@ public class FastLink {
         CommandLaunchHelper.prepare(Utils.splitCommand(command));
     List<String> commands = launchSpec.getCommandParts();
     ProcessBuilder processBuilder = new ProcessBuilder(commands);
-    CommandLaunchHelper.applyWorkingDirectory(processBuilder, launchSpec);
+    CommandLaunchHelper.configureProcessBuilder(processBuilder, launchSpec);
     try {
       Process process = processBuilder.start();
     } catch (Exception e) {
