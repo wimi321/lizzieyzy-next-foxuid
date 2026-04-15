@@ -14,10 +14,9 @@
 </p>
 
 <p align="center">
-  <strong>まだ lizzieyzy を使いたい人のために、きちんと続けて使える保守版です。</strong><br/>
-  元のプロジェクトが長く保守されなかった結果、野狐棋譜取得で困る利用者が増えていました。この版では、まずその実用部分を直し、初回起動や KataGo 同梱もわかりやすく整えています。<br/>
-  <strong>これは普通の利用者向けの KataGo 復盤 GUI でもあり、現在も保守されている lizzieyzy の代替版です。</strong><br/>
-  <strong>ダウンロードして、野狐のニックネームを入力し、棋譜取得と解析を続けられます。</strong>
+  <strong>LizzieYzy Next は、現在も保守されている lizzieyzy 系の実用版であり、普通の利用者向けの KataGo 復盤 GUI です。</strong><br/>
+  このプロジェクトが重視しているのは、配布物を選びやすくすること、初回起動を簡単にすること、野狐棋譜取得を使える状態に戻すこと、そして復盤中に問題手をより早く見つけられるようにすることです。<br/>
+  <strong>ダウンロードして、野狐のニックネームを入力し、公開棋譜を取得して、全局を素早く解析し、新しい勝率グラフと下部のクイック概要で重要な手へすぐ移動できます。</strong>
 </p>
 
 <p align="center">
@@ -28,236 +27,157 @@
   <a href="docs/TROUBLESHOOTING_EN.md"><strong>トラブル対応</strong></a>
 </p>
 
+> [!TIP]
+> 中国語 QQ グループ: `299419120`
+>
+> 日常の利用相談、バグ報告、保守方針のやり取りが一番速い場所です。
+
 > [!IMPORTANT]
-> まずはこの 5 点だけ見れば大丈夫です:
-> - Windows 利用者の多くは `windows64.opencl.portable.zip` を選べば始めやすいです。これは推奨の **OpenCL 版、インストール不要** です
-> - OpenCL の相性が悪い場合は `windows64.with-katago.portable.zip` を代わりに使えます
-> - NVIDIA GPU を使っていて、より速い解析を求めるなら `windows64.nvidia.portable.zip` を選べます
-> - 野狐棋譜取得では **野狐のニックネーム** を入力します。アプリが対応するアカウントを自動で見つけます
-> - 主な統合パッケージには KataGo が含まれており、初回起動では自動設定を優先します
+> まずはこの 6 点だけ押さえれば大丈夫です:
+> - Windows 利用者の多くは [Releases](https://github.com/wimi321/lizzieyzy-next/releases) で `*windows64.opencl.portable.zip` を選べば始めやすいです
+> - NVIDIA GPU があり、より速く解析したい場合は `*windows64.nvidia.portable.zip` を選べます
+> - OpenCL の相性が悪い場合は `*windows64.with-katago.portable.zip` に切り替えられます
+> - 野狐棋譜取得はニックネーム入力に対応しており、多くの利用者はアカウント番号を先に知らなくても大丈夫です
+> - 主な統合パッケージには KataGo `v1.16.4` と公式推奨の `zhizi` 重み `kata1-zhizi-b28c512nbt-muonfd2.bin.gz` が含まれています
+> - 主な release パッケージには `readboard_java` も同梱されており、多くの利用者は別の readboard リポジトリを用意する必要がありません
 
 ## このプロジェクトは何か
 
-`LizzieYzy Next` は、普通の利用者向けの `KataGo 囲碁復盤ソフト` であり、実用的な `KataGo GUI` であり、現在も保守されている `lizzieyzy の保守版 / 代替プロジェクト` です。
+`LizzieYzy Next` は次のように考えればわかりやすいです。
 
-このプロジェクトでは、多くの人が実際に必要とするものをまとめています。
+- 普通の利用者向けの `KataGo 復盤ソフト`
+- 実用面を継続保守している `lizzieyzy 保守版 / 代替プロジェクト`
+- `野狐棋譜取得 + KataGo 解析 + 非インストール配布 + 既定の重み` をまとめたデスクトップツール
 
-- `野狐棋譜取得`
-- `KataGo による解析と AI 復盤`
-- `Windows のインストール不要パッケージ`
-- `公式推奨の重み + 初回起動の自動設定`
-- `従来の lizzieyzy に近い使い方を保ちながら、設定の手間を減らすこと`
+次のようなものを探しているなら、まずこのプロジェクトを見る価値があります。
 
-次のようなものを探しているなら、まずこのプロジェクトを見るのがおすすめです。
-
-- `KataGo 囲碁復盤ソフト`
-- `囲碁 AI 復盤`
+- `KataGo 復盤ソフト`
 - `KataGo GUI`
 - `lizzieyzy 保守版`
-- `lizzieyzy 代替`
 - `野狐棋譜取得 + KataGo 復盤`
-- `Windows 非インストール KataGo GUI`
+- `Windows 非インストール 囲碁 AI ツール`
 
-## よく検索される質問に先に答えます
+## いまできること
 
-### 普通の利用者向けの KataGo 復盤ソフトはどれですか？
-
-細かい手動設定を先に調べなくても始めやすい `KataGo 囲碁復盤ソフト` を探しているなら、まず `LizzieYzy Next` を試すのがよいです。GUI、野狐棋譜取得、既定の重み、初回起動設定、配布パッケージまでそろえてあり、利用者が先に環境構築で止まらないことを重視しています。
-
-### まだ使える lizzieyzy の保守版はありますか？
-
-あります。`LizzieYzy Next` は、実際の利用で困る点を今も直し続けている `lizzieyzy` の保守版です。古い画面を残しただけの履歴ページではなく、野狐棋譜取得、KataGo 同梱、Windows の非インストール版、既定設定の使いやすさを継続的に保守しています。
-
-### 野狐棋譜を取得して、そのまま KataGo で復盤できるツールはありますか？
-
-あります。このプロジェクトでは `野狐のニックネーム` を入力して最新の公開棋譜を取得し、そのまま `KataGo` で解析と復盤を続けられます。数字のアカウントIDを先に調べる必要がある旧来の流れより、日常利用には自然です。
-
-### Windows でインストール不要の KataGo GUI はありますか？
-
-あります。`LizzieYzy Next` では、Windows では `portable.zip` を標準的なおすすめとして案内しています。多くの人は `windows64.opencl.portable.zip` から始めれば十分です。OpenCL の相性が悪い場合は `windows64.with-katago.portable.zip`、NVIDIA GPU があるなら `windows64.nvidia.portable.zip` を優先して試せます。
-
-## 元の lizzieyzy との違い
-
-検索結果で `lizzieyzy` と `LizzieYzy Next` の両方が出てきたら、実用上の違いは次のように考えるとわかりやすいです。
-
-| 比較項目 | 元の `lizzieyzy` | `LizzieYzy Next` |
-| --- | --- | --- |
-| 現在の状態 | 多くの人が覚えている元プロジェクトだが、実用面の継続保守は弱い | 使い勝手と配布体験を継続保守する現行ブランチ |
-| 野狐棋譜取得 | 古い取得フローは利用できない場面が増えた | よく使う取得フローを復旧し、ニックネーム入力にも対応 |
-| 入力方法 | 数字のアカウントIDを先に知っている前提が強い | 野狐のニックネームを入れるとアプリが自動で対応付け |
-| KataGo 利用の敷居 | 自分で環境や不足リソースを補う場面が多い | 推奨パッケージに KataGo と既定の重みを同梱 |
-| Windows での選びやすさ | 利用者が自分で判断する余地が大きい | `portable.zip` を先に勧める構成でわかりやすい |
-| 向いている人 | レガシー挙動を自分で調整できる人 | ダウンロードしてすぐ取得・解析したい普通の利用者 |
-
-## コミュニティと現在の方針
-
-| いまやりたいこと | まず見る場所 |
+| やりたいこと | いまのプロジェクトでどうできるか |
 | --- | --- |
-| ダウンロードしてインストールしたい | [Releases](https://github.com/wimi321/lizzieyzy-next/releases) / [インストールガイド](docs/INSTALL_JA.md) |
-| バグやインストール結果を共有したい | [Support](SUPPORT.md) |
-| 利用感や改善案を話したい | [GitHub Discussions](https://github.com/wimi321/lizzieyzy-next/discussions) / QQ グループ `299419120` |
-| 今後の優先事項を見たい | [ROADMAP.md](ROADMAP.md) |
-| 維持開発に参加したい | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 最近の公開野狐棋譜を取りたい | 野狐のニックネームを入力するとアプリが自動で対応アカウントを探します |
+| 全局の流れを早く見たい | 一手ずつ手動で進めなくても、全局を素早く見る解析を使えます |
+| 問題手を早く見たい | 新しい主勝率グラフと下部のヒート概要で大きな損失を見つけやすくなっています |
+| 設定をあまり触りたくない | 推奨パッケージに KataGo、既定の重み、初回自動設定が入っています |
+| インストールしたくない | Windows では `portable.zip` を優先して選べます |
+| 棋盤同期も使いたい | 主な配布物に `readboard_java` が同梱されています |
 
-このリポジトリは、次のような実用面を優先して保守しています。
+## まずどれをダウンロードするか
 
-- `lizzieyzy` を今も使っている利用者向けの主要な流れを維持すること
-- 野狐棋譜取得、KataGo 同梱、初回起動のわかりやすさを保つこと
-- 設定に詳しい少数者だけでなく、普通の利用者にも使いやすくすること
-
-## Windows 利用者はここから見れば大丈夫です
-
-**Windows** を使っているなら:
-
-- 多くの人は **`windows64.opencl.portable.zip`**。これは速度優先の **OpenCL 非インストール版** です
-- OpenCL の相性が悪いなら **`windows64.with-katago.portable.zip`**。こちらは **CPU フォールバック版** です
-- NVIDIA GPU があり、速度を優先したいなら **`windows64.nvidia.portable.zip`**
-
-インストーラの流れがほしい場合は、対応する `installer.exe` を選べます。
-上の 3 つはそれぞれ OpenCL 推奨版、CPU フォールバック版、NVIDIA 高速版です。
-NVIDIA 版は初回起動時に必要な公式 NVIDIA ランタイムをユーザーフォルダへ自動で準備してから高速解析を使えるようにします。
-CPU 版、OpenCL 版、NVIDIA 版はいずれも `KataGo Auto Setup` の `Smart Optimize` を使えます。
-
-## どれをダウンロードするか
-
-先に図で見たい場合は、こちらを見るのが早いです。
+すべての配布物は [Releases](https://github.com/wimi321/lizzieyzy-next/releases) にあります。下の表は、最新 release ページで探すときのキーワードです。
 
 <p align="center">
   <img src="assets/package-guide.svg" alt="LizzieYzy Next package guide" width="100%" />
 </p>
 
-| あなたの環境 | まず選ぶもの |
+| あなたの環境 | Releases でこのキーワードを含むファイルを探す |
 | --- | --- |
-| Windows x64、OpenCL 版、推奨、インストーラ不要 | `windows64.opencl.portable.zip` |
-| Windows x64、OpenCL 版、インストーラあり | `windows64.opencl.installer.exe` |
-| Windows x64、CPU 版、互換フォールバック、インストーラ不要 | `windows64.with-katago.portable.zip` |
-| Windows x64、CPU 版、互換フォールバック、インストーラあり | `windows64.with-katago.installer.exe` |
-| Windows x64、NVIDIA GPU、より速い解析、インストーラ不要 | `windows64.nvidia.portable.zip` |
-| Windows x64、NVIDIA GPU、インストーラあり | `windows64.nvidia.installer.exe` |
-| Windows x64、自分でエンジンを設定したい | `windows64.without.engine.portable.zip` |
-| Windows x64、自分でエンジンを設定したい、インストーラあり | `windows64.without.engine.installer.exe` |
-| macOS Apple Silicon | `mac-arm64.with-katago.dmg` |
-| macOS Intel | `mac-amd64.with-katago.dmg` |
-| Linux x64 | `linux64.with-katago.zip` |
+| Windows 利用者の多く、推奨、非インストール | `*windows64.opencl.portable.zip` |
+| Windows、OpenCL 版、インストーラあり | `*windows64.opencl.installer.exe` |
+| Windows、OpenCL が不安定、CPU フォールバック、非インストール | `*windows64.with-katago.portable.zip` |
+| Windows、CPU フォールバック、インストーラあり | `*windows64.with-katago.installer.exe` |
+| Windows、NVIDIA GPU、より速い解析、非インストール | `*windows64.nvidia.portable.zip` |
+| Windows、NVIDIA GPU、インストーラあり | `*windows64.nvidia.installer.exe` |
+| Windows、自分のエンジンを使う、非インストール | `*windows64.without.engine.portable.zip` |
+| Windows、自分のエンジンを使う、インストーラあり | `*windows64.without.engine.installer.exe` |
+| macOS Apple Silicon | `*mac-arm64.with-katago.dmg` |
+| macOS Intel | `*mac-amd64.with-katago.dmg` |
+| Linux | `*linux64.with-katago.zip` |
 
 迷ったときの目安:
 
-- Windows: どれを選ぶべきかわからない場合は `windows64.opencl.portable.zip`
+- Windows: まず `*windows64.opencl.portable.zip`
+- Windows + NVIDIA GPU: まず `*windows64.nvidia.portable.zip`
+- OpenCL が合わない: `*windows64.with-katago.portable.zip`
 - Mac: Apple Silicon か Intel かを先に確認
-- Linux: `with-katago.zip`
+- Linux: `*linux64.with-katago.zip`
 
-ざっくり言うと:
+## なぜ今この版を先に勧めやすいのか
 
-- `opencl.portable.zip` は Windows の推奨版
-- `with-katago.portable.zip` は OpenCL の相性が悪い環境向けの CPU フォールバック
-- `nvidia.portable.zip` は NVIDIA GPU 利用者向けの推奨高速版
-- `opencl.installer.exe` は OpenCL 版のインストーラ代替
-- `with-katago.installer.exe` は CPU フォールバックのインストーラ代替
-- `nvidia.installer.exe` は NVIDIA GPU 利用者向けインストーラ代替
-- `without.engine.portable.zip` は自分のエンジンを使い、インストールも省きたい人向け
-- `without.engine.installer.exe` はインストーラ経由で自分のエンジンを使いたい人向け
-
-## このメンテ版で改善したこと
-
-- **野狐棋譜取得がまた使えるようになりました**
-  元プロジェクトで止まっていた公開棋譜取得の流れを、また使える形に戻しています。
-- **先に数字のIDを調べる必要がなくなりました**
-  いまは野狐のニックネームを入力すれば、アプリが対応するアカウントを見つけて公開棋譜を取得します。
-- **初回起動が楽になりました**
-  まず内蔵の解析環境を準備するので、多くの利用者は最初から細かい設定をしなくて済みます。
-- **KataGo の速度調整もアプリ内で進めました**
-  `KataGo Auto Setup` に `Smart Optimize` を追加し、KataGo の benchmark 結果からより合いやすいスレッド数を自動で保存できます。
+- `野狐棋譜取得が再び使える`
+  利用者が覚えているニックネームから始められます。
+- `全局を素早く見る解析が主導線になった`
+  一手ずつ積み上げなくても、全体像を早く作れます。
+- `主勝率グラフ + 下部クイック概要`
+  大きな損失が出た場所を先に探しやすくなりました。
+- `Windows は非インストール版を先に案内`
+  OpenCL / NVIDIA / CPU フォールバックの違いがわかりやすくなっています。
+- `readboard_java を主 release に同梱`
+  多くの利用者は別リポジトリを組み合わせなくて済みます。
+- `実際の release とスモークテスト`
+  単にソースを更新するだけでなく、複数 OS の配布と確認も続けています。
 
 ## 3 ステップで開始
 
-1. [Releases](https://github.com/wimi321/lizzieyzy-next/releases) から自分の環境に合うパッケージをダウンロードします。
-2. **野狐棋譜（ニックネームで取得）** の入口を開きます。
-3. 野狐のニックネームを入力し、最新の公開棋譜を取得して、そのまま解析を続けます。
+1. [Releases](https://github.com/wimi321/lizzieyzy-next/releases) から自分の環境に合うものをダウンロードします。
+2. `野狐棋譜` を開いて野狐のニックネームを入力します。
+3. 棋譜を取得し、全局を素早く解析して、グラフと概要から重要な手へ移動します。
 
 <p align="center">
   <a href="assets/fox-id-demo.gif">
-    <img src="assets/fox-id-demo-cover.png" alt="LizzieYzy Next Demo" width="100%" />
+    <img src="assets/fox-id-demo-cover.png" alt="LizzieYzy Next Fox nickname demo" width="100%" />
   </a>
 </p>
 
 <p align="center">
-  GitHub 上で GIF の再生が遅い場合は、上の画像をクリックすると全体のアニメーションを開けます。
+  GitHub 上で GIF の再生が遅い場合は、上の画像をクリックすると全体を開けます。
 </p>
 
 ## 実際の画面
 
-以下は、現在のメンテ版そのものの実画面です。下部には **野狐棋譜** と **公式重み更新** の入口が直接見えるようになっています。
+以下は現在のメンテ版そのものの実画面です。
 
 <p align="center">
-  <img src="assets/interface-overview.png" alt="LizzieYzy Next actual interface" width="100%" />
+  <img src="assets/interface-overview-2026-04.png" alt="LizzieYzy Next actual interface" width="100%" />
 </p>
 
-普段よく使う入口は、最初から主画面に見えるようにしています。
+グラフ部分は次のように読むとわかりやすいです。
 
-| やりたいこと | 主画面で見る場所 |
-| --- | --- |
-| 最近の公開棋譜を取得したい | `野狐棋譜` |
-| 公式 KataGo 重みを更新したい | `更新官方权重` |
-| そのまま解析と復習を続けたい | `Kata評估` / `自動分析` |
+<p align="center">
+  <img src="assets/winrate-quick-overview-2026-04.png" alt="LizzieYzy Next winrate graph and quick overview" width="46%" />
+</p>
 
-## 統合パッケージに最初から入っているもの
+- 青線 / 紫線: 双方の勝率の流れ
+- 緑線: 目差の変化
+- 下部のヒート帯: 全局の中で大きな問題が集まっている場所
+- 縦のガイド線: 現在の手やホバー中の手の位置
 
-| 項目 | 現在の値 |
-| --- | --- |
-| KataGo バージョン | `v1.16.4` |
-| 既定の重み | `kata1-zhizi-b28c512nbt-muonfd2.bin.gz` |
-| 初回起動の自動設定 | 有効 |
-| 公式重みダウンロード入口 | あり |
+## 元の lizzieyzy との違い
 
-多くの利用者にとって大事なのは、この 1 点です。
+| 比較項目 | 元の `lizzieyzy` | `LizzieYzy Next` |
+| --- | --- | --- |
+| 現在の状態 | 多くの人が覚えている元プロジェクトだが、実用面の継続保守は弱い | 使用感と配布体験を継続保守する現行ブランチ |
+| 野狐棋譜取得 | 古い取得フローは壊れた場面が多い | よく使う取得フローを復旧し、ニックネーム入力にも対応 |
+| 入力方法 | 数字のアカウント番号を先に知っている前提が強い | 野狐のニックネームを入れるとアプリが自動で対応付け |
+| KataGo 利用の敷居 | 自分で環境や不足リソースを補う場面が多い | 推奨パッケージに KataGo と既定の重みを同梱 |
+| Windows での選びやすさ | 利用者が自分で判断する余地が大きい | `portable.zip` を先に勧める構成でわかりやすい |
+| 同期ツール | 利用者が自分で組み合わせる場面が多い | 主な release に `readboard_java` を同梱 |
 
-**主推薦の統合パッケージには KataGo と既定の重みが含まれているので、すぐに使い始めやすくなっています。**
+## よくある質問
 
-## 導入と利用のよくある質問
+### readboard 用に別リポジトリは必要ですか？
 
-<details>
-<summary><strong>KataGo の復盤ソフトを探しているなら、まずどのプロジェクトを見るべきですか？</strong></summary>
+多くの利用者には不要です。`LizzieYzy Next` は `readboard_java` を主な release パッケージに含めています。
 
-保守が続いていて、GUI があり、野狐棋譜取得にも対応している `KataGo` 復盤ツールを探しているなら、まず `LizzieYzy Next` を見るのがおすすめです。「ダウンロードしてすぐ復盤」に近く、「ダウンロード後に環境構築から始める」方向ではありません。
-</details>
+### 野狐のアカウント番号を先に知っておく必要はありますか？
 
-<details>
-<summary><strong>以前 lizzieyzy を探していた人は、今はどのリポジトリを見るべきですか？</strong></summary>
+多くの場合は不要です。野狐のニックネームを入力すれば、アプリが対応するアカウントを探します。
 
-歴史的な元ページを見るより、いま実際に使い続けたいなら `wimi321/lizzieyzy-next` を先に見るのがよいです。野狐のニックネーム取得、KataGo 同梱、非インストール配布パッケージなど、いまも必要とされる流れをここで保守しています。
-</details>
+### 全局の流れを見るのに、まだ一手ずつ進める必要がありますか？
 
-<details>
-<summary><strong>先にアカウント番号を知っておく必要はありますか？</strong></summary>
+通常はそこまで必要ありません。全局を素早く見る解析があるため、主勝率グラフと概要をかなり早く作れます。
 
-不要です。野狐のニックネームを入力すれば、アプリが対応するアカウントを自動で探します。取得後の一覧にはニックネームとアカウント番号の両方が表示されます。
-</details>
+### macOS で初回起動時にブロックされたらどうすればよいですか？
 
-<details>
-<summary><strong>なぜニックネーム入力に変えたのですか？</strong></summary>
+現在の macOS 配布物は未署名・未公証です。初回にブロックされた場合は [インストールガイド](docs/INSTALL_JA.md) の手順を見てください。
 
-普通の利用者はアカウント番号よりニックネームを覚えていることが多いためです。面倒な検索手順をアプリの中に戻しました。
-</details>
-
-<details>
-<summary><strong>棋譜が見つからないときは何を確認すればよいですか？</strong></summary>
-
-ニックネームが正しいか、そのアカウントに最近の公開棋譜があるか、一時的なネットワーク問題がないかを確認してください。
-</details>
-
-<details>
-<summary><strong>初回起動で KataGo を手動設定する必要はありますか？</strong></summary>
-
-多くの `with-katago` 利用者には不要です。内蔵 KataGo、重み、設定パスを自動で見つける流れを優先します。
-</details>
-
-<details>
-<summary><strong>macOS で最初にブロックされたらどうすればよいですか？</strong></summary>
-
-現在の macOS ビルドはまだ署名と公証を行っていません。最初に止められた場合は、[インストールガイド](docs/INSTALL_JA.md) の手順を確認してください。
-</details>
-
-## さらに見る
+## ドキュメントとコミュニティ
 
 - [インストールガイド](docs/INSTALL_JA.md)
 - [Package Overview](docs/PACKAGES_EN.md)
@@ -267,11 +187,13 @@ CPU 版、OpenCL 版、NVIDIA 版はいずれも `KataGo Auto Setup` の `Smart 
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 - [Support](SUPPORT.md)
+- GitHub Discussions: <https://github.com/wimi321/lizzieyzy-next/discussions>
+- 中国語 QQ グループ: `299419120`
 
-## クレジット
+## Credits
 
 - Original project: [yzyray/lizzieyzy](https://github.com/yzyray/lizzieyzy)
 - KataGo: [lightvector/KataGo](https://github.com/lightvector/KataGo)
-- 野狐棋譜取得の参考:
-  - [yzyray/FoxRequest](https://github.com/yzyray/FoxRequest)
-  - [FuckUbuntu/Lizzieyzy-Helper](https://github.com/FuckUbuntu/Lizzieyzy-Helper)
+Historical Fox sync references:
+- [yzyray/FoxRequest](https://github.com/yzyray/FoxRequest)
+- [FuckUbuntu/Lizzieyzy-Helper](https://github.com/FuckUbuntu/Lizzieyzy-Helper)
