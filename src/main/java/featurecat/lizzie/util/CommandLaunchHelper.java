@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jdesktop.swingx.util.OS;
@@ -29,8 +31,14 @@ public final class CommandLaunchHelper {
   private static final int MAX_ENV_EXPANSION_DEPTH = 8;
   private static final Pattern WINDOWS_DRIVE_PATH_PATTERN = Pattern.compile("^[A-Za-z]:\\\\.*");
   private static final Pattern WINDOWS_VARIABLE_PATTERN = Pattern.compile("%([^%]+)%");
-  private static final Pattern REGISTRY_PATH_PATTERN =
-      Pattern.compile("^\\s*Path\\s+REG_\\w+\\s+(.*)$", Pattern.MULTILINE);
+  private static final ConcurrentMap<String, String> WINDOWS_REGISTRY_PATH_CACHE =
+      new ConcurrentHashMap<String, String>();
+  private static final WindowsRegistryProcessStarter DEFAULT_WINDOWS_REGISTRY_PROCESS_STARTER =
+      ProcessBuilder::start;
+  private static final WindowsRegistryPathReader DEFAULT_WINDOWS_REGISTRY_PATH_READER =
+      new ProcessWindowsRegistryPathReader(DEFAULT_WINDOWS_REGISTRY_PROCESS_STARTER);
+  private static volatile WindowsRegistryPathReader windowsRegistryPathReader =
+      DEFAULT_WINDOWS_REGISTRY_PATH_READER;
   private static final String[] FILE_PATH_OPTIONS = {
     "-model",
     "--model",
@@ -87,8 +95,8 @@ public final class CommandLaunchHelper {
             workingDirectory,
             processBuilder.environment(),
             System.getenv(),
-            readWindowsRegistryPath(MACHINE_ENVIRONMENT_KEY),
-            readWindowsRegistryPath(USER_ENVIRONMENT_KEY)));
+            getWindowsRegistryPath(MACHINE_ENVIRONMENT_KEY),
+            getWindowsRegistryPath(USER_ENVIRONMENT_KEY)));
   }
 
   private static Path detectWorkingDirectory(List<String> commandParts) {
@@ -407,6 +415,9 @@ public final class CommandLaunchHelper {
       LinkedHashSet<String> seenEntries,
       String rawEntry,
       Map<String, String> expansionVariables) {
+    if (rawEntry == null) {
+      return;
+    }
     String normalized = normalizeWindowsPath(expandWindowsVariables(rawEntry, expansionVariables));
     if (normalized == null) {
       return;
@@ -484,23 +495,58 @@ public final class CommandLaunchHelper {
     environment.put(PATH_KEY, rebuiltWindowsPath);
   }
 
+  static String getWindowsRegistryPath(String environmentKey) {
+    if (environmentKey == null || environmentKey.trim().isEmpty()) {
+      return "";
+    }
+    return WINDOWS_REGISTRY_PATH_CACHE.computeIfAbsent(
+        environmentKey, CommandLaunchHelper::loadWindowsRegistryPath);
+  }
+
+  static void setWindowsRegistryPathReaderForTest(WindowsRegistryPathReader reader) {
+    windowsRegistryPathReader = reader == null ? DEFAULT_WINDOWS_REGISTRY_PATH_READER : reader;
+    resetWindowsRegistryPathCacheForTest();
+  }
+
+  static void resetWindowsRegistryPathReaderForTest() {
+    windowsRegistryPathReader = DEFAULT_WINDOWS_REGISTRY_PATH_READER;
+    resetWindowsRegistryPathCacheForTest();
+  }
+
+  static void resetWindowsRegistryPathCacheForTest() {
+    WINDOWS_REGISTRY_PATH_CACHE.clear();
+  }
+
+  private static String loadWindowsRegistryPath(String environmentKey) {
+    String path = windowsRegistryPathReader.readPath(environmentKey);
+    return path == null ? "" : path;
+  }
+
+  static String readWindowsRegistryPathForTest(
+      String environmentKey, WindowsRegistryProcessStarter processStarter) {
+    return readWindowsRegistryPath(environmentKey, processStarter);
+  }
+
   private static String readWindowsRegistryPath(String environmentKey) {
+    return readWindowsRegistryPath(environmentKey, DEFAULT_WINDOWS_REGISTRY_PROCESS_STARTER);
+  }
+
+  private static String readWindowsRegistryPath(
+      String environmentKey, WindowsRegistryProcessStarter processStarter) {
+    WindowsRegistryProcessStarter starter =
+        processStarter == null ? DEFAULT_WINDOWS_REGISTRY_PROCESS_STARTER : processStarter;
     ProcessBuilder query = new ProcessBuilder("reg", "query", environmentKey, "/v", PATH_KEY_MIXED);
     query.redirectErrorStream(true);
     try {
-      Process process = query.start();
+      Process process = starter.start(query);
       String output = readProcessOutput(process);
       int exitCode = waitForProcess(process);
-      if (exitCode == 0) {
-        return extractRegistryPath(output);
-      }
-      if (isMissingRegistryValue(output)) {
+      if (exitCode != 0) {
         return "";
       }
-      throw new IllegalStateException(
-          "Unable to read registry Path from " + environmentKey + ": " + output);
+      return extractRegistryPath(output);
     } catch (IOException e) {
-      throw new IllegalStateException("Unable to query registry Path from " + environmentKey, e);
+      return "";
     }
   }
 
@@ -522,20 +568,40 @@ public final class CommandLaunchHelper {
       return process.waitFor();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("Interrupted while reading registry Path", e);
+      return -1;
     }
   }
 
   private static String extractRegistryPath(String output) {
-    Matcher matcher = REGISTRY_PATH_PATTERN.matcher(output);
-    return matcher.find() ? matcher.group(1).trim() : "";
+    if (output == null || output.trim().isEmpty()) {
+      return "";
+    }
+    String[] lines = output.split("\\R");
+    for (String line : lines) {
+      String path = extractRegistryPathFromLine(line);
+      if (path != null) {
+        return path;
+      }
+    }
+    return "";
   }
 
-  private static boolean isMissingRegistryValue(String output) {
-    String normalized = output == null ? "" : output.toLowerCase(Locale.ROOT);
-    return normalized.contains("unable to find")
-        || normalized.contains("was unable to find")
-        || normalized.contains("cannot find");
+  private static String extractRegistryPathFromLine(String line) {
+    if (line == null) {
+      return null;
+    }
+    String trimmed = line.trim();
+    if (trimmed.isEmpty()) {
+      return null;
+    }
+    String[] columns = trimmed.split("\\s+", 3);
+    if (columns.length < 3 || !PATH_KEY_MIXED.equalsIgnoreCase(columns[0])) {
+      return null;
+    }
+    if (!columns[1].toUpperCase(Locale.ROOT).startsWith("REG_")) {
+      return null;
+    }
+    return columns[2].trim();
   }
 
   private static void addCandidateRoot(LinkedHashSet<Path> roots, String rootText) {
@@ -613,6 +679,28 @@ public final class CommandLaunchHelper {
 
     public File getWorkingDirectory() {
       return workingDirectory;
+    }
+  }
+
+  interface WindowsRegistryProcessStarter {
+    Process start(ProcessBuilder processBuilder) throws IOException;
+  }
+
+  interface WindowsRegistryPathReader {
+    String readPath(String environmentKey);
+  }
+
+  private static final class ProcessWindowsRegistryPathReader implements WindowsRegistryPathReader {
+    private final WindowsRegistryProcessStarter processStarter;
+
+    private ProcessWindowsRegistryPathReader(WindowsRegistryProcessStarter processStarter) {
+      this.processStarter =
+          processStarter == null ? DEFAULT_WINDOWS_REGISTRY_PROCESS_STARTER : processStarter;
+    }
+
+    @Override
+    public String readPath(String environmentKey) {
+      return readWindowsRegistryPath(environmentKey, processStarter);
     }
   }
 }

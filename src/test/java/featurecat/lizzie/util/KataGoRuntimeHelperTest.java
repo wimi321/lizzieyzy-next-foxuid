@@ -3,18 +3,15 @@ package featurecat.lizzie.util;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import featurecat.lizzie.Config;
+import featurecat.lizzie.ConfigTestHelper;
 import featurecat.lizzie.Lizzie;
-import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
-import sun.misc.Unsafe;
 
 public class KataGoRuntimeHelperTest {
-  private static final Unsafe UNSAFE = loadUnsafe();
   private static final String OS_NAME_PROPERTY = "os.name";
   private static final String PATH_SEPARATOR = System.getProperty("path.separator");
   private static final String WINDOWS_OS_NAME = "Windows 11";
@@ -127,10 +124,8 @@ public class KataGoRuntimeHelperTest {
     }
   }
 
-  private static TestConfig createTestConfig(Path runtimeWorkDirectory) throws Exception {
-    TestConfig config = (TestConfig) UNSAFE.allocateInstance(TestConfig.class);
-    config.runtimeWorkDirectory = runtimeWorkDirectory.toFile();
-    return config;
+  private static Config createTestConfig(Path runtimeWorkDirectory) {
+    return ConfigTestHelper.createForTests(runtimeWorkDirectory);
   }
 
   private static void withOsName(String osName, ThrowingRunnable action) throws Exception {
@@ -172,28 +167,7 @@ public class KataGoRuntimeHelperTest {
     return path.toAbsolutePath().normalize();
   }
 
-  private static Unsafe loadUnsafe() {
-    try {
-      Field field = Unsafe.class.getDeclaredField("theUnsafe");
-      field.setAccessible(true);
-      return (Unsafe) field.get(null);
-    } catch (ReflectiveOperationException e) {
-      throw new IllegalStateException("Unable to access Unsafe", e);
-    }
-  }
-
   private interface ThrowingRunnable {
     void run() throws Exception;
-  }
-
-  private static final class TestConfig extends Config {
-    private File runtimeWorkDirectory;
-
-    private TestConfig() throws IOException {}
-
-    @Override
-    public File getRuntimeWorkDirectory() {
-      return runtimeWorkDirectory;
-    }
   }
 }

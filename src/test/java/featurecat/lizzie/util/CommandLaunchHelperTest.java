@@ -5,12 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.jdesktop.swingx.util.OS;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 public class CommandLaunchHelperTest {
@@ -123,8 +131,124 @@ public class CommandLaunchHelperTest {
         actual);
   }
 
+  @Test
+  void buildWindowsPathEntriesIgnoresNullExecutableAndWorkingDirectoryEntries() {
+    List<String> actual =
+        CommandLaunchHelper.buildWindowsPathEntries(
+            Collections.<String>emptyList(),
+            null,
+            Collections.<String, String>emptyMap(),
+            Collections.<String, String>emptyMap(),
+            null,
+            null);
+
+    assertListEquals(Collections.<String>emptyList(), actual);
+  }
+
+  @Test
+  void readWindowsRegistryPathTreatsMissingRegExecutableAsSoftFailure() throws Exception {
+    AtomicReference<List<String>> command = new AtomicReference<List<String>>();
+
+    assertEquals(
+        "",
+        CommandLaunchHelper.readWindowsRegistryPathForTest(
+            "HKCU\\Environment",
+            query -> {
+              command.set(query.command());
+              throw new IOException("missing reg executable");
+            }));
+    assertIterableEquals(
+        Arrays.asList("reg", "query", "HKCU\\Environment", "/v", "Path"), command.get());
+  }
+
+  @Test
+  void extractRegistryPathHandlesCaseAndWhitespaceVariations() throws Exception {
+    String output =
+        "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\n"
+            + "    path    REG_EXPAND_SZ    C:\\Windows\\System32;C:\\Tools\n";
+
+    assertEquals(
+        "C:\\Windows\\System32;C:\\Tools",
+        invokePrivateStringMethod("extractRegistryPath", output));
+  }
+
+  @Test
+  void windowsRegistryPathCacheReadsEachHiveOnce() throws Exception {
+    AtomicInteger reads = new AtomicInteger();
+    CommandLaunchHelper.setWindowsRegistryPathReaderForTest(
+        environmentKey -> {
+          reads.incrementAndGet();
+          return environmentKey + "-cached";
+        });
+    try {
+      CommandLaunchHelper.resetWindowsRegistryPathCacheForTest();
+
+      assertEquals(
+          "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment-cached",
+          CommandLaunchHelper.getWindowsRegistryPath(
+              "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"));
+      assertEquals(
+          "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment-cached",
+          CommandLaunchHelper.getWindowsRegistryPath(
+              "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"));
+      assertEquals(
+          "HKCU\\Environment-cached",
+          CommandLaunchHelper.getWindowsRegistryPath("HKCU\\Environment"));
+
+      assertEquals(2, reads.get());
+    } finally {
+      CommandLaunchHelper.resetWindowsRegistryPathReaderForTest();
+      CommandLaunchHelper.resetWindowsRegistryPathCacheForTest();
+    }
+  }
+
+  @Test
+  void configureProcessBuilderOnNonWindowsPreservesPathAndAppliesWorkingDirectory()
+      throws Exception {
+    Assumptions.assumeFalse(OS.isWindows(), "non-Windows scenario");
+
+    Path root = Files.createTempDirectory("command-launch-non-windows-root");
+    try {
+      Path engineDir = Files.createDirectories(root.resolve("engine"));
+      List<String> command = Arrays.asList(engineDir.resolve("katago").toString());
+      CommandLaunchHelper.LaunchSpec launchSpec = CommandLaunchHelper.prepare(command);
+
+      ProcessBuilder processBuilder = new ProcessBuilder("echo");
+      processBuilder.directory(root.toFile());
+      processBuilder.environment().put("PATH", "/usr/bin:/custom/bin");
+      processBuilder.environment().put("Path", "/tmp/mixed-case-path");
+
+      CommandLaunchHelper.configureProcessBuilder(processBuilder, launchSpec);
+
+      assertPathEquals(engineDir, processBuilder.directory().toPath());
+      assertEquals("/usr/bin:/custom/bin", processBuilder.environment().get("PATH"));
+      assertEquals("/tmp/mixed-case-path", processBuilder.environment().get("Path"));
+    } finally {
+      deleteTree(root);
+    }
+  }
+
   private static void assertListEquals(List<String> expected, List<String> actual) {
     assertIterableEquals(expected, actual);
+  }
+
+  private static String invokePrivateStringMethod(String methodName, String argument)
+      throws Exception {
+    Method method = CommandLaunchHelper.class.getDeclaredMethod(methodName, String.class);
+    method.setAccessible(true);
+    return invokeString(method, argument);
+  }
+
+  private static String invokeString(Method method, String argument) throws Exception {
+    try {
+      return (String) method.invoke(null, argument);
+    } catch (InvocationTargetException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof Exception) {
+        throw (Exception) cause;
+      }
+      throw e;
+    }
   }
 
   private static void assertPathEquals(Path expected, Path actual) {
