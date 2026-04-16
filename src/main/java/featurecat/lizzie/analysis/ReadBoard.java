@@ -65,6 +65,7 @@ public class ReadBoard {
   private boolean hideFromPlace = false;
   public boolean editMode = false;
   private final SyncConflictTracker conflictTracker = new SyncConflictTracker();
+  private final SyncHistoryJumpTracker historyJumpTracker = new SyncHistoryJumpTracker();
 
   private SyncSnapshotRebuildPolicy rebuildPolicy() {
     return new SyncSnapshotRebuildPolicy(Board.boardWidth);
@@ -303,7 +304,7 @@ public class ReadBoard {
       tempcount = new ArrayList<Integer>();
     }
     if (line.startsWith("clear")) {
-      conflictTracker.clear();
+      resetSyncTrackers();
       Lizzie.board.clear(false);
       Lizzie.frame.refresh();
     }
@@ -313,14 +314,14 @@ public class ReadBoard {
         int boardWidth = Integer.parseInt(params[1]);
         int boardHeight = Integer.parseInt(params[2]);
         if (boardWidth != Board.boardWidth || boardHeight != Board.boardHeight) {
-          conflictTracker.clear();
+          resetSyncTrackers();
           Lizzie.board.reopen(boardWidth, boardHeight);
         } else {
-          conflictTracker.clear();
+          resetSyncTrackers();
           Lizzie.board.clear(false);
         }
       } else {
-        conflictTracker.clear();
+        resetSyncTrackers();
         Lizzie.board.clear(false);
       }
     }
@@ -344,7 +345,7 @@ public class ReadBoard {
     }
     if (line.startsWith("endsync")) {
       noMsg = true;
-      conflictTracker.clear();
+      resetSyncTrackers();
       tempcount = new ArrayList<Integer>();
       Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
@@ -356,7 +357,7 @@ public class ReadBoard {
       }
     }
     if (line.startsWith("stopsync")) {
-      conflictTracker.clear();
+      resetSyncTrackers();
       tempcount = new ArrayList<Integer>();
       Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
@@ -546,7 +547,7 @@ public class ReadBoard {
     //    }
     if (tempcount.size() > Board.boardWidth * Board.boardHeight) {
       tempcount = new ArrayList<Integer>();
-      conflictTracker.clear();
+      resetSyncTrackers();
       return;
     }
     isSyncing = true;
@@ -664,7 +665,12 @@ public class ReadBoard {
       }
     }
     if (!needReSync) {
-      applySyncViewState(played, node, node2);
+      BoardHistoryNode currentSyncEndNode = Lizzie.board.getHistory().getMainEnd();
+      boolean restoredSyncEnd = restoreSyncEndAfterHistoryJump(node);
+      if (restoredSyncEnd) {
+        needRefresh = true;
+      }
+      applySyncViewState(played, restoredSyncEnd ? currentSyncEndNode : node, currentSyncEndNode);
     }
     if (needReSync && !isSecondTime) {
       int[] snapshotCodes = getSnapshotCodes();
@@ -674,22 +680,29 @@ public class ReadBoard {
         needRefresh = true;
       } else {
         if (!played && !needRefresh) {
-          if (rebuildPolicy().shouldRebuildImmediately(node2, snapshotCodes)) {
-            conflictTracker.clear();
+          if (tryApplyHistorySnapshotMatch(node, node2, snapshotCodes)) {
+            played = true;
+            needReSync = false;
+            needRefresh = true;
+          } else if (rebuildPolicy().shouldRebuildImmediatelyWithoutHistory(node2)) {
+            resetSyncTrackers();
             Lizzie.board.clear(false);
             syncBoardStones(true);
             isSyncing = false;
             return;
-          }
-          SyncConflictTracker.Decision conflictDecision = conflictTracker.evaluate(snapshotCodes);
-          if (conflictDecision == SyncConflictTracker.Decision.HOLD) {
-            isSyncing = false;
-            return;
+          } else {
+            SyncConflictTracker.Decision conflictDecision = conflictTracker.evaluate(snapshotCodes);
+            if (conflictDecision == SyncConflictTracker.Decision.HOLD) {
+              isSyncing = false;
+              return;
+            }
           }
         }
-        conflictTracker.clear();
-        Lizzie.board.clear(false);
-        syncBoardStones(true);
+        if (needReSync) {
+          resetSyncTrackers();
+          Lizzie.board.clear(false);
+          syncBoardStones(true);
+        }
       }
     }
     if (!needReSync) {
@@ -738,6 +751,11 @@ public class ReadBoard {
     return codes;
   }
 
+  private void resetSyncTrackers() {
+    conflictTracker.clear();
+    historyJumpTracker.clear();
+  }
+
   private void restoreViewedNodeAfterSync(
       boolean played, BoardHistoryNode currentNode, BoardHistoryNode syncEndNode) {
     if (Lizzie.frame.bothSync
@@ -769,12 +787,40 @@ public class ReadBoard {
     if (!canApplySingleMoveRecovery(syncStartNode, move, snapshotCodes)) {
       return false;
     }
+    historyJumpTracker.clear();
     Lizzie.board.moveToAnyPosition(syncStartNode);
     Lizzie.board.placeForSync(move.x, move.y, move.color, false);
     if (Lizzie.config.alwaysSyncBoardStat || showInBoard) {
       Lizzie.frame.lastMove();
     }
     applySyncViewState(true, currentNode, syncStartNode);
+    return true;
+  }
+
+  private boolean tryApplyHistorySnapshotMatch(
+      BoardHistoryNode currentNode, BoardHistoryNode syncStartNode, int[] snapshotCodes) {
+    Optional<BoardHistoryNode> matchedNode =
+        rebuildPolicy().findMatchingHistoryNode(syncStartNode, snapshotCodes);
+    if (!matchedNode.isPresent()) {
+      return false;
+    }
+    historyJumpTracker.remember(currentNode, matchedNode.get(), syncStartNode);
+    if (currentNode != matchedNode.get()) {
+      Lizzie.board.moveToAnyPosition(matchedNode.get());
+      Lizzie.frame.renderVarTree(0, 0, false, false);
+    }
+    return true;
+  }
+
+  private boolean restoreSyncEndAfterHistoryJump(BoardHistoryNode currentNode) {
+    Optional<BoardHistoryNode> restoreTarget =
+        historyJumpTracker.consumeStableSnapshotTarget(
+            currentNode, () -> Lizzie.board.getHistory().getMainEnd());
+    if (!restoreTarget.isPresent()) {
+      return false;
+    }
+    Lizzie.board.moveToAnyPosition(restoreTarget.get());
+    Lizzie.frame.renderVarTree(0, 0, false, false);
     return true;
   }
 
@@ -861,7 +907,7 @@ public class ReadBoard {
 
   public void shutdown() {
     noMsg = true;
-    conflictTracker.clear();
+    resetSyncTrackers();
     tempcount = new ArrayList<Integer>();
     Lizzie.frame.syncBoard = false;
     Lizzie.frame.bothSync = false;
