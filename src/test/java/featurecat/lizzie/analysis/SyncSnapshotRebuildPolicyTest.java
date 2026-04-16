@@ -108,12 +108,10 @@ public class SyncSnapshotRebuildPolicyTest {
                 stones(placement(1, 1, Stone.BLACK), placement(0, 0, Stone.WHITE)),
                 Optional.of(new int[] {0, 0}),
                 Stone.WHITE));
-    int[] snapshot =
-        snapshot(previousNode.getData().stones, Optional.of(new int[] {1, 1}), 3);
+    int[] snapshot = snapshot(previousNode.getData().stones, Optional.of(new int[] {1, 1}), 3);
     snapshot[0] = 4;
 
-    Optional<BoardHistoryNode> matchedNode =
-        policy.findMatchingHistoryNode(currentNode, snapshot);
+    Optional<BoardHistoryNode> matchedNode = policy.findMatchingHistoryNode(currentNode, snapshot);
 
     assertFalse(matchedNode.isPresent());
   }
