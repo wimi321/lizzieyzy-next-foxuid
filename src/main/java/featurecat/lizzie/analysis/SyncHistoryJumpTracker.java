@@ -7,17 +7,26 @@ import java.util.function.Supplier;
 final class SyncHistoryJumpTracker {
   private BoardHistoryNode pendingMatchedNode;
 
-  void remember(BoardHistoryNode matchedNode, BoardHistoryNode syncEndNode) {
+  synchronized void remember(BoardHistoryNode matchedNode, BoardHistoryNode syncEndNode) {
     pendingMatchedNode = matchedNode == syncEndNode ? null : matchedNode;
   }
 
-  void remember(
+  synchronized void remember(
       BoardHistoryNode currentNode, BoardHistoryNode matchedNode, BoardHistoryNode syncEndNode) {
-    pendingMatchedNode =
-        currentNode == matchedNode || matchedNode == syncEndNode ? null : matchedNode;
+    if (matchedNode == syncEndNode) {
+      pendingMatchedNode = null;
+      return;
+    }
+    if (currentNode == matchedNode) {
+      if (pendingMatchedNode != matchedNode) {
+        pendingMatchedNode = null;
+      }
+      return;
+    }
+    pendingMatchedNode = matchedNode;
   }
 
-  Optional<BoardHistoryNode> consumeStableSnapshotTarget(
+  synchronized Optional<BoardHistoryNode> consumeStableSnapshotTarget(
       BoardHistoryNode currentNode, Supplier<BoardHistoryNode> syncEndSupplier) {
     if (pendingMatchedNode == null) {
       return Optional.empty();
@@ -35,7 +44,11 @@ final class SyncHistoryJumpTracker {
     return Optional.of(syncEndNode);
   }
 
-  void clear() {
+  synchronized void onLocalNavigation() {
+    pendingMatchedNode = null;
+  }
+
+  synchronized void clear() {
     pendingMatchedNode = null;
   }
 }

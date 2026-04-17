@@ -2384,6 +2384,7 @@ public class Board {
         if (history.getCurrentHistoryNode().hasRemovedStone())
           history.getCurrentHistoryNode().clearAndSyncBoard(true);
         updateIsBest();
+        notifyReadBoardLocalHistoryNavigation();
         clearPressStoneInfo(null);
         if (needRefresh) {
           clearAfterMove();
@@ -2527,6 +2528,7 @@ public class Board {
       if (history.nextVariation(idx).isPresent()) {
         // Update leelaz board position, before updating to next node
         updateIsBest();
+        notifyReadBoardLocalHistoryNavigation();
         Optional<int[]> lastMoveOpt = history.getData().lastMove;
         // history.getCurrentHistoryNode().placeExtraStones();
         if (lastMoveOpt.isPresent()) {
@@ -2979,6 +2981,7 @@ public class Board {
         history.getCurrentHistoryNode().undoExtraStones();
         history.previous();
         if (needSync) history.getCurrentHistoryNode().clearAndSyncBoard(false);
+        notifyReadBoardLocalHistoryNavigation();
         if (needRefresh) {
           clearAfterMove();
           Lizzie.frame.refresh();
@@ -2989,6 +2992,12 @@ public class Board {
       }
       modifyEnd();
       return false;
+    }
+  }
+
+  private void notifyReadBoardLocalHistoryNavigation() {
+    if (Lizzie.frame != null && Lizzie.frame.readBoard != null) {
+      Lizzie.frame.readBoard.onLocalHistoryNavigation();
     }
   }
 
