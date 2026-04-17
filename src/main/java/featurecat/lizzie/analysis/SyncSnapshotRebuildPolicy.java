@@ -25,7 +25,37 @@ final class SyncSnapshotRebuildPolicy {
     if (!marker.valid) {
       return Optional.empty();
     }
+    if (!marker.present) {
+      return findUniqueStoneMatch(syncStartNode, snapshotCodes);
+    }
+    return findMarkedMatch(syncStartNode, snapshotCodes, marker);
+  }
 
+  private boolean matchesSnapshot(BoardData candidate, int[] snapshotCodes, SnapshotMarker marker) {
+    return matchesStones(candidate.stones, snapshotCodes) && matchesMarker(candidate, marker);
+  }
+
+  private Optional<BoardHistoryNode> findUniqueStoneMatch(
+      BoardHistoryNode syncStartNode, int[] snapshotCodes) {
+    BoardHistoryNode candidate = syncStartNode;
+    BoardHistoryNode matchedNode = null;
+    while (true) {
+      if (matchesStones(candidate.getData().stones, snapshotCodes)) {
+        if (matchedNode != null) {
+          return Optional.empty();
+        }
+        matchedNode = candidate;
+      }
+      Optional<BoardHistoryNode> previous = candidate.previous();
+      if (!previous.isPresent()) {
+        return Optional.ofNullable(matchedNode);
+      }
+      candidate = previous.get();
+    }
+  }
+
+  private Optional<BoardHistoryNode> findMarkedMatch(
+      BoardHistoryNode syncStartNode, int[] snapshotCodes, SnapshotMarker marker) {
     BoardHistoryNode candidate = syncStartNode;
     while (true) {
       if (matchesSnapshot(candidate.getData(), snapshotCodes, marker)) {
@@ -37,10 +67,6 @@ final class SyncSnapshotRebuildPolicy {
       }
       candidate = previous.get();
     }
-  }
-
-  private boolean matchesSnapshot(BoardData candidate, int[] snapshotCodes, SnapshotMarker marker) {
-    return matchesStones(candidate.stones, snapshotCodes) && matchesMarker(candidate, marker);
   }
 
   private boolean matchesStones(Stone[] stones, int[] snapshotCodes) {

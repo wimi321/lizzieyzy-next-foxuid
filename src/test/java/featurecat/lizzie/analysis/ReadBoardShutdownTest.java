@@ -2,6 +2,7 @@ package featurecat.lizzie.analysis;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import featurecat.lizzie.Lizzie;
@@ -16,11 +17,19 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import javax.swing.SwingUtilities;
 import org.junit.jupiter.api.Test;
 
 class ReadBoardShutdownTest {
+  private static final long MAX_EDT_RESTART_BLOCK_MS = 150L;
+  private static final long SHUTDOWN_WAIT_BLOCK_MS = 300L;
+  private static final long RESTART_TIMEOUT_MS = 2L;
+
   @Test
   void shutdownReleasesHostedReadBoardResources() throws Exception {
     LizzieFrame previousFrame = Lizzie.frame;
@@ -71,6 +80,43 @@ class ReadBoardShutdownTest {
       assertTrue(
           outputStream.writtenText().contains("quit"),
           "shutdown should send quit before releasing resources.");
+    } finally {
+      Lizzie.frame = previousFrame;
+    }
+  }
+
+  @Test
+  void openReadBoardJavaDoesNotBlockEventDispatchThreadWhileRestarting() throws Exception {
+    LizzieFrame previousFrame = Lizzie.frame;
+    try {
+      TrackingLizzieFrame frame = allocate(TrackingLizzieFrame.class);
+      ReadBoard existingReadBoard = allocate(ReadBoard.class);
+      frame.initialize(existingReadBoard, SHUTDOWN_WAIT_BLOCK_MS);
+      frame.readBoard = existingReadBoard;
+      Lizzie.frame = frame;
+
+      AtomicLong elapsedMs = new AtomicLong();
+      SwingUtilities.invokeAndWait(
+          () -> {
+            long startNanos = System.nanoTime();
+            frame.openReadBoardJava();
+            elapsedMs.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos));
+          });
+
+      assertTrue(
+          elapsedMs.get() < MAX_EDT_RESTART_BLOCK_MS,
+          "restarting readboard should return quickly on the event dispatch thread.");
+      assertTrue(
+          frame.awaitShutdownStarted(RESTART_TIMEOUT_MS, TimeUnit.SECONDS),
+          "restart should begin shutting down the existing readboard in the background.");
+      assertTrue(
+          frame.awaitRestart(RESTART_TIMEOUT_MS, TimeUnit.SECONDS),
+          "restart should eventually create a replacement readboard.");
+      assertFalse(
+          frame.startedBeforeShutdownCompleted,
+          "replacement readboard should not start before the previous instance finishes shutting down.");
+      assertSame(
+          frame.createdReadBoard, frame.readBoard, "restart should publish the new readboard.");
     } finally {
       Lizzie.frame = previousFrame;
     }
@@ -162,6 +208,55 @@ class ReadBoardShutdownTest {
     @Override
     public synchronized void close() {
       closeCalled = true;
+    }
+  }
+
+  private static final class TrackingLizzieFrame extends LizzieFrame {
+    private CountDownLatch shutdownStartedSignal;
+    private CountDownLatch restartSignal;
+    private ReadBoard existingReadBoard;
+    private ReadBoard createdReadBoard;
+    private long shutdownWaitBlockMs;
+    private volatile boolean shutdownCompleted;
+    private volatile boolean startedBeforeShutdownCompleted;
+
+    private void initialize(ReadBoard existingReadBoard, long shutdownWaitBlockMs) {
+      this.existingReadBoard = existingReadBoard;
+      this.shutdownWaitBlockMs = shutdownWaitBlockMs;
+      this.shutdownStartedSignal = new CountDownLatch(1);
+      this.restartSignal = new CountDownLatch(1);
+    }
+
+    private boolean awaitShutdownStarted(long timeout, TimeUnit unit) throws InterruptedException {
+      return shutdownStartedSignal.await(timeout, unit);
+    }
+
+    private boolean awaitRestart(long timeout, TimeUnit unit) throws InterruptedException {
+      return restartSignal.await(timeout, unit);
+    }
+
+    @Override
+    protected void shutdownReadBoard(ReadBoard targetReadBoard) {
+      if (targetReadBoard != existingReadBoard) {
+        throw new AssertionError("unexpected readboard shutdown target");
+      }
+      shutdownStartedSignal.countDown();
+      try {
+        Thread.sleep(shutdownWaitBlockMs);
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError(ex);
+      }
+      shutdownCompleted = true;
+      readBoard = null;
+    }
+
+    @Override
+    protected ReadBoard createJavaReadBoard() throws Exception {
+      startedBeforeShutdownCompleted = !shutdownCompleted;
+      createdReadBoard = allocate(ReadBoard.class);
+      restartSignal.countDown();
+      return createdReadBoard;
     }
   }
 }

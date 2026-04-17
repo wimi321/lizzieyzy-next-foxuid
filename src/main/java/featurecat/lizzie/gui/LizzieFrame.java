@@ -2251,20 +2251,7 @@ public class LizzieFrame extends JFrame {
   }
 
   public void openReadBoardJava() {
-    if (readBoard != null) {
-      try {
-        readBoard.shutdown();
-      } catch (Exception e) {
-        e.printStackTrace();
-        // Failed to save config
-      }
-    }
-    try {
-      readBoard = new ReadBoard(true, true);
-    } catch (Exception e) {
-      // TODO Auto-generated catch block
-      e.printStackTrace();
-    }
+    reopenReadBoard(this::createJavaReadBoard);
   }
 
   public void openBoardSync() {
@@ -2276,40 +2263,73 @@ public class LizzieFrame extends JFrame {
       showLegacyReadBoardDownloadDialog();
       return;
     }
-    if (readBoard == null) {
-      try {
-        readBoard = new ReadBoard(true, false);
-      } catch (Exception e) {
-        // TODO Auto-generated catch block
-        e.printStackTrace();
-        try {
-          readBoard = new ReadBoard(false, false);
-        } catch (Exception e1) {
-          // TODO Auto-generated catch block
-          e1.printStackTrace();
-        }
-      }
+    reopenReadBoard(this::createNativeReadBoard);
+  }
 
-    } else {
-      try {
-        readBoard.shutdown();
-      } catch (Exception e) {
-        e.printStackTrace();
-        // Failed to save config
-      }
-      try {
-        readBoard = new ReadBoard(true, false);
-      } catch (Exception e) {
-        // TODO Auto-generated catch block
-        e.printStackTrace();
-        try {
-          readBoard = new ReadBoard(false, false);
-        } catch (Exception e1) {
-          // TODO Auto-generated catch block
-          e1.printStackTrace();
-        }
-      }
+  private void reopenReadBoard(ReadBoardFactory factory) {
+    if (!SwingUtilities.isEventDispatchThread() || readBoard == null) {
+      replaceReadBoard(factory);
+      return;
     }
+    ReadBoard existingReadBoard = readBoard;
+    Thread restartThread =
+        new Thread(
+            () -> {
+              shutdownReadBoard(existingReadBoard);
+              SwingUtilities.invokeLater(
+                  () -> {
+                    if (readBoard == null) {
+                      startReadBoard(factory);
+                    }
+                  });
+            },
+            "lizzie-readboard-restart");
+    restartThread.start();
+  }
+
+  private void replaceReadBoard(ReadBoardFactory factory) {
+    ReadBoard existingReadBoard = readBoard;
+    if (existingReadBoard != null) {
+      shutdownReadBoard(existingReadBoard);
+    }
+    startReadBoard(factory);
+  }
+
+  private void startReadBoard(ReadBoardFactory factory) {
+    try {
+      readBoard = factory.create();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  protected void shutdownReadBoard(ReadBoard targetReadBoard) {
+    if (targetReadBoard == null) {
+      return;
+    }
+    try {
+      targetReadBoard.shutdown();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  protected ReadBoard createJavaReadBoard() throws Exception {
+    return new ReadBoard(true, true);
+  }
+
+  protected ReadBoard createNativeReadBoard() throws Exception {
+    try {
+      return new ReadBoard(true, false);
+    } catch (Exception e) {
+      e.printStackTrace();
+      return new ReadBoard(false, false);
+    }
+  }
+
+  @FunctionalInterface
+  private interface ReadBoardFactory {
+    ReadBoard create() throws Exception;
   }
 
   private void showLegacyReadBoardDownloadDialog() {

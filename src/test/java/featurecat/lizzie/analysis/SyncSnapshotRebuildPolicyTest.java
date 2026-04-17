@@ -173,6 +173,35 @@ public class SyncSnapshotRebuildPolicyTest {
     assertEquals(currentNode, matchedNode.get());
   }
 
+  @Test
+  void returnsEmptyWhenSnapshotWithoutMarkerMatchesMultipleHistoryNodes() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    Stone[] repeatedStones = stones(placement(1, 1, Stone.BLACK));
+    BoardHistoryNode root = createNode(new Stone[BOARD_AREA], Optional.empty(), Stone.EMPTY);
+    BoardHistoryNode placedNode =
+        root.add(createNode(repeatedStones, Optional.of(new int[] {1, 1}), Stone.BLACK));
+    BoardHistoryNode passNode =
+        placedNode.add(
+            new BoardHistoryNode(
+                new BoardData(
+                    repeatedStones.clone(),
+                    Optional.empty(),
+                    Stone.WHITE,
+                    false,
+                    new Zobrist(),
+                    2,
+                    new int[BOARD_AREA],
+                    0,
+                    0,
+                    50,
+                    0)));
+
+    Optional<BoardHistoryNode> matchedNode =
+        policy.findMatchingHistoryNode(passNode, snapshot(repeatedStones, Optional.empty(), 0));
+
+    assertFalse(matchedNode.isPresent());
+  }
+
   private BoardHistoryNode createNode(
       Stone[] stones, Optional<int[]> lastMove, Stone lastMoveColor) {
     return new BoardHistoryNode(
