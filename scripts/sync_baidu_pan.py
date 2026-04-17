@@ -25,16 +25,7 @@ MAX_NETWORK_RETRIES = 5
 CURRENT_VERSION_FILENAME = '当前版本.txt'
 EXPECTED_ASSET_SUFFIXES = (
     'windows64.opencl.portable.zip',
-    'windows64.opencl.installer.exe',
-    'windows64.with-katago.portable.zip',
-    'windows64.with-katago.installer.exe',
     'windows64.nvidia.portable.zip',
-    'windows64.nvidia.installer.exe',
-    'windows64.without.engine.portable.zip',
-    'windows64.without.engine.installer.exe',
-    'mac-arm64.with-katago.dmg',
-    'mac-amd64.with-katago.dmg',
-    'linux64.with-katago.zip',
 )
 
 
@@ -44,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--local-release-dir',
-        help='Optional local directory with the 11 public release assets. If omitted, stream from GitHub release directly.',
+        help='Optional local directory with the mirrored release assets. If omitted, stream from GitHub release directly.',
     )
     parser.add_argument(
         '--from-github-release',
@@ -683,6 +674,13 @@ def main() -> int:
     client.delete_paths(latest_delete_paths)
 
     history_items = client.list_dir(history_dir)
+    allowed_history_names = {asset.name for asset in assets}
+    history_delete_paths = [
+        item['path']
+        for item in history_items
+        if item.get('server_filename') not in allowed_history_names
+    ]
+    client.delete_paths(history_delete_paths)
     history_items_by_name = map_items_by_name(history_items)
     latest_items_by_name = map_items_by_name(latest_items)
 

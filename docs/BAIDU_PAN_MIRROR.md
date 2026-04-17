@@ -1,12 +1,12 @@
 # 百度网盘镜像维护说明
 
-这份文档只讲一件事：怎么把 GitHub release 的公开主资产，同步到一个固定的百度网盘共享目录里。
+这份文档只讲一件事：怎么把 GitHub release 里最适合国内用户的 2 个 Windows 免安装包，同步到一个固定的百度网盘共享目录里。
 
 当前方案固定为：
 
 - 百度网盘账号：个人网盘 / PCS
 - 分享方式：手动创建一次固定共享文件夹
-- 自动化：GitHub release 完成后，工作流自动上传 11 个公开主资产
+- 自动化：GitHub release 完成后，工作流自动上传 2 个 Windows 免安装主资产
 - README / release notes：后续统一展示固定百度网盘链接和提取码
 
 ## 一、你现在需要准备什么
@@ -122,7 +122,7 @@ python3 scripts/sync_baidu_pan.py \
   --dry-run
 ```
 
-如果 dry run 输出的 11 个文件名都对，再去掉 `--dry-run` 真跑。
+如果 dry run 输出的 2 个文件名都对，再去掉 `--dry-run` 真跑。
 
 如果你不想先把大包下载到自己电脑，也可以直接让脚本从 GitHub release 读取资产信息做 dry run：
 
@@ -141,7 +141,7 @@ python3 scripts/sync_baidu_pan.py \
 当前设计接在 `update-release-notes.yml` 后面：
 
 1. 先生成并更新 GitHub release notes
-2. 在 GitHub Actions runner 上下载当前 GitHub release 的 11 个公开主资产
+2. 在 GitHub Actions runner 上下载当前 GitHub release 的 2 个 Windows 免安装包
 3. 调用 `scripts/sync_baidu_pan.py`
 4. 自动同步到：
    - `最新版本/`
@@ -149,7 +149,7 @@ python3 scripts/sync_baidu_pan.py \
 
 行为固定为：
 
-- `最新版本` 只保留当前版本的 11 个公开主资产
+- `最新版本` 只保留当前版本的 2 个 Windows 免安装包
 - `历史版本/<release_tag>` 保留该版完整镜像
 - `最新版本/当前版本.txt` 会写入当前 release 信息、GitHub release URL，以及当时已经配置好的百度分享信息
 
@@ -159,7 +159,7 @@ python3 scripts/sync_baidu_pan.py \
 
 - 共享根目录链接可以打开
 - `最新版本` 和 `历史版本` 两个目录都存在
-- `最新版本` 里只有当前 release 的 11 个公开主资产
+- `最新版本` 里只有当前 release 的 2 个 Windows 免安装包
 - `历史版本/<release_tag>` 保留同一批文件
 - `当前版本.txt` 内容正确
 - 提取码可用
