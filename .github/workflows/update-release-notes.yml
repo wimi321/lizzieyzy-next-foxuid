@@ -56,7 +56,6 @@ jobs:
             --notes-file "dist/release-meta/${{ inputs.date_tag }}-release-notes.md"
 
       - name: Download public release assets for Baidu mirror
-        if: ${{ secrets.BAIDU_APP_KEY != '' && secrets.BAIDU_APP_SECRET != '' && secrets.BAIDU_REFRESH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -78,7 +77,6 @@ jobs:
             -p "${{ inputs.date_tag }}-linux64.with-katago.zip"
 
       - name: Sync public assets to Baidu Netdisk mirror
-        if: ${{ secrets.BAIDU_APP_KEY != '' && secrets.BAIDU_APP_SECRET != '' && secrets.BAIDU_REFRESH_TOKEN != '' }}
         env:
           BAIDU_APP_KEY: ${{ secrets.BAIDU_APP_KEY }}
           BAIDU_APP_SECRET: ${{ secrets.BAIDU_APP_SECRET }}
