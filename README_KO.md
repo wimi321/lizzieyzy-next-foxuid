@@ -186,6 +186,7 @@
 
 ## 사용자 문서
 
+- [지원 가이드](SUPPORT.md)
 - [설치 가이드](docs/INSTALL_KO.md)
 - [패키지 안내 (English)](docs/PACKAGES_EN.md)
 - [문제 해결 (English)](docs/TROUBLESHOOTING_EN.md)

@@ -186,6 +186,7 @@ The current macOS builds are still unsigned and not notarized. If macOS blocks t
 
 ## User Docs
 
+- [Support Guide](SUPPORT.md)
 - [Installation Guide](docs/INSTALL_EN.md)
 - [Package Overview](docs/PACKAGES_EN.md)
 - [Troubleshooting](docs/TROUBLESHOOTING_EN.md)

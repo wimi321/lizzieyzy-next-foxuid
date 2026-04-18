@@ -186,6 +186,7 @@
 
 ## 用户文档
 
+- [获取帮助](SUPPORT.md)
 - [安装说明](docs/INSTALL.md)
 - [发布包说明](docs/PACKAGES.md)
 - [常见问题与排错](docs/TROUBLESHOOTING.md)

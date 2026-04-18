@@ -186,6 +186,7 @@
 
 ## 利用者向けドキュメント
 
+- [サポートガイド](SUPPORT.md)
 - [インストールガイド](docs/INSTALL_JA.md)
 - [配布パッケージ一覧 (English)](docs/PACKAGES_EN.md)
 - [トラブル対応 (English)](docs/TROUBLESHOOTING_EN.md)
