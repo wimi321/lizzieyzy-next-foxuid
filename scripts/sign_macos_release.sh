@@ -105,11 +105,26 @@ for dmg in "${dmg_files[@]}"; do
   codesign --force --timestamp --keychain "$keychain" --sign "$sign_identity" "$signed_dmg"
 
   echo "Submitting $signed_dmg for notarization..."
+  notary_json="$work_dir/notary-submit.json"
   xcrun notarytool submit "$signed_dmg" \
     --apple-id "${APPLE_ID}" \
     --password "${APPLE_APP_PASSWORD}" \
     --team-id "${APPLE_TEAM_ID}" \
-    --wait
+    --wait \
+    --output-format json >"$notary_json"
+  cat "$notary_json"
+  submission_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$notary_json")"
+  notary_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$notary_json")"
+  if [[ "$notary_status" != "Accepted" ]]; then
+    echo "Notarization failed with status: $notary_status" >&2
+    if [[ -n "$submission_id" ]]; then
+      xcrun notarytool log "$submission_id" \
+        --apple-id "${APPLE_ID}" \
+        --password "${APPLE_APP_PASSWORD}" \
+        --team-id "${APPLE_TEAM_ID}" || true
+    fi
+    exit 1
+  fi
 
   xcrun stapler staple "$signed_dmg"
   spctl --assess --type open --context context:primary-signature -vvv "$signed_dmg" || true
