@@ -11,6 +11,8 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -32,6 +34,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
@@ -68,6 +71,8 @@ public class FoxKifuDownload extends JFrame {
   private ArrayList<String[]> rows;
   private boolean isSecondTimeReqEmpty = false;
   private boolean isRequestEmpty = false;
+  private JPanel progressGlassPane;
+  private JLabel progressMessageLabel;
 
   public FoxKifuDownload() {
     Lizzie.setFrameSize(this, 980, 680);
@@ -195,6 +200,7 @@ public class FoxKifuDownload extends JFrame {
             int col = table.columnAtPoint(e.getPoint());
             if (e.getClickCount() == 2) {
               if (row >= 0 && col >= 0 && foxReq != null) {
+                showProgressNotice("正在下载棋谱，请稍候…");
                 foxReq.sendCommand("chessid " + table.getValueAt(row, 10).toString());
               }
             }
@@ -340,7 +346,60 @@ public class FoxKifuDownload extends JFrame {
     Lizzie.config.lastFoxName = normalizedUser;
     Lizzie.config.uiConfig.put("last-fox-name", Lizzie.config.lastFoxName);
     saveConfigQuietly();
+    showProgressNotice("正在搜索野狐账号 \"" + normalizedUser + "\"，请稍候…");
     foxReq.sendCommand("user_name " + normalizedUser);
+  }
+
+  private void showProgressNotice(String message) {
+    javax.swing.SwingUtilities.invokeLater(
+        () -> {
+          ensureProgressOverlay();
+          progressMessageLabel.setText(message);
+          presentWindow();
+          progressGlassPane.setVisible(true);
+          progressGlassPane.revalidate();
+          progressGlassPane.repaint();
+        });
+  }
+
+  private void hideProgressNotice() {
+    javax.swing.SwingUtilities.invokeLater(
+        () -> {
+          if (progressGlassPane != null) {
+            progressGlassPane.setVisible(false);
+          }
+        });
+  }
+
+  private void ensureProgressOverlay() {
+    if (progressGlassPane != null) {
+      return;
+    }
+    progressGlassPane = new JPanel(new GridBagLayout());
+    progressGlassPane.setOpaque(false);
+
+    JPanel card = new JPanel(new BorderLayout(12, 10));
+    card.setBackground(new Color(250, 250, 250));
+    card.setBorder(
+        javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createLineBorder(new Color(96, 112, 128)),
+            javax.swing.BorderFactory.createEmptyBorder(16, 22, 16, 22)));
+
+    progressMessageLabel = new JFontLabel();
+    card.add(progressMessageLabel, BorderLayout.CENTER);
+
+    JProgressBar progressBar = new JProgressBar();
+    progressBar.setIndeterminate(true);
+    progressBar.setStringPainted(true);
+    progressBar.setString("处理中...");
+    progressBar.setPreferredSize(new Dimension(360, 22));
+    card.add(progressBar, BorderLayout.SOUTH);
+
+    GridBagConstraints gbc = new GridBagConstraints();
+    gbc.gridx = 0;
+    gbc.gridy = 0;
+    progressGlassPane.add(card, gbc);
+    setGlassPane(progressGlassPane);
   }
 
   public void receiveResult(String string) {
@@ -357,6 +416,7 @@ public class FoxKifuDownload extends JFrame {
       JSONObject jsonObject = new JSONObject(string);
       if (jsonObject.optInt("result", 0) != 0) {
         isSearching = false;
+        hideProgressNotice();
         Utils.showMsg(
             Lizzie.resourceBundle.getString("FoxKifuDownload.getKifuFailed")
                 + jsonObject.optString("resultstr", string),
@@ -388,11 +448,13 @@ public class FoxKifuDownload extends JFrame {
         Lizzie.frame.scheduleResumeAnalysisAfterLoad(200);
         Lizzie.frame.refresh();
         Lizzie.config.readKomi = oriReadKomi;
+        hideProgressNotice();
         if (Lizzie.config.foxAfterGet == 0) setExtendedState(JFrame.ICONIFIED);
         else if (Lizzie.config.foxAfterGet == 1) setVisible(false);
       }
     } catch (JSONException e1) {
       e1.printStackTrace();
+      hideProgressNotice();
       Utils.showMsg(
           Lizzie.resourceBundle.getString("FoxKifuDownload.getKifuFailed") + string, this);
       isSearching = false;
@@ -402,6 +464,7 @@ public class FoxKifuDownload extends JFrame {
   private void handleChessList(JSONArray jsonArray, String resolvedNickname, String resolvedUid)
       throws JSONException {
     isSearching = false;
+    hideProgressNotice();
     int oldRows = foxKifuInfos.size();
     int previousTabNumber = curTabNumber;
     boolean shouldAdvancePage = advanceToNextPageAfterLoad;

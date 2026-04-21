@@ -63,7 +63,8 @@ public class CheckVersion extends JDialog {
     textPane.setCaretPosition(0);
 
     JLabel label =
-        new JLabel(resourceBundle.getString("CheckVersion.currentVersion") + Lizzie.lizzieVersion);
+        new JLabel(
+            resourceBundle.getString("CheckVersion.currentVersion") + Lizzie.getAppDisplayName());
     label.setBounds(5, 5, 341, 15);
     getContentPane().add(label);
 

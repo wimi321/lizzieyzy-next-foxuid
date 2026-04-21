@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/release_metadata.sh"
 
 DATE_TAG="${1:-$(date +%F)}"
-APP_VERSION="${2:-2.5.3}"
+APP_VERSION="${2:-1.0.0}"
 JAR_PATH="${3:-target/lizzie-yzy2.5.3-shaded.jar}"
 WINDOWS_UPGRADE_UUID="${WINDOWS_UPGRADE_UUID:-c2ef73ec-f99a-4f3d-b950-f52c0186122a}"
 
@@ -43,6 +43,9 @@ WINDOWS_UPGRADE_UUID_OPENCL="${WINDOWS_UPGRADE_UUID_OPENCL:-0ec8b17f-06b0-4f6a-9
 ENGINE_BACKEND_MARKER_NAME="lizzieyzy-next-engine-backend.txt"
 NVIDIA_RUNTIME_PREPARE_SCRIPT="$ROOT_DIR/scripts/prepare_bundled_nvidia_runtime.py"
 NVIDIA_RUNTIME_STAGE_DIR="$DIST_DIR/nvidia-runtime"
+READBOARD_RELEASE_API="${READBOARD_RELEASE_API:-https://api.github.com/repos/qiyi71w/readboard/releases/latest}"
+READBOARD_CACHE_DIR="$ROOT_DIR/.cache/readboard"
+READBOARD_STAGE_DIR="$DIST_DIR/readboard"
 PYTHON_BIN=""
 
 resolve_python_bin() {
@@ -59,6 +62,108 @@ resolve_python_bin() {
   fi
   echo "Python not found. Install Python 3 to prepare the Windows NVIDIA runtime."
   exit 1
+}
+
+prepare_bundled_readboard_assets() {
+  resolve_python_bin
+  "$PYTHON_BIN" - "$READBOARD_RELEASE_API" "$READBOARD_CACHE_DIR" "$READBOARD_STAGE_DIR" <<'PY'
+import json
+import os
+import shutil
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+api_url, cache_dir, stage_dir = sys.argv[1:4]
+source_dir = os.environ.get("READBOARD_SOURCE_DIR", "").strip()
+
+def reset_dir(path):
+    if os.path.exists(path):
+        shutil.rmtree(path)
+    os.makedirs(path, exist_ok=True)
+
+def copy_contents(src, dst):
+    reset_dir(dst)
+    for name in os.listdir(src):
+        source = os.path.join(src, name)
+        target = os.path.join(dst, name)
+        if os.path.isdir(source):
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+
+def find_readboard_root(root):
+    candidates = []
+    for current, _dirs, files in os.walk(root):
+        lower_files = {name.lower() for name in files}
+        if "readboard.exe" in lower_files or "readboard.bat" in lower_files:
+            has_exe = "readboard.exe" in lower_files
+            candidates.append((0 if has_exe else 1, len(current), current))
+    if not candidates:
+        raise SystemExit("Native readboard package did not contain readboard.exe/readboard.bat")
+    candidates.sort()
+    return candidates[0][2]
+
+if source_dir:
+    if not os.path.isdir(source_dir):
+        raise SystemExit(f"READBOARD_SOURCE_DIR does not exist: {source_dir}")
+    copy_contents(find_readboard_root(source_dir), stage_dir)
+else:
+    os.makedirs(cache_dir, exist_ok=True)
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "LizzieYzy-Next-Packager",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        metadata = json.load(response)
+    asset = None
+    for candidate in metadata.get("assets", []):
+        name = candidate.get("name", "")
+        lower_name = name.lower()
+        if lower_name.endswith(".zip") and "readboard" in lower_name:
+            asset = candidate
+            break
+    if not asset or not asset.get("browser_download_url"):
+        raise SystemExit("Unable to find a native readboard zip in the latest release assets")
+
+    zip_name = asset.get("name") or "readboard.zip"
+    zip_path = os.path.join(cache_dir, zip_name)
+    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+        tmp_path = zip_path + ".tmp"
+        with urllib.request.urlopen(asset["browser_download_url"], timeout=120) as response:
+            with open(tmp_path, "wb") as out:
+                shutil.copyfileobj(response, out)
+        os.replace(tmp_path, zip_path)
+
+    temp_dir = tempfile.mkdtemp(prefix="readboard-", dir=cache_dir)
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(temp_dir)
+        copy_contents(find_readboard_root(temp_dir), stage_dir)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+readboard_exe = os.path.join(stage_dir, "readboard.exe")
+if not os.path.isfile(readboard_exe):
+    raise SystemExit("Windows release must include native readboard.exe")
+print(f"Prepared native readboard assets in {stage_dir}")
+PY
+}
+
+copy_bundled_readboard_assets() {
+  local input_dir="$1"
+
+  if [[ ! -f "$READBOARD_STAGE_DIR/readboard.exe" ]]; then
+    echo "Missing bundled native readboard.exe in $READBOARD_STAGE_DIR"
+    exit 1
+  fi
+
+  mkdir -p "$input_dir/readboard"
+  cp -R "$READBOARD_STAGE_DIR/." "$input_dir/readboard/"
 }
 
 rm -rf "$DIST_DIR"
@@ -127,6 +232,7 @@ copy_common_inputs() {
     mkdir -p "$input_dir/readboard_java"
     cp -R "$ROOT_DIR/src/main/resources/assets/readboard_java/." "$input_dir/readboard_java/"
   fi
+  copy_bundled_readboard_assets "$input_dir"
 }
 
 copy_bundle_engine_assets() {
@@ -330,7 +436,8 @@ Download verification:
 
 What is bundled:
 - Windows release assets include a packaged Java runtime via jpackage.
-- The built-in Java readboard helper is included in `readboard_java/`.
+- Native Windows readboard is included in `readboard/`.
+- The built-in Java readboard helper is also included in `readboard_java/` as a fallback.
 EOF
 
   if [[ "$has_with_katago" == "true" ]]; then
@@ -427,6 +534,8 @@ build_no_engine_installer="true"
 has_with_katago_assets="false"
 has_opencl_katago_assets="false"
 has_nvidia_katago_assets="false"
+
+prepare_bundled_readboard_assets
 
 if has_bundled_katago "$STANDARD_ENGINE_PLATFORM_DIR"; then
   has_with_katago_assets="true"

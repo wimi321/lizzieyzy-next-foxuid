@@ -101,10 +101,11 @@
 
 ## 当前内置同步工具信息
 
-- 主发布包现在把 `readboard_java` 简易棋盘同步工具作为主项目的一部分交付
-- Windows / Linux 包路径：`Lizzieyzy/readboard_java/`
+- Windows 发布包现在内置原生 `readboard/readboard.exe` 和依赖文件，正常使用不需要下载外部同步工具
+- `readboard_java` 简易棋盘同步工具仍作为备用方案随包交付
+- Windows 原生路径：`Lizzieyzy/readboard/`
+- Windows / Linux Java 版路径：`Lizzieyzy/readboard_java/`
 - macOS 包路径：`LizzieYzy Next.app/Contents/app/readboard_java/`
-- 旧的 Windows 原生 `readboard` 文件夹现在只作为兼容备用，不再是主 release 的默认依赖
 
 ## 新旧发布格式怎么理解
 

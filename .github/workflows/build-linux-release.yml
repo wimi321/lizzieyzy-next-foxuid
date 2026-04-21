@@ -10,7 +10,7 @@ on:
       release_tag:
         description: Existing GitHub release tag to upload into
         required: true
-        default: 2.5.3-next-2026-03-24.2
+        default: 1.0.0-next-2026-03-24.2
 
 permissions:
   contents: write

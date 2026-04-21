@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/release_metadata.sh"
 
 DATE_TAG="${1:-$(date +%F)}"
-APP_VERSION="${2:-2.5.3}"
+APP_VERSION="${2:-1.0.0}"
 JAR_PATH="${3:-target/lizzie-yzy2.5.3-shaded.jar}"
 
 JAVA_HOME_DEFAULT="$ROOT_DIR/.tools/jdk-21/jdk-21.0.10.jdk/Contents/Home"

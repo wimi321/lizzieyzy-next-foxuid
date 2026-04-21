@@ -143,7 +143,7 @@ public class LizzieFrame extends JFrame {
     Lizzie.resourceBundle.getString("LizzieFrame.commands.keyDelete"),
     Lizzie.resourceBundle.getString("LizzieFrame.commands.keyE"),
   };
-  private String DEFAULT_TITLE = Lizzie.resourceBundle.getString("LizzieFrame.title");
+  private String DEFAULT_TITLE = Lizzie.getAppDisplayName();
   private JLayeredPane basePanel;
   public static BoardRenderer boardRenderer;
   public static BoardRenderer boardRenderer2;
@@ -2286,75 +2286,39 @@ public class LizzieFrame extends JFrame {
   }
 
   public void openBoardSync() {
+    // Non-Windows has no native readboard — always use the bundled Java version.
     if (!OS.isWindows()) {
       openReadBoardJava();
       return;
     }
+    // Windows release packages include native readboard. If a custom/dev checkout is missing it,
+    // fall back to the bundled Java helper instead of downloading anything at runtime.
     if (!ReadBoard.isLegacyNativeReadBoardAvailable()) {
-      showLegacyReadBoardDownloadDialog();
+      openReadBoardJava();
       return;
     }
-    if (readBoard == null) {
-      try {
-        readBoard = new ReadBoard(true, false);
-      } catch (Exception e) {
-        // TODO Auto-generated catch block
-        e.printStackTrace();
-        try {
-          readBoard = new ReadBoard(false, false);
-        } catch (Exception e1) {
-          // TODO Auto-generated catch block
-          e1.printStackTrace();
-        }
-      }
+    launchNativeReadBoard();
+  }
 
-    } else {
+  private void launchNativeReadBoard() {
+    if (readBoard != null) {
       try {
         readBoard.shutdown();
       } catch (Exception e) {
         e.printStackTrace();
-        // Failed to save config
-      }
-      try {
-        readBoard = new ReadBoard(true, false);
-      } catch (Exception e) {
-        // TODO Auto-generated catch block
-        e.printStackTrace();
-        try {
-          readBoard = new ReadBoard(false, false);
-        } catch (Exception e1) {
-          // TODO Auto-generated catch block
-          e1.printStackTrace();
-        }
       }
     }
-  }
-
-  private void showLegacyReadBoardDownloadDialog() {
-    LegacyReadBoardPrompts.promptMissingLegacyReadBoardDownload(
-        Lizzie.resourceBundle,
-        this::confirmLegacyReadBoardDownload,
-        uri -> Desktop.getDesktop().browse(uri),
-        Utils::showMsg);
-  }
-
-  private boolean confirmLegacyReadBoardDownload(
-      String title, String message, String confirmLabel, String cancelLabel) {
-    Object[] options = new Object[] {confirmLabel, cancelLabel};
-    Object defaultOption = cancelLabel;
-    JOptionPane optionPane =
-        new JOptionPane(
-            message,
-            JOptionPane.QUESTION_MESSAGE,
-            JOptionPane.YES_NO_OPTION,
-            null,
-            options,
-            defaultOption);
-    JDialog dialog = optionPane.createDialog(this, title);
-    dialog.setVisible(true);
-    dialog.dispose();
-    Object value = optionPane.getValue();
-    return value != null && value.equals(confirmLabel);
+    try {
+      readBoard = new ReadBoard(true, false);
+    } catch (Exception e) {
+      e.printStackTrace();
+      try {
+        readBoard = new ReadBoard(false, false);
+      } catch (Exception e1) {
+        e1.printStackTrace();
+        openReadBoardJava();
+      }
+    }
   }
 
   public void openConfigDialog2(int index) {
@@ -7339,11 +7303,17 @@ public class LizzieFrame extends JFrame {
     if (hasEnginePkTitile && enginePkTitile != null) {
       sb.append(Lizzie.leelaz.oriEnginename);
       sb.append(visitsString + " ");
-      setTitle(enginePkTitile + " " + sb.toString());
+      setTitle(enginePkTitile + " " + DEFAULT_TITLE + " - " + sb.toString());
     } else {
-      // sb.append(DEFAULT_TITLE);
+      String titlePrefix = sb.toString();
+      sb.setLength(0);
+      sb.append(DEFAULT_TITLE);
+      if (!titlePrefix.trim().isEmpty()) {
+        sb.append(" - ");
+        sb.append(titlePrefix);
+      }
       if (EngineManager.isEmpty) {
-        sb.append("Lizzie ");
+        sb.append(" ");
       } else sb.append(Lizzie.leelaz.oriEnginename);
       if (!EngineManager.isEmpty) {
         if (Lizzie.leelaz.isPondering()) sb.append(visitsString + " ");

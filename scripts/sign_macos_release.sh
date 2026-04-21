@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Sign and notarize macOS DMG release assets.
+#
+# Requires the following environment variables (typically provided via GitHub
+# Actions secrets). If any of them are empty, the script exits 0 and leaves the
+# unsigned asset untouched so local builds are unaffected.
+#
+#   APPLE_CERT_P12         Base64-encoded Developer ID Application .p12
+#   APPLE_CERT_PASSWORD    Password for the .p12 (may be empty)
+#   APPLE_ID               Apple ID email for notarytool
+#   APPLE_APP_PASSWORD     App-specific password for notarytool
+#   APPLE_TEAM_ID          10-character Developer Team ID
+#   APPLE_SIGN_IDENTITY    Optional override, e.g. "Developer ID Application: Name (TEAMID)"
+#
+# Usage: sign_macos_release.sh <release-dir> <mac-arch>
+#        release-dir contains the *.dmg produced by jpackage
+#        mac-arch is either "mac-arm64" or "mac-amd64"
+set -euo pipefail
+
+release_dir="${1:-dist/release}"
+mac_arch="${2:-mac-arm64}"
+
+if [[ -z "${APPLE_CERT_P12:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
+  echo "Apple Developer credentials not configured; skipping sign/notarize."
+  exit 0
+fi
+
+if ! command -v codesign >/dev/null 2>&1 || ! command -v xcrun >/dev/null 2>&1; then
+  echo "codesign or xcrun not available; cannot sign on this host." >&2
+  exit 1
+fi
+
+keychain="lizzieyzy-sign.keychain-db"
+keychain_password="$(openssl rand -hex 16)"
+security create-keychain -p "$keychain_password" "$keychain" >/dev/null
+security set-keychain-settings -lut 21600 "$keychain" >/dev/null
+security unlock-keychain -p "$keychain_password" "$keychain" >/dev/null
+
+cert_path="$(mktemp -t lizzieyzy-cert.XXXXXX).p12"
+printf '%s' "$APPLE_CERT_P12" | base64 --decode > "$cert_path"
+security import "$cert_path" -k "$keychain" -P "${APPLE_CERT_PASSWORD:-}" -T /usr/bin/codesign >/dev/null
+security list-keychains -d user -s "$keychain" "$(security list-keychains -d user | tr -d '"')"
+security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+rm -f "$cert_path"
+
+sign_identity="${APPLE_SIGN_IDENTITY:-}"
+if [[ -z "$sign_identity" ]]; then
+  sign_identity="$(security find-identity -v -p codesigning "$keychain" | awk -F '"' '/Developer ID Application/ {print $2; exit}')"
+fi
+if [[ -z "$sign_identity" ]]; then
+  echo "Could not locate a Developer ID Application identity in keychain." >&2
+  security delete-keychain "$keychain" >/dev/null 2>&1 || true
+  exit 1
+fi
+echo "Using signing identity: $sign_identity"
+
+cleanup() {
+  security delete-keychain "$keychain" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+dmg_pattern="*${mac_arch}*.dmg"
+shopt -s nullglob
+dmg_files=( "$release_dir"/$dmg_pattern )
+shopt -u nullglob
+if [[ ${#dmg_files[@]} -eq 0 ]]; then
+  echo "No DMG matching $dmg_pattern in $release_dir" >&2
+  exit 1
+fi
+
+for dmg in "${dmg_files[@]}"; do
+  echo "Processing $dmg"
+
+  work_dir="$(mktemp -d -t lizzieyzy-sign.XXXXXX)"
+  mount_point="$work_dir/mount"
+  mkdir -p "$mount_point"
+
+  hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -noautoopen -readonly >/dev/null
+  app_path="$(find "$mount_point" -maxdepth 2 -name '*.app' -print -quit || true)"
+  if [[ -z "$app_path" ]]; then
+    hdiutil detach "$mount_point" -quiet >/dev/null 2>&1 || true
+    echo "No .app bundle found inside $dmg" >&2
+    exit 1
+  fi
+
+  staging="$work_dir/staging"
+  mkdir -p "$staging"
+  cp -R "$app_path" "$staging/"
+  hdiutil detach "$mount_point" -quiet >/dev/null 2>&1 || true
+
+  staged_app="$staging/$(basename "$app_path")"
+
+  # Sign every helper binary first so the outer signature is valid.
+  find "$staged_app" -type f \( -name '*.dylib' -o -name 'katago' -o -perm -u+x \) \
+    -exec codesign --force --options runtime --timestamp \
+                   --keychain "$keychain" --sign "$sign_identity" {} + >/dev/null
+
+  codesign --force --deep --options runtime --timestamp \
+           --keychain "$keychain" --sign "$sign_identity" "$staged_app"
+
+  # Rebuild DMG from the signed app.
+  signed_dmg="$work_dir/$(basename "$dmg")"
+  hdiutil create -volname "$(basename "$staged_app" .app)" \
+                 -srcfolder "$staging" -ov -format UDZO "$signed_dmg" >/dev/null
+  codesign --force --timestamp --keychain "$keychain" --sign "$sign_identity" "$signed_dmg"
+
+  echo "Submitting $signed_dmg for notarization..."
+  xcrun notarytool submit "$signed_dmg" \
+    --apple-id "${APPLE_ID}" \
+    --password "${APPLE_APP_PASSWORD}" \
+    --team-id "${APPLE_TEAM_ID}" \
+    --wait
+
+  xcrun stapler staple "$signed_dmg"
+  spctl --assess --type open --context context:primary-signature -vvv "$signed_dmg" || true
+
+  mv "$signed_dmg" "$dmg"
+  rm -rf "$work_dir"
+  echo "Signed and notarized: $dmg"
+done

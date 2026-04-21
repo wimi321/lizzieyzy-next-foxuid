@@ -8,6 +8,8 @@ import featurecat.lizzie.util.KataGoAutoSetupHelper.DownloadSession;
 import featurecat.lizzie.util.KataGoAutoSetupHelper.ProgressListener;
 import featurecat.lizzie.util.KataGoAutoSetupHelper.SetupSnapshot;
 import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
@@ -32,9 +34,11 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -67,7 +71,11 @@ public final class KataGoRuntimeHelper {
   private static final Pattern BENCHMARK_BACKEND_PATTERN =
       Pattern.compile("You are currently using the (.+?) version of KataGo\\.");
   private static final Pattern BENCHMARK_SUMMARY_LINE_PATTERN =
-      Pattern.compile("^numSearchThreads\\s*=\\s*\\d+:.*$");
+      Pattern.compile("^numSearchThreads\\s*=\\s*\\d+:\\s*(?:\\(baseline\\)|[+-]?\\d+\\s+Elo.*)$");
+  private static final Pattern BENCHMARK_POSITION_PROGRESS_PATTERN =
+      Pattern.compile("numSearchThreads\\s*=\\s*(\\d+):\\s*(\\d+)\\s*/\\s*(\\d+)\\s*positions");
+  private static final Pattern BENCHMARK_POSSIBLE_THREADS_PATTERN =
+      Pattern.compile("Possible numbers of threads to test:\\s*(.*)");
   private static final List<List<String>> REQUIRED_RUNTIME_DLL_GROUPS =
       Arrays.asList(
           Arrays.asList("cudart64_12.dll"),
@@ -77,17 +85,15 @@ public final class KataGoRuntimeHelper {
           Arrays.asList("nvJitLink*.dll"),
           Arrays.asList("zlibwapi.dll", "libz.dll"));
   private static final Object NVIDIA_RUNTIME_LOCK = new Object();
-  private static final int BENCHMARK_VISITS = 800;
-  private static final int BENCHMARK_POSITIONS = 6;
-  private static final int BENCHMARK_MIN_TIME_SECONDS = 5;
-  private static final int BENCHMARK_MAX_TIME_SECONDS = 15;
-  private static final int APPLE_AUTO_OPTIMIZE_VERSION = 1;
+  private static final int APPLE_AUTO_OPTIMIZE_VERSION = 2;
   private static final int APPLE_AUTO_OPTIMIZE_DELAY_MILLIS = 2500;
   private static final int MAX_APPLE_ANALYSIS_THREADS = 8;
   private static final String BENCHMARK_SIGNATURE_KEY = "katago-benchmark-signature";
   private static final String APPLE_AUTO_OPTIMIZE_VERSION_KEY =
       "katago-apple-auto-optimize-version";
   private static final Object APPLE_AUTO_OPTIMIZE_LOCK = new Object();
+  private static final Object BENCHMARK_ANALYSIS_PAUSE_LOCK = new Object();
+  private static Boolean benchmarkPreviousShowPonderTips = null;
   private static volatile boolean appleAutoOptimizeRunning = false;
 
   private KataGoRuntimeHelper() {}
@@ -475,7 +481,6 @@ public final class KataGoRuntimeHelper {
       ensureBundledRuntimeReady(snapshot.enginePath, null);
     }
 
-    int benchmarkTime = resolveBenchmarkTimeSeconds();
     List<String> command = new ArrayList<String>();
     command.add(snapshot.enginePath.toAbsolutePath().normalize().toString());
     command.add("benchmark");
@@ -483,17 +488,18 @@ public final class KataGoRuntimeHelper {
     command.add(snapshot.gtpConfigPath.toAbsolutePath().normalize().toString());
     command.add("-model");
     command.add(snapshot.activeWeightPath.toAbsolutePath().normalize().toString());
+    // Follow KataGo's official benchmark flow: with -s, KataGo performs its own thread search
+    // using the backend-specific defaults (Metal/OpenCL/CUDA default 800 visits, Eigen default 80).
     command.add("-s");
-    command.add("-n");
-    command.add(String.valueOf(BENCHMARK_POSITIONS));
-    command.add("-v");
-    command.add(String.valueOf(BENCHMARK_VISITS));
-    command.add("-time");
-    command.add(String.valueOf(benchmarkTime));
     command.add("-override-config");
     command.add("logToStderr=false,logAllGTPCommunication=false,logSearchInfo=false");
 
     command = prepareBundledLaunchCommand(command, snapshot.enginePath);
+    notifyProgress(
+        listener,
+        resource("AutoSetup.benchmarkStarting", "Starting KataGo benchmark..."),
+        0L,
+        1000L);
 
     ProcessBuilder processBuilder = new ProcessBuilder(command);
     processBuilder.redirectErrorStream(true);
@@ -502,6 +508,11 @@ public final class KataGoRuntimeHelper {
     Process process;
     try {
       process = processBuilder.start();
+      notifyProgress(
+          listener,
+          resource("AutoSetup.benchmarkRunning", "KataGo benchmark is running..."),
+          0L,
+          1000L);
     } catch (IOException e) {
       throw new IOException(
           resource("AutoSetup.benchmarkFailed", "Unable to run KataGo benchmark right now.")
@@ -511,16 +522,10 @@ public final class KataGoRuntimeHelper {
     }
 
     StringBuilder output = new StringBuilder();
-    try (BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        output.append(line).append('\n');
-        if (listener != null && !line.trim().isEmpty()) {
-          listener.onProgress(trimStatusForUi(line), 0L, -1L);
-        }
-      }
+    BenchmarkProgressTracker progressTracker = new BenchmarkProgressTracker();
+    try {
+      readBenchmarkOutput(
+          process.getInputStream(), output, listener, activeSession, process, progressTracker);
     } catch (IOException e) {
       process.destroyForcibly();
       throw e;
@@ -540,6 +545,8 @@ public final class KataGoRuntimeHelper {
       Thread.currentThread().interrupt();
       throw new InterruptedIOException("KataGo benchmark interrupted");
     }
+    notifyProgress(
+        listener, resource("AutoSetup.benchmarkDone", "Benchmark complete."), 1000L, 1000L);
 
     BenchmarkResult result = parseBenchmarkOutput(output.toString());
     if (result == null) {
@@ -547,6 +554,49 @@ public final class KataGoRuntimeHelper {
           resource("AutoSetup.benchmarkFailed", "Unable to run KataGo benchmark right now."));
     }
     return result;
+  }
+
+  private static void readBenchmarkOutput(
+      InputStream inputStream,
+      StringBuilder output,
+      ProgressListener listener,
+      DownloadSession session,
+      Process process,
+      BenchmarkProgressTracker progressTracker)
+      throws IOException {
+    try (InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8)) {
+      char[] buffer = new char[1024];
+      StringBuilder statusSegment = new StringBuilder();
+      int read;
+      while ((read = reader.read(buffer)) != -1) {
+        if (session != null && session.isCancelled()) {
+          process.destroyForcibly();
+          throw new DownloadCancelledException(
+              resource("AutoSetup.downloadCancelled", "Download cancelled."));
+        }
+        for (int i = 0; i < read; i++) {
+          char ch = buffer[i];
+          output.append(ch);
+          if (ch == '\r' || ch == '\n') {
+            publishBenchmarkStatus(statusSegment.toString(), listener, progressTracker);
+            statusSegment.setLength(0);
+          } else {
+            statusSegment.append(ch);
+          }
+        }
+      }
+      publishBenchmarkStatus(statusSegment.toString(), listener, progressTracker);
+    }
+  }
+
+  private static void publishBenchmarkStatus(
+      String rawStatus, ProgressListener listener, BenchmarkProgressTracker progressTracker) {
+    String trimmed = rawStatus == null ? "" : rawStatus.trim();
+    if (trimmed.isEmpty()) {
+      return;
+    }
+    int progressValue = progressTracker == null ? 0 : progressTracker.update(trimmed);
+    notifyProgress(listener, trimStatusForUi(trimmed), progressValue, 1000L);
   }
 
   public static BenchmarkResult runBenchmarkAndApply(
@@ -592,6 +642,43 @@ public final class KataGoRuntimeHelper {
     restartIdlePreloadedAnalysisEngine();
   }
 
+  public static boolean pauseCurrentAnalysisForBenchmark() {
+    synchronized (BENCHMARK_ANALYSIS_PAUSE_LOCK) {
+      if (benchmarkPreviousShowPonderTips == null && Lizzie.config != null) {
+        benchmarkPreviousShowPonderTips = Lizzie.config.showPonderLimitedTips;
+        Lizzie.config.showPonderLimitedTips = false;
+      }
+    }
+    boolean analysisWasPondering =
+        Lizzie.leelaz != null && Lizzie.leelaz.isLoaded() && Lizzie.leelaz.isPondering();
+    if (analysisWasPondering) {
+      try {
+        Lizzie.leelaz.togglePonder();
+      } catch (Exception ignored) {
+      }
+    }
+    return analysisWasPondering;
+  }
+
+  public static void restoreAnalysisAfterBenchmark(boolean analysisWasPondering) {
+    synchronized (BENCHMARK_ANALYSIS_PAUSE_LOCK) {
+      if (benchmarkPreviousShowPonderTips != null && Lizzie.config != null) {
+        Lizzie.config.showPonderLimitedTips = benchmarkPreviousShowPonderTips.booleanValue();
+      }
+      benchmarkPreviousShowPonderTips = null;
+    }
+    if (!analysisWasPondering) {
+      return;
+    }
+    if (Lizzie.leelaz == null || !Lizzie.leelaz.isLoaded() || Lizzie.leelaz.isPondering()) {
+      return;
+    }
+    try {
+      Lizzie.leelaz.togglePonder();
+    } catch (Exception ignored) {
+    }
+  }
+
   public static void startAppleSiliconAutoOptimizationAsync() {
     if (!isAppleSiliconHost() || Lizzie.config == null || Lizzie.config.uiConfig == null) {
       return;
@@ -606,6 +693,8 @@ public final class KataGoRuntimeHelper {
     Thread worker =
         new Thread(
             () -> {
+              JDialog notice = null;
+              boolean pausedAnalysis = false;
               try {
                 try {
                   Thread.sleep(APPLE_AUTO_OPTIMIZE_DELAY_MILLIS);
@@ -619,9 +708,25 @@ public final class KataGoRuntimeHelper {
                   return;
                 }
 
+                notice =
+                    showBenchmarkNotice(
+                        "正在进行 Apple Silicon 智能测速优化",
+                        "正在按 KataGo 官方 benchmark 自动测试最合适的线程数，" + "测速期间会暂停当前分析，完成后会自动恢复。");
+                final JDialog progressNotice = notice;
+                pausedAnalysis = pauseCurrentAnalysisForBenchmark();
+
                 System.out.println(
                     "Running Apple Silicon KataGo benchmark in background for automatic tuning...");
-                BenchmarkResult result = runBenchmarkAndApply(snapshot, null, null);
+                BenchmarkResult result =
+                    runBenchmarkAndApply(
+                        snapshot,
+                        (statusText, downloadedBytes, totalBytes) -> {
+                          if (progressNotice != null) {
+                            updateBenchmarkNotice(
+                                progressNotice, statusText, downloadedBytes, totalBytes);
+                          }
+                        },
+                        null);
                 applyBenchmarkResultToRunningEngines(result);
                 System.out.println(
                     "Apple Silicon KataGo tuning applied: " + formatBenchmarkResult(result));
@@ -630,12 +735,344 @@ public final class KataGoRuntimeHelper {
                     "Apple Silicon KataGo auto benchmark failed: " + e.getLocalizedMessage());
                 e.printStackTrace();
               } finally {
+                if (notice != null) {
+                  disposeBenchmarkNotice(notice);
+                }
+                restoreAnalysisAfterBenchmark(pausedAnalysis);
                 synchronized (APPLE_AUTO_OPTIMIZE_LOCK) {
                   appleAutoOptimizeRunning = false;
                 }
               }
             },
             "katago-apple-auto-optimize");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  private static JDialog showBenchmarkNotice(String title, String message) {
+    if (Lizzie.frame == null) return null;
+    final JDialog[] noticeHolder = new JDialog[1];
+    Runnable task =
+        () -> {
+          JDialog notice = createBenchmarkNotice(title, message);
+          if (notice != null) {
+            noticeHolder[0] = notice;
+            notice.setVisible(true);
+            updateBenchmarkNotice(
+                notice,
+                resource("AutoSetup.benchmarkPreparing", "Preparing benchmark..."),
+                0L,
+                1000L);
+            notice.toFront();
+            notice.repaint();
+          }
+        };
+    if (SwingUtilities.isEventDispatchThread()) {
+      task.run();
+    } else {
+      try {
+        SwingUtilities.invokeAndWait(task);
+      } catch (Exception e) {
+        e.printStackTrace();
+        return null;
+      }
+    }
+    return noticeHolder[0];
+  }
+
+  private static JDialog createBenchmarkNotice(String title, String message) {
+    if (Lizzie.frame == null) return null;
+    JDialog notice = new JDialog(Lizzie.frame, title, false);
+    notice.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+    notice.setAlwaysOnTop(true);
+    notice.setType(Window.Type.UTILITY);
+    notice.setFocusableWindowState(false);
+    JPanel panel = new JPanel(new BorderLayout(12, 12));
+    panel.setOpaque(true);
+    panel.setBackground(new Color(255, 248, 232));
+    panel.setBorder(
+        BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(230, 190, 122)),
+            BorderFactory.createEmptyBorder(18, 22, 18, 22)));
+    JLabel msg = new JLabel("<html>" + message + "</html>");
+    msg.putClientProperty("lizzie.benchmark.notice.label", Boolean.TRUE);
+    panel.add(msg, BorderLayout.NORTH);
+    JLabel status = new JLabel("准备测速...");
+    status.putClientProperty("lizzie.benchmark.notice.status", Boolean.TRUE);
+    panel.add(status, BorderLayout.CENTER);
+    JProgressBar pb = new JProgressBar();
+    pb.setIndeterminate(false);
+    pb.setMinimum(0);
+    pb.setMaximum(1000);
+    pb.setValue(0);
+    pb.setStringPainted(true);
+    pb.setString("准备测速… 0%");
+    pb.setPreferredSize(new Dimension(520, 24));
+    pb.putClientProperty("lizzie.benchmark.notice.bar", Boolean.TRUE);
+    panel.add(pb, BorderLayout.SOUTH);
+    notice.setContentPane(panel);
+    notice.setMinimumSize(new Dimension(560, 150));
+    notice.pack();
+    notice.setLocationRelativeTo(Lizzie.frame);
+    return notice;
+  }
+
+  private static void disposeBenchmarkNotice(JDialog notice) {
+    if (notice == null) return;
+    SwingUtilities.invokeLater(notice::dispose);
+  }
+
+  private static void updateBenchmarkNotice(
+      JDialog notice, String statusText, long downloadedBytes, long totalBytes) {
+    if (notice == null) return;
+    SwingUtilities.invokeLater(
+        () -> {
+          if (notice.getContentPane().getComponentCount() == 0) return;
+          Component root = notice.getContentPane().getComponent(0);
+          if (!(root instanceof JPanel)) return;
+          int progressValue =
+              totalBytes > 0
+                  ? (int) Math.max(0L, Math.min(1000L, (downloadedBytes * 1000L) / totalBytes))
+                  : -1;
+          for (Component child : ((JPanel) root).getComponents()) {
+            if (child instanceof JLabel
+                && Boolean.TRUE.equals(
+                    ((JLabel) child).getClientProperty("lizzie.benchmark.notice.status"))) {
+              ((JLabel) child)
+                  .setText(
+                      statusText == null || statusText.trim().isEmpty() ? "测速中..." : statusText);
+            }
+            if (child instanceof JProgressBar) {
+              JProgressBar progressBar = (JProgressBar) child;
+              int displayProgress = progressValue >= 0 ? progressValue : progressBar.getValue();
+              if (progressValue >= 0) {
+                progressBar.setIndeterminate(false);
+                progressBar.setMaximum(1000);
+                progressBar.setValue(progressValue);
+              } else {
+                progressBar.setIndeterminate(false);
+                progressBar.setMaximum(1000);
+              }
+              progressBar.setString(
+                  (statusText == null || statusText.trim().isEmpty() ? "测速中..." : statusText)
+                      + "  "
+                      + Math.max(0, Math.min(1000, displayProgress)) / 10
+                      + "%");
+            }
+          }
+          notice.getContentPane().revalidate();
+          notice.getContentPane().repaint();
+          notice.getRootPane().paintImmediately(notice.getRootPane().getVisibleRect());
+        });
+  }
+
+  private static final class BenchmarkProgressTracker {
+    private static final int MODEL_LOAD_PROGRESS = 30;
+    private static final int THREAD_LIST_PROGRESS = 80;
+    private static final int SEARCH_PROGRESS_START = 80;
+    private static final int SEARCH_PROGRESS_SPAN = 900;
+    private static final int SUMMARY_PROGRESS = 990;
+
+    private final Map<Integer, Integer> completedPositionsByThread =
+        new HashMap<Integer, Integer>();
+    private int expectedTestedThreadCount = 0;
+    private int observedThreadCount = 0;
+    private int positionsPerThread = 0;
+    private int lastPermille = 0;
+
+    int update(String rawStatus) {
+      String status = rawStatus == null ? "" : rawStatus.trim();
+      if (status.isEmpty()) {
+        return lastPermille;
+      }
+      if (status.contains("Loading model") || status.contains("Initializing benchmark")) {
+        return advanceTo(MODEL_LOAD_PROGRESS);
+      }
+
+      Matcher possibleThreadsMatcher = BENCHMARK_POSSIBLE_THREADS_PATTERN.matcher(status);
+      if (possibleThreadsMatcher.find()) {
+        int possibleThreadCount = countIntegers(possibleThreadsMatcher.group(1));
+        expectedTestedThreadCount =
+            Math.max(
+                expectedTestedThreadCount, estimateOfficialAutoTuneProbeCount(possibleThreadCount));
+        return advanceTo(THREAD_LIST_PROGRESS);
+      }
+
+      Matcher progressMatcher = BENCHMARK_POSITION_PROGRESS_PATTERN.matcher(status);
+      if (progressMatcher.find()) {
+        int threadCount = parseIntSafely(progressMatcher.group(1));
+        int completed = parseIntSafely(progressMatcher.group(2));
+        int total = parseIntSafely(progressMatcher.group(3));
+        if (threadCount <= 0 || total <= 0) {
+          return lastPermille;
+        }
+        if (!completedPositionsByThread.containsKey(threadCount)) {
+          observedThreadCount += 1;
+        }
+        positionsPerThread = Math.max(positionsPerThread, total);
+        int clampedCompleted = Math.max(0, Math.min(completed, total));
+        Integer previousCompleted = completedPositionsByThread.get(threadCount);
+        if (previousCompleted == null || clampedCompleted > previousCompleted.intValue()) {
+          completedPositionsByThread.put(threadCount, clampedCompleted);
+        }
+        if (expectedTestedThreadCount <= 0) {
+          expectedTestedThreadCount = 6;
+        }
+        expectedTestedThreadCount =
+            Math.max(expectedTestedThreadCount, Math.max(1, observedThreadCount));
+
+        int completedUnits = 0;
+        for (Integer value : completedPositionsByThread.values()) {
+          completedUnits += Math.max(0, value.intValue());
+        }
+        int totalUnits = Math.max(1, expectedTestedThreadCount * positionsPerThread);
+        int progress =
+            SEARCH_PROGRESS_START
+                + (int)
+                    Math.min(
+                        SEARCH_PROGRESS_SPAN,
+                        (completedUnits * (long) SEARCH_PROGRESS_SPAN) / totalUnits);
+        return advanceTo(Math.min(progress, 985));
+      }
+
+      if (status.contains("Ordered summary of results")
+          || status.contains("So APPROXIMATELY based on this benchmark")) {
+        return advanceTo(SUMMARY_PROGRESS);
+      }
+
+      return lastPermille;
+    }
+
+    private int advanceTo(int permille) {
+      lastPermille = Math.max(lastPermille, Math.max(0, Math.min(1000, permille)));
+      return lastPermille;
+    }
+
+    private static int countIntegers(String text) {
+      if (text == null || text.trim().isEmpty()) {
+        return 0;
+      }
+      int count = 0;
+      Matcher matcher = Pattern.compile("\\d+").matcher(text);
+      while (matcher.find()) {
+        count += 1;
+      }
+      return count;
+    }
+
+    private static int estimateOfficialAutoTuneProbeCount(int possibleThreadCount) {
+      if (possibleThreadCount <= 0) {
+        return 6;
+      }
+      if (possibleThreadCount > 64) {
+        return Math.max(6, (int) Math.ceil(Math.log(possibleThreadCount) / Math.log(1.5)));
+      }
+      boolean[] seen = new boolean[possibleThreadCount];
+      return Math.max(1, estimateTernaryProbeCount(0, possibleThreadCount - 1, seen, 0));
+    }
+
+    private static int estimateTernaryProbeCount(
+        int start, int end, boolean[] seen, int seenCount) {
+      if (start > end) {
+        return seenCount;
+      }
+      int firstMid = start + (end - start) / 3;
+      int secondMid = end - (end - start) / 3;
+      boolean firstWasSeen = seen[firstMid];
+      boolean secondWasSeen = seen[secondMid];
+      int nextSeenCount = seenCount;
+      if (!firstWasSeen) {
+        seen[firstMid] = true;
+        nextSeenCount += 1;
+      }
+      if (secondMid != firstMid && !secondWasSeen) {
+        seen[secondMid] = true;
+        nextSeenCount += 1;
+      }
+      int leftCount = estimateTernaryProbeCount(start, secondMid - 1, seen, nextSeenCount);
+      int rightCount = estimateTernaryProbeCount(firstMid + 1, end, seen, nextSeenCount);
+      seen[firstMid] = firstWasSeen;
+      if (secondMid != firstMid) {
+        seen[secondMid] = secondWasSeen;
+      }
+      return Math.max(leftCount, rightCount);
+    }
+  }
+
+  private static void notifyProgress(
+      ProgressListener listener, String statusText, long downloadedBytes, long totalBytes) {
+    if (listener != null) {
+      listener.onProgress(statusText == null ? "" : statusText, downloadedBytes, totalBytes);
+    }
+  }
+
+  /**
+   * Run a one-time KataGo benchmark on the first launch so default thread counts reflect the actual
+   * hardware. Shows a non-modal notification to the user while the benchmark runs. No-op if a
+   * benchmark result is already stored, if no engine is available, or on Apple Silicon (handled by
+   * {@link #startAppleSiliconAutoOptimizationAsync()}).
+   */
+  public static void startFirstRunBenchmarkAsync() {
+    if (Lizzie.config == null || Lizzie.config.uiConfig == null) return;
+    if (isAppleSiliconHost()) return;
+    if (getStoredBenchmarkResult() != null) return;
+
+    Thread worker =
+        new Thread(
+            () -> {
+              try {
+                Thread.sleep(3000L);
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+              }
+              SetupSnapshot snapshot;
+              try {
+                snapshot = KataGoAutoSetupHelper.inspectLocalSetup();
+              } catch (Exception e) {
+                return;
+              }
+              if (snapshot == null
+                  || !snapshot.hasEngine()
+                  || !snapshot.hasConfigs()
+                  || !snapshot.hasWeight()) {
+                return;
+              }
+              if (getStoredBenchmarkResult() != null) return;
+
+              final javax.swing.JDialog notice =
+                  Lizzie.frame != null && Lizzie.frame.isShowing()
+                      ? showBenchmarkNotice(
+                          "KataGo 智能测速",
+                          "首次启动正在进行一次 KataGo 智能测速优化，<br/>"
+                              + "用于自动选出最适合你这台电脑的线程数，<br/>"
+                              + "完成后分析速度会更稳定、更快。<br/><br/>"
+                              + "这是 KataGo 官方 benchmark 流程，可能需要数分钟，请稍候，<br/>"
+                              + "期间分析会被暂停，完成后会自动恢复。")
+                      : null;
+
+              boolean pausedAnalysis = pauseCurrentAnalysisForBenchmark();
+
+              try {
+                BenchmarkResult result =
+                    runBenchmarkAndApply(
+                        snapshot,
+                        (statusText, downloadedBytes, totalBytes) ->
+                            updateBenchmarkNotice(notice, statusText, downloadedBytes, totalBytes),
+                        null);
+                applyBenchmarkResultToRunningEngines(result);
+                System.out.println(
+                    "First-run KataGo benchmark applied: " + formatBenchmarkResult(result));
+              } catch (Exception e) {
+                System.err.println("First-run KataGo benchmark failed: " + e.getLocalizedMessage());
+              } finally {
+                if (notice != null) {
+                  disposeBenchmarkNotice(notice);
+                }
+                restoreAnalysisAfterBenchmark(pausedAnalysis);
+              }
+            },
+            "katago-first-run-benchmark");
     worker.setDaemon(true);
     worker.start();
   }
@@ -775,14 +1212,6 @@ public final class KataGoRuntimeHelper {
     String summary = String.join(" | ", summaryLines);
     return new BenchmarkResult(
         recommendedThreads, currentThreads, backend, summary, System.currentTimeMillis());
-  }
-
-  private static int resolveBenchmarkTimeSeconds() {
-    int seconds = 5;
-    if (Lizzie.config != null) {
-      seconds = Math.max(seconds, Lizzie.config.maxGameThinkingTimeSeconds);
-    }
-    return Math.max(BENCHMARK_MIN_TIME_SECONDS, Math.min(BENCHMARK_MAX_TIME_SECONDS, seconds));
   }
 
   private static void prependPath(ProcessBuilder processBuilder, Path path) {
@@ -1471,9 +1900,30 @@ public final class KataGoRuntimeHelper {
   }
 
   private static String trimStatusForUi(String line) {
-    String trimmed = line == null ? "" : line.trim();
+    String trimmed = line == null ? "" : line.replace('\r', '\n').trim();
+    if (trimmed.contains("\n")) {
+      String[] parts = trimmed.split("\\n");
+      for (int i = parts.length - 1; i >= 0; i--) {
+        if (!parts[i].trim().isEmpty()) {
+          trimmed = parts[i].trim();
+          break;
+        }
+      }
+    }
     if (trimmed.isEmpty()) {
       return resource("AutoSetup.benchmarking", "Optimizing KataGo...");
+    }
+    Matcher progressMatcher = BENCHMARK_POSITION_PROGRESS_PATTERN.matcher(trimmed);
+    if (progressMatcher.find()) {
+      return String.format(
+          resource("AutoSetup.benchmarkThreadProgress", "Testing threads %d: %d/%d positions"),
+          parseIntSafely(progressMatcher.group(1)),
+          parseIntSafely(progressMatcher.group(2)),
+          parseIntSafely(progressMatcher.group(3)));
+    }
+    if (BENCHMARK_POSSIBLE_THREADS_PATTERN.matcher(trimmed).find()) {
+      return resource(
+          "AutoSetup.benchmarkOfficialTune", "Running KataGo official benchmark thread search...");
     }
     if (trimmed.length() > 120) {
       return trimmed.substring(0, 120) + "...";

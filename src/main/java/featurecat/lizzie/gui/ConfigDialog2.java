@@ -340,9 +340,11 @@ public class ConfigDialog2 extends JDialog {
     LinkLabel lblLizzieName =
         new LinkLabel(
             "<html><div align=\"center\"><b>LizzieYzy Next "
-                + Lizzie.lizzieVersion
+                + Lizzie.nextVersion
                 + "</b></div>"
-                + "<div align=\"center\"><font style=\"font-weight:plain;font-size:12;\">Java version: "
+                + "<div align=\"center\"><font style=\"font-weight:plain;font-size:12;\">基于 lizzieyzy "
+                + Lizzie.lizzieVersion
+                + " · Java "
                 + Lizzie.javaVersionString
                 + "</font></div></html>");
     lblLizzieName.setFont(new Font(Config.sysDefaultFontName, Font.BOLD, 24));
@@ -3048,12 +3050,10 @@ public class ConfigDialog2 extends JDialog {
       htmlDoc = (HTMLDocument) htmlKit.createDefaultDocument();
       htmlStyle = htmlKit.getStyleSheet();
       boolean apple = AppleStyleSupport.isAppleStyleEnabled();
-      java.awt.Color bg = apple ? new java.awt.Color(30, 33, 38) : java.awt.Color.WHITE;
       java.awt.Color fg = apple ? java.awt.Color.WHITE : java.awt.Color.BLACK;
+      // Let the component's parent background show through for a uniform look.
       String style =
-          "body {background:#"
-              + String.format("%02x%02x%02x", bg.getRed(), bg.getGreen(), bg.getBlue())
-              + "; color:#"
+          "body {color:#"
               + String.format("%02x%02x%02x", fg.getRed(), fg.getGreen(), fg.getBlue())
               + "; font-family:"
               + Config.sysDefaultFontName
@@ -3061,6 +3061,9 @@ public class ConfigDialog2 extends JDialog {
               + (Lizzie.config.commentFontSize > 0
                   ? "font-size:" + Lizzie.config.commentFontSize
                   : "")
+              + "}"
+              + " a {color:#"
+              + (apple ? "8ab4f8" : "1565c0")
               + "}";
       htmlStyle.addRule(style);
 
@@ -3069,6 +3072,7 @@ public class ConfigDialog2 extends JDialog {
       setText(text);
       setEditable(false);
       setOpaque(false);
+      setBackground(new Color(0, 0, 0, 0));
       putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
       addHyperlinkListener(
           new HyperlinkListener() {

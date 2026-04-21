@@ -607,8 +607,16 @@ public final class KataGoAutoSetupHelper {
 
     Utils.saveEngineSettings(engines);
     rememberPreferredWeight(snapshot.activeWeightPath);
-    Lizzie.config.uiConfig.put("autoload-default", true);
-    Lizzie.config.uiConfig.put("autoload-empty", false);
+    // Only force autoload=default on a truly fresh install. Once the user has picked
+    // "start with no engine" or "pick manually", respect that choice across setup runs.
+    boolean firstRunSetup =
+        !Lizzie.config.uiConfig.has("autoload-default")
+            && !Lizzie.config.uiConfig.has("autoload-empty")
+            && !Lizzie.config.uiConfig.has("autoload-last");
+    if (firstRunSetup) {
+      Lizzie.config.uiConfig.put("autoload-default", true);
+      Lizzie.config.uiConfig.put("autoload-empty", false);
+    }
     Lizzie.config.uiConfig.put("default-engine", engineIndex);
     Lizzie.config.uiConfig.put("analysis-engine-command", analysisCommand);
     Lizzie.config.uiConfig.put("estimate-command", estimateCommand);

@@ -50,7 +50,9 @@ public class Lizzie {
   public static Board board;
   public static Leelaz leelaz;
   public static Leelaz leelaz2;
+  public static String appName = "LizzieYzy Next";
   public static String lizzieVersion = "2.5.3";
+  public static String nextVersion = "1.0.0";
   public static String checkVersion = "230614";
   public static boolean readMode = false;
   private static String[] mainArgs;
@@ -71,14 +73,13 @@ public class Lizzie {
     Utils.applyMaintainedDefaultSettings();
     if (config.logConsoleToFile) {
       PrintStream oldPrintStream = System.out;
-      FileOutputStream bos =
-          new FileOutputStream("LastConsoleLogs_" + lizzieVersion + ".txt", true);
+      FileOutputStream bos = new FileOutputStream("LastConsoleLogs_" + nextVersion + ".txt", true);
       MultiOutputStream multi = new MultiOutputStream(new PrintStream(bos), oldPrintStream);
       System.setOut(new PrintStream(multi));
 
       PrintStream oldErrorPrintStream = System.err;
       FileOutputStream bosError =
-          new FileOutputStream("LastErrorLogs_" + lizzieVersion + ".txt", true);
+          new FileOutputStream("LastErrorLogs_" + nextVersion + ".txt", true);
       MultiOutputStream multiError =
           new MultiOutputStream(new PrintStream(bosError), oldErrorPrintStream);
       System.setErr(new PrintStream(multiError));
@@ -185,6 +186,10 @@ public class Lizzie {
       }
     }
     if (Lizzie.config.autoReplayBranch) frame.autoReplayBranch();
+  }
+
+  public static String getAppDisplayName() {
+    return appName + " " + nextVersion;
   }
 
   private static void ensureWritableWorkingDir() {
@@ -439,6 +444,7 @@ public class Lizzie {
               }
             }
             KataGoRuntimeHelper.startAppleSiliconAutoOptimizationAsync();
+            KataGoRuntimeHelper.startFirstRunBenchmarkAsync();
           }
         });
     //    if (config.autoCheckVersion) {

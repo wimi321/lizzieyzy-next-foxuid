@@ -10,7 +10,7 @@ on:
       release_tag:
         description: Existing GitHub release tag to upload into
         required: true
-        default: 2.5.3-next-2026-03-24.2
+        default: 1.0.0-next-2026-03-24.2
 
 permissions:
   contents: write
@@ -72,7 +72,7 @@ jobs:
             serial="${GITHUB_RUN_ATTEMPT:-0}"
           fi
           WINDOWS_BUILD_SERIAL="$serial" \
-            ./scripts/package_windows_exe.sh "${{ inputs.date_tag }}" 2.5.3 target/lizzie-yzy2.5.3-shaded.jar
+            ./scripts/package_windows_exe.sh "${{ inputs.date_tag }}" 1.0.0 target/lizzie-yzy2.5.3-shaded.jar
 
       - name: Validate public Windows assets
         shell: bash
@@ -88,18 +88,24 @@ jobs:
           grep -q "first launch should work offline" "$note_file"
           test -f "dist/windows/input-with-katago/engines/katago/windows-x64/katago.exe"
           test -f "dist/windows/input-with-katago/PROJECT_INFO.txt"
+          test -f "dist/windows/input-with-katago/readboard/readboard.exe"
           grep -Eq '^Windows bundle: katago-v[0-9.]+-eigen-windows-x64\.zip$' "dist/windows/input-with-katago/engines/katago/VERSION.txt"
           test -f "dist/windows/input-opencl/engines/katago/windows-x64/katago.exe"
           test -f "dist/windows/input-opencl/PROJECT_INFO.txt"
+          test -f "dist/windows/input-opencl/readboard/readboard.exe"
           grep -Eq '^Windows OpenCL bundle: katago-v[0-9.]+-opencl-windows-x64\.zip$' "dist/windows/input-opencl/engines/katago/VERSION.txt"
           test -f "dist/windows/app-image-with-katago/LizzieYzy Next/LizzieYzy Next.exe"
           test -f "dist/windows/app-image-with-katago/LizzieYzy Next/app/PROJECT_INFO.txt"
+          test -f "dist/windows/app-image-with-katago/LizzieYzy Next/app/readboard/readboard.exe"
           test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/LizzieYzy Next OpenCL.exe"
           test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/PROJECT_INFO.txt"
+          test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/readboard/readboard.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/LizzieYzy Next NVIDIA.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/PROJECT_INFO.txt"
+          test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/readboard/readboard.exe"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/katago.exe"
           test -f "dist/windows/input-nvidia/PROJECT_INFO.txt"
+          test -f "dist/windows/input-nvidia/readboard/readboard.exe"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/cudart64_12.dll"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/cublas64_12.dll"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/cublasLt64_12.dll"
@@ -115,7 +121,9 @@ jobs:
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/engines/katago/windows-x64/libz.dll"
           find "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/engines/katago/windows-x64" -maxdepth 1 -type f -name 'nvJitLink*.dll' | grep -q .
           test -f "dist/windows/input-without.engine/PROJECT_INFO.txt"
+          test -f "dist/windows/input-without.engine/readboard/readboard.exe"
           test -f "dist/windows/app-image-without.engine/LizzieYzy Next/app/PROJECT_INFO.txt"
+          test -f "dist/windows/app-image-without.engine/LizzieYzy Next/app/readboard/readboard.exe"
 
       - name: Smoke test bundled Windows app image
         shell: powershell

@@ -95,10 +95,11 @@ Paths:
 
 ## Bundled Board Sync Helper
 
-- Main release packages now ship the simplified `readboard_java` helper as part of the main product
-- Windows / Linux path: `Lizzieyzy/readboard_java/`
+- Windows release packages now include native `readboard/readboard.exe` and its dependency files, so normal users do not need to download a separate board sync tool
+- The simplified `readboard_java` helper still ships as a fallback
+- Windows native path: `Lizzieyzy/readboard/`
+- Windows / Linux Java helper path: `Lizzieyzy/readboard_java/`
 - macOS path: `LizzieYzy Next.app/Contents/app/readboard_java/`
-- The older Windows-native `readboard` folder is now treated as a legacy compatibility path, not the main release dependency
 
 ## How To Read Old Versus New Release Layouts
 

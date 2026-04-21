@@ -13,6 +13,7 @@ import featurecat.lizzie.util.Utils;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
@@ -33,6 +34,7 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 public class KataGoAutoSetupDialog extends JDialog {
@@ -55,6 +57,8 @@ public class KataGoAutoSetupDialog extends JDialog {
   private final JLabel lblBenchmarkValue = new JFontLabel();
   private final JLabel lblRemoteDetailValue = new JFontLabel();
   private final JLabel lblStatus = new JFontLabel();
+  private final JPanel progressPanel = new JPanel(new BorderLayout(0, 6));
+  private final JLabel progressStatusLabel = new JFontLabel();
   private final JFontComboBox<RemoteWeightInfo> cmbRemoteWeights =
       new JFontComboBox<RemoteWeightInfo>();
   private final JProgressBar progressBar = new JProgressBar();
@@ -70,8 +74,8 @@ public class KataGoAutoSetupDialog extends JDialog {
     super(owner);
     setModal(false);
     setTitle(text("AutoSetup.title"));
-    setSize(860, 500);
-    setMinimumSize(new Dimension(820, 460));
+    setSize(920, 620);
+    setMinimumSize(new Dimension(880, 560));
     setLocationRelativeTo(owner);
     setAlwaysOnTop(owner instanceof LizzieFrame && ((LizzieFrame) owner).isAlwaysOnTop());
 
@@ -84,7 +88,11 @@ public class KataGoAutoSetupDialog extends JDialog {
     content.add(description, BorderLayout.NORTH);
 
     JPanel infoPanel = new JPanel(new GridBagLayout());
-    content.add(infoPanel, BorderLayout.CENTER);
+    JScrollPane infoScrollPane = new JScrollPane(infoPanel);
+    infoScrollPane.setBorder(null);
+    infoScrollPane.getViewport().setOpaque(false);
+    infoScrollPane.setOpaque(false);
+    content.add(infoScrollPane, BorderLayout.CENTER);
 
     GridBagConstraints gbc = new GridBagConstraints();
     gbc.gridx = 0;
@@ -123,9 +131,21 @@ public class KataGoAutoSetupDialog extends JDialog {
     JPanel bottomPanel = new JPanel(new BorderLayout(0, 10));
     content.add(bottomPanel, BorderLayout.SOUTH);
 
+    progressPanel.setOpaque(true);
+    progressPanel.setBackground(new Color(255, 248, 232));
+    progressPanel.setBorder(
+        BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(230, 190, 122)),
+            BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+    progressPanel.setVisible(false);
+    progressStatusLabel.setForeground(WARN_COLOR);
+    progressStatusLabel.setText("");
     progressBar.setStringPainted(true);
-    progressBar.setVisible(false);
-    bottomPanel.add(progressBar, BorderLayout.NORTH);
+    progressBar.setPreferredSize(new Dimension(10, 24));
+    progressBar.setMinimumSize(new Dimension(10, 22));
+    progressPanel.add(progressStatusLabel, BorderLayout.NORTH);
+    progressPanel.add(progressBar, BorderLayout.CENTER);
+    bottomPanel.add(progressPanel, BorderLayout.NORTH);
 
     JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
     bottomPanel.add(buttonPanel, BorderLayout.SOUTH);
@@ -258,7 +278,7 @@ public class KataGoAutoSetupDialog extends JDialog {
     if (actualModelName.equalsIgnoreCase(activeFile)) {
       return actualModelName;
     }
-    return actualModelName + "  |  " + activeFile;
+    return actualModelName;
   }
 
   private String formatConfig(SetupSnapshot state) {
@@ -471,7 +491,8 @@ public class KataGoAutoSetupDialog extends JDialog {
 
     final DownloadSession session = new DownloadSession();
     activeDownloadSession = session;
-    setBusy(true, text("AutoSetup.benchmarking"), 0, -1);
+    final boolean analysisWasPondering = KataGoRuntimeHelper.pauseCurrentAnalysisForBenchmark();
+    setBusy(true, text("AutoSetup.benchmarkPreparing"), 0, 1000);
     Thread worker =
         new Thread(
             () -> {
@@ -494,8 +515,8 @@ public class KataGoAutoSetupDialog extends JDialog {
                                     setBusy(
                                         true,
                                         text("AutoSetup.benchmarking") + " " + statusText,
-                                        0,
-                                        -1)),
+                                        downloadedBytes,
+                                        totalBytes)),
                         null);
                 applyBenchmarkToRunningEngine(result);
                 SwingUtilities.invokeLater(
@@ -515,6 +536,7 @@ public class KataGoAutoSetupDialog extends JDialog {
               } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> onBackgroundError(e));
               } finally {
+                KataGoRuntimeHelper.restoreAnalysisAfterBenchmark(analysisWasPondering);
                 clearActiveDownload(session, Thread.currentThread());
               }
             },
@@ -587,6 +609,13 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void setBusy(boolean busy, String statusText, long downloadedBytes, long totalBytes) {
+    if (statusText == null || statusText.trim().isEmpty()) {
+      statusText = busy ? text("AutoSetup.benchmarking") : "";
+    }
+    lblStatus.setText(statusText);
+    lblStatus.setForeground(busy ? WARN_COLOR : Color.DARK_GRAY);
+    progressStatusLabel.setText(statusText);
+    progressStatusLabel.setForeground(busy ? WARN_COLOR : Color.DARK_GRAY);
     btnRefresh.setEnabled(!busy);
     btnAutoSetup.setEnabled(!busy);
     btnDownloadWeight.setEnabled(!busy && getSelectedRemoteWeight() != null);
@@ -595,32 +624,51 @@ public class KataGoAutoSetupDialog extends JDialog {
     btnStopDownload.setEnabled(busy && activeDownloadSession != null);
     btnClose.setEnabled(true);
 
-    progressBar.setVisible(busy);
+    progressPanel.setVisible(busy);
     progressBar.setIndeterminate(busy && totalBytes <= 0);
     if (!busy) {
       progressBar.setIndeterminate(false);
       progressBar.setValue(0);
       progressBar.setString("");
-      return;
-    }
-
-    if (totalBytes > 0) {
+    } else if (totalBytes > 0) {
       progressBar.setMaximum(1000);
       progressBar.setValue((int) Math.min(1000, (downloadedBytes * 1000L) / totalBytes));
-      progressBar.setString(
-          statusText
-              + "  "
-              + Math.min(100, (downloadedBytes * 100L) / totalBytes)
-              + "%  "
-              + formatSize(downloadedBytes)
-              + " / "
-              + formatSize(totalBytes));
+      long percent = Math.min(100, (downloadedBytes * 100L) / totalBytes);
+      if (isBenchmarkPermilleProgress(statusText, downloadedBytes, totalBytes)) {
+        progressBar.setString(statusText + "  " + percent + "%");
+      } else {
+        progressBar.setString(
+            statusText
+                + "  "
+                + percent
+                + "%  "
+                + formatSize(downloadedBytes)
+                + " / "
+                + formatSize(totalBytes));
+      }
     } else if (downloadedBytes > 0) {
       progressBar.setValue(0);
       progressBar.setString(statusText + "  " + formatSize(downloadedBytes));
     } else {
       progressBar.setValue(0);
       progressBar.setString(statusText);
+    }
+
+    progressPanel.revalidate();
+    progressPanel.repaint();
+    progressStatusLabel.repaint();
+    progressBar.repaint();
+    Container parent = progressPanel.getParent();
+    if (parent != null) {
+      parent.revalidate();
+      parent.repaint();
+    }
+    getContentPane().revalidate();
+    getContentPane().repaint();
+    if (busy && isShowing()) {
+      progressPanel.paintImmediately(progressPanel.getVisibleRect());
+      lblStatus.paintImmediately(lblStatus.getVisibleRect());
+      progressBar.paintImmediately(progressBar.getVisibleRect());
     }
   }
 
@@ -638,6 +686,11 @@ public class KataGoAutoSetupDialog extends JDialog {
         && snapshot.hasEngine()
         && snapshot.hasConfigs()
         && snapshot.hasWeight();
+  }
+
+  private boolean isBenchmarkPermilleProgress(
+      String statusText, long downloadedBytes, long totalBytes) {
+    return totalBytes == 1000L && downloadedBytes >= 0L && downloadedBytes <= 1000L;
   }
 
   private String formatSize(long bytes) {
