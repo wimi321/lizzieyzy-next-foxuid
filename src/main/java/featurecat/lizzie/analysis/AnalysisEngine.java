@@ -7,9 +7,11 @@ import featurecat.lizzie.gui.EngineFailedMessage;
 import featurecat.lizzie.gui.RemoteEngineData;
 import featurecat.lizzie.gui.WaitForAnalysis;
 import featurecat.lizzie.rules.Board;
+import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.Movelist;
 import featurecat.lizzie.rules.SGFParser;
+import featurecat.lizzie.rules.Stone;
 import featurecat.lizzie.util.CommandLaunchHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.Utils;
@@ -328,7 +330,9 @@ public class AnalysisEngine {
     stack.push(node);
     while (!stack.isEmpty()) {
       BoardHistoryNode cur = stack.pop();
-      sendRequest(cur);
+      if (shouldAnalyzeBranchNode(cur)) {
+        sendRequest(cur);
+      }
       if (cur.numberOfChildren() >= 1) {
         for (int i = cur.numberOfChildren() - 1; i >= 0; i--)
           stack.push(cur.getVariations().get(i));
@@ -362,28 +366,15 @@ public class AnalysisEngine {
       Lizzie.leelaz.togglePonder();
       shouldRePonder = true;
     } else shouldRePonder = false;
-    BoardHistoryNode node = Lizzie.board.getHistory().getStart();
-    while (!node.getData().lastMove.isPresent() && node.next().isPresent()) {
-      node = node.next().get();
-    }
+    BoardHistoryNode node = firstHistoryActionNode(Lizzie.board.getHistory().getStart());
     int moveNum = 1;
-    boolean startAnalyze = false;
-    if (startMove < 0 || startMove == 1) {
-      startAnalyze = true;
-    }
-    while (node.next().isPresent()) {
-      if (startAnalyze) sendRequest(node);
+    while (node != null) {
+      if (shouldAnalyzeTurn(moveNum, startMove, endMove)) {
+        sendRequest(node);
+      }
+      node = nextHistoryActionNode(node);
       moveNum++;
-      node = node.next().get();
-      if (moveNum == startMove) {
-        startAnalyze = true;
-      }
-      if (moveNum == endMove) {
-        startAnalyze = false;
-        break;
-      }
     }
-    if (startAnalyze) sendRequest(node);
     if (analyzeMap.size() > 0) {
       Lizzie.frame.requestProblemListRefresh();
       if (showProgressDialog) {
@@ -410,19 +401,16 @@ public class AnalysisEngine {
     request.put(
         "includeMovesOwnership",
         Lizzie.config.showKataGoEstimate && Lizzie.config.useMovesOwnership);
-    if (Lizzie.board.hasStartStone) {
-      ArrayList<String[]> initialStoneList = new ArrayList<String[]>();
-      for (Movelist mv : Lizzie.board.startStonelist) {
-        if (!mv.ispass) {
-          if (mv.isblack) {
-            initialStoneList.add(new String[] {"B", Board.convertCoordinatesToName(mv.x, mv.y)});
-
-          } else {
-            initialStoneList.add(new String[] {"W", Board.convertCoordinatesToName(mv.x, mv.y)});
-          }
-        }
-      }
+    BoardHistoryNode snapshotAnchor = findSnapshotAnchor(analyzeNode);
+    BoardHistoryNode initialStateAnchor = resolveInitialStateAnchor(snapshotAnchor);
+    ArrayList<String[]> moveList = collectHistoryActions(analyzeNode, snapshotAnchor);
+    ArrayList<String[]> initialStoneList = collectInitialStones(initialStateAnchor);
+    if (!initialStoneList.isEmpty()) {
       request.put("initialStones", initialStoneList);
+    }
+    String initialPlayer = collectInitialPlayer(initialStateAnchor);
+    if (initialPlayer != null) {
+      request.put("initialPlayer", initialPlayer);
     }
     JSONObject ruleSettings;
     if (!Lizzie.config.analysisUseCurrentRules) {
@@ -441,26 +429,8 @@ public class AnalysisEngine {
     request.put("boardXSize", Board.boardWidth);
     request.put("boardYSize", Board.boardHeight);
     ArrayList<Integer> moveTurns = new ArrayList<Integer>();
-    ArrayList<String[]> moveList = new ArrayList<String[]>();
-    BoardHistoryNode node = analyzeNode;
-    while (node.previous().isPresent()) {
-      if (node.getData().lastMove.isPresent()) {
-        int[] move = node.getData().lastMove.get();
-        if (node.getData().lastMoveColor.isBlack())
-          moveList.add(new String[] {"B", Board.convertCoordinatesToName(move[0], move[1])});
-        else moveList.add(new String[] {"W", Board.convertCoordinatesToName(move[0], move[1])});
-      } else {
-        if (node.getData().lastMoveColor.isBlack()) moveList.add(new String[] {"B", "pass"});
-        else moveList.add(new String[] {"W", "pass"});
-      }
-      node = node.previous().get();
-    }
-    ArrayList<String[]> moveList2 = new ArrayList<String[]>();
-    for (int i = moveList.size() - 1; i >= 0; i--) {
-      moveList2.add(moveList.get(i));
-    }
-    moveTurns.add(moveList2.size());
-    request.put("moves", moveList2);
+    moveTurns.add(moveList.size());
+    request.put("moves", moveList);
     request.put("analyzeTurns", moveTurns);
     JSONObject overrideSettings = new JSONObject();
     overrideSettings.put("reportAnalysisWinratesAs", "SIDETOMOVE");
@@ -468,6 +438,167 @@ public class AnalysisEngine {
     sendCommand(request.toString());
     analyzeMap.put(globalID, analyzeNode);
     globalID++;
+  }
+
+  private static BoardHistoryNode firstHistoryActionNode(BoardHistoryNode node) {
+    if (isRealHistoryAction(node.getData())) {
+      return node;
+    }
+    return nextHistoryActionNode(node);
+  }
+
+  private static BoardHistoryNode nextHistoryActionNode(BoardHistoryNode node) {
+    BoardHistoryNode current = node;
+    while (current.next().isPresent()) {
+      current = current.next().get();
+      if (isRealHistoryAction(current.getData())) {
+        return current;
+      }
+    }
+    return null;
+  }
+
+  private static boolean isRealHistoryAction(BoardData data) {
+    return data.isMoveNode() || (data.isPassNode() && !data.dummy);
+  }
+
+  private static boolean shouldAnalyzeTurn(int moveNum, int startMove, int endMove) {
+    boolean withinStart = startMove < 0 || moveNum >= startMove;
+    boolean withinEnd = endMove < 0 || moveNum < endMove;
+    return withinStart && withinEnd;
+  }
+
+  private static BoardHistoryNode resolveInitialStateAnchor(BoardHistoryNode snapshotAnchor) {
+    if (snapshotAnchor == null) {
+      return null;
+    }
+    if (!Lizzie.board.hasStartStone || snapshotAnchor.previous().isPresent()) {
+      return snapshotAnchor;
+    }
+    BoardData data = snapshotAnchor.getData();
+    if (data.moveNumber > 0 || data.lastMove.isPresent()) {
+      return snapshotAnchor;
+    }
+    for (Stone stone : data.stones) {
+      if (stone.isBlack() || stone.isWhite()) {
+        return snapshotAnchor;
+      }
+    }
+    return null;
+  }
+
+  private static ArrayList<String[]> collectInitialStones(BoardHistoryNode initialStateAnchor) {
+    if (initialStateAnchor != null) {
+      return collectSnapshotAnchorStones(initialStateAnchor.getData().stones);
+    }
+    if (Lizzie.board.hasStartStone) {
+      return collectConfiguredStartStones();
+    }
+    return new ArrayList<String[]>();
+  }
+
+  private static ArrayList<String[]> collectConfiguredStartStones() {
+    ArrayList<String[]> initialStoneList = new ArrayList<String[]>();
+    for (Movelist mv : Lizzie.board.startStonelist) {
+      if (!mv.ispass) {
+        initialStoneList.add(
+            new String[] {mv.isblack ? "B" : "W", Board.convertCoordinatesToName(mv.x, mv.y)});
+      }
+    }
+    return initialStoneList;
+  }
+
+  private static ArrayList<String[]> collectSnapshotAnchorStones(Stone[] stones) {
+    ArrayList<String[]> initialStoneList = new ArrayList<String[]>();
+    for (int y = 0; y < Board.boardHeight; y++) {
+      for (int x = 0; x < Board.boardWidth; x++) {
+        Stone stone = stones[Board.getIndex(x, y)];
+        if (stone.isBlack() || stone.isWhite()) {
+          initialStoneList.add(
+              new String[] {stone.isBlack() ? "B" : "W", Board.convertCoordinatesToName(x, y)});
+        }
+      }
+    }
+    return initialStoneList;
+  }
+
+  private static String collectInitialPlayer(BoardHistoryNode initialStateAnchor) {
+    if (initialStateAnchor != null) {
+      return initialStateAnchor.getData().blackToPlay ? "B" : "W";
+    }
+    if (Lizzie.board.hasStartStone) {
+      BoardHistoryNode root = Lizzie.board.getHistory().getStart();
+      return root.getData().blackToPlay ? "B" : "W";
+    }
+    return null;
+  }
+
+  private static BoardHistoryNode findSnapshotAnchor(BoardHistoryNode analyzeNode) {
+    BoardHistoryNode current = analyzeNode;
+    while (true) {
+      if (isSnapshotAnchor(current)) {
+        return current;
+      }
+      if (!current.previous().isPresent()) {
+        return null;
+      }
+      current = current.previous().get();
+    }
+  }
+
+  private static boolean isSnapshotAnchor(BoardHistoryNode node) {
+    if (!node.getData().isSnapshotNode()) {
+      return false;
+    }
+    if (node.previous().isPresent()) {
+      return true;
+    }
+    BoardData data = node.getData();
+    if (data.moveNumber > 0 || data.lastMove.isPresent()) {
+      return true;
+    }
+    if (!data.blackToPlay) {
+      return true;
+    }
+    for (Stone stone : data.stones) {
+      if (stone.isBlack() || stone.isWhite()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static ArrayList<String[]> collectHistoryActions(BoardHistoryNode analyzeNode) {
+    return collectHistoryActions(analyzeNode, findSnapshotAnchor(analyzeNode));
+  }
+
+  private static ArrayList<String[]> collectHistoryActions(
+      BoardHistoryNode analyzeNode, BoardHistoryNode snapshotAnchor) {
+    ArrayList<String[]> reversedMoves = new ArrayList<String[]>();
+    BoardHistoryNode node = analyzeNode;
+    while (node != snapshotAnchor && node.previous().isPresent()) {
+      if (node.getData().isMoveNode()) {
+        int[] move = node.getData().lastMove.get();
+        reversedMoves.add(
+            new String[] {
+              node.getData().lastMoveColor.isBlack() ? "B" : "W",
+              Board.convertCoordinatesToName(move[0], move[1])
+            });
+      } else if (node.getData().isPassNode() && !node.getData().dummy) {
+        reversedMoves.add(
+            new String[] {node.getData().lastMoveColor.isBlack() ? "B" : "W", "pass"});
+      }
+      node = node.previous().get();
+    }
+    ArrayList<String[]> moveList = new ArrayList<String[]>();
+    for (int i = reversedMoves.size() - 1; i >= 0; i--) {
+      moveList.add(reversedMoves.get(i));
+    }
+    return moveList;
+  }
+
+  private static boolean shouldAnalyzeBranchNode(BoardHistoryNode node) {
+    return isRealHistoryAction(node.getData());
   }
 
   public void shutdown() {

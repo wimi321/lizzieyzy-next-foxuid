@@ -1,6 +1,5 @@
 package featurecat.lizzie.analysis;
 
-import featurecat.lizzie.Lizzie;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.Closeable;

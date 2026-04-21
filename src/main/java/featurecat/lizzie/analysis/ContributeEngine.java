@@ -5,6 +5,7 @@ import featurecat.lizzie.gui.EngineFailedMessage;
 import featurecat.lizzie.gui.Menu;
 import featurecat.lizzie.gui.RemoteEngineData;
 import featurecat.lizzie.rules.Board;
+import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.SGFParser;
 import featurecat.lizzie.rules.Stone;
@@ -19,6 +20,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import org.jdesktop.swingx.util.OS;
@@ -1006,6 +1008,7 @@ public class ContributeEngine {
 
   class sameStatus {
     boolean isSame;
+    boolean historyExhausted;
     BoardHistoryNode startNode;
   }
 
@@ -1013,9 +1016,7 @@ public class ContributeEngine {
       ContributeGameInfo watchGame, ArrayList<ContributeMoveInfo> remainList) {
     sameStatus status = new sameStatus();
     status.isSame = true;
-    status.startNode = Lizzie.board.getHistory().getStart();
-    while (status.startNode.next().isPresent() && !status.startNode.getData().lastMove.isPresent())
-      status.startNode = status.startNode.next().get();
+    status.startNode = skipStaticSnapshotAnchors(Lizzie.board.getHistory().getStart());
     if (watchGame.initMoveList != null && watchGame.initMoveList.size() > 0) {
       status = compareListAndNode(watchGame.initMoveList, status, remainList);
     }
@@ -1029,40 +1030,65 @@ public class ContributeEngine {
       ArrayList<ContributeMoveInfo> list,
       sameStatus status,
       ArrayList<ContributeMoveInfo> remainList) {
-    boolean started = false;
-
+    if (status.historyExhausted) {
+      getRemainList(list, remainList, 0);
+      return status;
+    }
     for (int i = 0; i < list.size(); i++) {
       ContributeMoveInfo move = list.get(i);
-      if (started || !move.isPass) {
-        started = true;
-        if (status.startNode.getData().lastMove.isPresent()) {
-          if (status.startNode.getData().lastMove.get()[0] != move.pos[0]
-              || status.startNode.getData().lastMove.get()[1] != move.pos[1]) {
-            status.isSame = false;
-            return status;
-          }
-          if (status.startNode.next().isPresent()) status.startNode = status.startNode.next().get();
-          else {
-            getRemainList(list, remainList, i + 1);
-            return status;
-          }
-
-        } else {
-          if (move.isPass) {
-            if (status.startNode.next().isPresent())
-              status.startNode = status.startNode.next().get();
-            else {
-              getRemainList(list, remainList, i + 1);
-              return status;
-            }
-          } else {
-            status.isSame = false;
-            return status;
-          }
-        }
+      status.startNode = skipStaticSnapshotAnchors(status.startNode);
+      BoardData nodeData = status.startNode.getData();
+      if (!isReplayableHistoryAction(nodeData)) {
+        getRemainList(list, remainList, i);
+        return status;
       }
+      if (nodeMatchesMove(nodeData, move)) {
+        Optional<BoardHistoryNode> nextNode = nextHistoryActionNode(status.startNode);
+        if (nextNode.isPresent()) {
+          status.startNode = nextNode.get();
+        } else {
+          status.historyExhausted = true;
+          getRemainList(list, remainList, i + 1);
+          return status;
+        }
+        continue;
+      }
+      status.isSame = false;
+      return status;
     }
     return status;
+  }
+
+  private boolean nodeMatchesMove(BoardData nodeData, ContributeMoveInfo move) {
+    if (!isReplayableHistoryAction(nodeData)) {
+      return false;
+    }
+    if (nodeData.isMoveNode() && nodeData.lastMove.isPresent() && !move.isPass) {
+      return nodeData.lastMoveColor.isBlack() == move.isBlack
+          && nodeData.lastMove.get()[0] == move.pos[0]
+          && nodeData.lastMove.get()[1] == move.pos[1];
+    }
+    return nodeData.isPassNode() && move.isPass && nodeData.lastMoveColor.isBlack() == move.isBlack;
+  }
+
+  private BoardHistoryNode skipStaticSnapshotAnchors(BoardHistoryNode startNode) {
+    BoardHistoryNode node = startNode;
+    while (node.next().isPresent() && !isReplayableHistoryAction(node.getData())) {
+      node = node.next().get();
+    }
+    return node;
+  }
+
+  private Optional<BoardHistoryNode> nextHistoryActionNode(BoardHistoryNode startNode) {
+    Optional<BoardHistoryNode> nextNode = startNode.next();
+    while (nextNode.isPresent() && !isReplayableHistoryAction(nextNode.get().getData())) {
+      nextNode = nextNode.get().next();
+    }
+    return nextNode;
+  }
+
+  private boolean isReplayableHistoryAction(BoardData nodeData) {
+    return nodeData.isMoveNode() || (nodeData.isPassNode() && !nodeData.dummy);
   }
 
   private void getRemainList(

@@ -16,27 +16,15 @@ final class SyncSnapshotClassifier {
     this.boardArea = boardWidth * boardHeight;
   }
 
-  Optional<SingleMove> findSingleMoveCapture(Stone[] currentStones, int[] snapshot) {
+  SnapshotDelta summarizeDelta(Stone[] currentStones, int[] snapshot) {
     if (currentStones.length != boardArea || snapshot.length != boardArea) {
-      return Optional.empty();
+      return SnapshotDelta.invalid();
     }
-    Delta delta = analyzeDelta(currentStones, snapshot);
-    if (!delta.isSingleMove()) {
-      return Optional.empty();
-    }
-    SingleMove move = new SingleMove(delta.moveX, delta.moveY, delta.moveColor);
-    Stone[] simulated = simulateMove(currentStones, move);
-    if (simulated == null || !matchesSnapshot(simulated, snapshot)) {
-      return Optional.empty();
-    }
-    return Optional.of(move);
-  }
-
-  private Delta analyzeDelta(Stone[] currentStones, int[] snapshot) {
-    Delta delta = new Delta();
+    SnapshotDelta delta = new SnapshotDelta();
     for (int snapshotIndex = 0; snapshotIndex < boardArea; snapshotIndex++) {
       int x = snapshotIndex % boardWidth;
       int y = snapshotIndex / boardWidth;
+      delta.recordMarker(x, y, markerColor(snapshot[snapshotIndex]));
       int currentValue = normalize(currentStones[stoneIndex(x, y)]);
       int snapshotValue = normalize(snapshot[snapshotIndex]);
       if (currentValue == snapshotValue) {
@@ -54,6 +42,19 @@ final class SyncSnapshotClassifier {
       return delta;
     }
     return delta;
+  }
+
+  Optional<SingleMove> findSingleMoveCapture(Stone[] currentStones, int[] snapshot) {
+    SnapshotDelta delta = summarizeDelta(currentStones, snapshot);
+    if (!delta.isSingleMoveCapture()) {
+      return Optional.empty();
+    }
+    SingleMove move = new SingleMove(delta.moveX, delta.moveY, delta.moveColor);
+    Stone[] simulated = simulateMove(currentStones, move);
+    if (simulated == null || !matchesSnapshot(simulated, snapshot)) {
+      return Optional.empty();
+    }
+    return Optional.of(move);
   }
 
   private Stone[] simulateMove(Stone[] currentStones, SingleMove move) {
@@ -165,6 +166,16 @@ final class SyncSnapshotClassifier {
     return 0;
   }
 
+  private int markerColor(int value) {
+    if (value == 3) {
+      return 1;
+    }
+    if (value == 4) {
+      return 2;
+    }
+    return 0;
+  }
+
   static final class SingleMove {
     final int x;
     final int y;
@@ -177,17 +188,29 @@ final class SyncSnapshotClassifier {
     }
   }
 
-  private static final class Delta {
+  static final class SnapshotDelta {
     private int moveX = -1;
     private int moveY = -1;
     private Stone moveColor = Stone.EMPTY;
+    private int additions = 0;
     private int removedBlack = 0;
     private int removedWhite = 0;
     private boolean valid = true;
+    private boolean markerValid = true;
+    private boolean markerPresent = false;
+    private int markerX = -1;
+    private int markerY = -1;
+    private Stone markerColor = Stone.EMPTY;
+
+    private static SnapshotDelta invalid() {
+      SnapshotDelta delta = new SnapshotDelta();
+      delta.valid = false;
+      return delta;
+    }
 
     private void recordAddition(int x, int y, Stone color) {
+      additions++;
       if (moveColor != Stone.EMPTY) {
-        valid = false;
         return;
       }
       moveX = x;
@@ -207,14 +230,84 @@ final class SyncSnapshotClassifier {
       valid = false;
     }
 
-    private boolean isSingleMove() {
-      if (!valid || moveColor == Stone.EMPTY) {
+    boolean allowsIncrementalSync() {
+      if (!valid || !markerValid || removedBlack + removedWhite > 0) {
+        return false;
+      }
+      if (additions == 0) {
+        return !markerPresent;
+      }
+      if (additions != 1 || !markerPresent) {
+        return false;
+      }
+      return markerMatchesSingleAddition();
+    }
+
+    boolean hasMarker() {
+      return markerValid && markerPresent;
+    }
+
+    int markerX() {
+      return markerX;
+    }
+
+    int markerY() {
+      return markerY;
+    }
+
+    Stone markerColor() {
+      return markerColor;
+    }
+
+    int additions() {
+      return additions;
+    }
+
+    int removals() {
+      return removedBlack + removedWhite;
+    }
+
+    int changedStones() {
+      return additions + removals();
+    }
+
+    boolean hasOnlyAdditions() {
+      return valid && removedBlack == 0 && removedWhite == 0;
+    }
+
+    boolean hasOnlyRemovals() {
+      return valid && additions == 0 && removals() > 0;
+    }
+
+    private boolean isSingleMoveCapture() {
+      if (!valid || !markerValid || moveColor == Stone.EMPTY || additions != 1) {
+        return false;
+      }
+      if (markerPresent && !markerMatchesSingleAddition()) {
         return false;
       }
       if (moveColor == Stone.BLACK) {
         return removedBlack == 0;
       }
       return removedWhite == 0;
+    }
+
+    private void recordMarker(int x, int y, int color) {
+      if (color == 0) {
+        return;
+      }
+      if (markerPresent) {
+        markerValid = false;
+        return;
+      }
+      markerPresent = true;
+      markerX = x;
+      markerY = y;
+      markerColor = color == 1 ? Stone.BLACK : Stone.WHITE;
+    }
+
+    private boolean markerMatchesSingleAddition() {
+      return markerX == moveX && markerY == moveY && markerColor == moveColor;
     }
   }
 }

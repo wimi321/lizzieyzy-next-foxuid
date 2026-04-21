@@ -3,7 +3,9 @@ package featurecat.lizzie.analysis;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
+import featurecat.lizzie.rules.BoardNodeKind;
 import featurecat.lizzie.rules.Stone;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,141 +29,250 @@ public class Branch {
       Stone[] stonesTemp,
       boolean forMouseOnStone,
       BoardData forMouseOnStoneData) {
-    int[] moveNumberList = new int[Board.boardWidth * Board.boardHeight];
     isNewStone = new boolean[Board.boardWidth * Board.boardHeight];
     pvVisitsList = new int[Board.boardWidth * Board.boardHeight];
-    this.length = Math.min(variation.size(), length);
-    int moveNumber = 0;
     double winrate = 0.0;
     int playouts = 0;
-    //  branchLength = variation.size();
+    BoardData sourceData =
+        resolveSourceData(board, fromSubboard, stonesTemp, forMouseOnStone, forMouseOnStoneData);
+    Stone[] sourceStones =
+        resolveSourceStones(board, stonesTemp, forMouseOnStone, forMouseOnStoneData);
+    boolean branchBlackToPlay = fromSubboard ? blackToPlay : sourceData.blackToPlay;
+    this.data =
+        copySourceData(
+            sourceData,
+            sourceStones,
+            branchBlackToPlay,
+            new int[Board.boardWidth * Board.boardHeight],
+            winrate,
+            playouts);
+    this.length = applyVariation(variation, pvVisits, length);
+  }
+
+  private static BoardData resolveSourceData(
+      Board board,
+      boolean fromSubboard,
+      Stone[] stonesTemp,
+      boolean forMouseOnStone,
+      BoardData forMouseOnStoneData) {
     if (forMouseOnStone) {
-      this.data =
-          new BoardData(
-              forMouseOnStoneData.stones.clone(),
-              forMouseOnStoneData.lastMove,
-              forMouseOnStoneData.lastMoveColor,
-              forMouseOnStoneData.blackToPlay,
-              forMouseOnStoneData.zobrist.clone(),
-              moveNumber,
-              moveNumberList,
-              forMouseOnStoneData.blackCaptures,
-              forMouseOnStoneData.whiteCaptures,
-              winrate,
-              playouts);
-    } else {
-      if (fromSubboard) {
-        this.data =
-            new BoardData(
-                stonesTemp.clone(), // stonesTemp
-                board.getLastMove(),
-                board.getData().lastMoveColor,
-                blackToPlay,
-                board.getData().zobrist.clone(),
-                moveNumber,
-                moveNumberList,
-                board.getData().blackCaptures,
-                board.getData().whiteCaptures,
-                winrate,
-                playouts);
-      } else {
-        if (stonesTemp != null)
-          this.data =
-              new BoardData(
-                  stonesTemp.clone(),
-                  board.getHistory().getCurrentHistoryNode().previous().get().getData().lastMove,
-                  board
-                      .getHistory()
-                      .getCurrentHistoryNode()
-                      .previous()
-                      .get()
-                      .getData()
-                      .lastMoveColor,
-                  board.getHistory().getCurrentHistoryNode().previous().get().getData().blackToPlay,
-                  board
-                      .getHistory()
-                      .getCurrentHistoryNode()
-                      .previous()
-                      .get()
-                      .getData()
-                      .zobrist
-                      .clone(),
-                  moveNumber,
-                  moveNumberList,
-                  board
-                      .getHistory()
-                      .getCurrentHistoryNode()
-                      .previous()
-                      .get()
-                      .getData()
-                      .blackCaptures,
-                  board
-                      .getHistory()
-                      .getCurrentHistoryNode()
-                      .previous()
-                      .get()
-                      .getData()
-                      .whiteCaptures,
-                  winrate,
-                  playouts);
-        else
-          this.data =
-              new BoardData(
-                  board.getStones().clone(),
-                  board.getLastMove(),
-                  board.getData().lastMoveColor,
-                  board.getData().blackToPlay,
-                  board.getData().zobrist.clone(),
-                  moveNumber,
-                  moveNumberList,
-                  board.getData().blackCaptures,
-                  board.getData().whiteCaptures,
-                  winrate,
-                  playouts);
-      }
+      return forMouseOnStoneData;
     }
-    for (int i = 0; i < variation.size() && i < length; i++) {
-      Optional<int[]> coordOpt = Board.asCoordinates(variation.get(i));
+    if (fromSubboard || stonesTemp == null) {
+      return board.getData();
+    }
+    return board.getHistory().getCurrentHistoryNode().previous().get().getData();
+  }
+
+  private static Stone[] resolveSourceStones(
+      Board board, Stone[] stonesTemp, boolean forMouseOnStone, BoardData forMouseOnStoneData) {
+    if (forMouseOnStone) {
+      return forMouseOnStoneData.stones.clone();
+    }
+    return stonesTemp != null ? stonesTemp.clone() : board.getStones().clone();
+  }
+
+  private static BoardData copySourceData(
+      BoardData sourceData,
+      Stone[] stones,
+      boolean blackToPlay,
+      int[] moveNumberList,
+      double winrate,
+      int playouts) {
+    BoardData branchData =
+        createBoardData(
+            sourceData.getNodeKind(),
+            stones,
+            copyLastMove(sourceData.lastMove),
+            sourceData.lastMoveColor,
+            blackToPlay,
+            sourceData.zobrist.clone(),
+            sourceData.moveNumber,
+            moveNumberList,
+            sourceData.blackCaptures,
+            sourceData.whiteCaptures,
+            winrate,
+            playouts);
+    copyRenderMetadata(sourceData, branchData);
+    return branchData;
+  }
+
+  private int applyVariation(List<String> variation, List<String> pvVisits, int maxLength) {
+    int processedMoves = 0;
+    int limit = Math.min(variation.size(), maxLength);
+    for (int i = 0; i < limit; i++) {
+      String move = variation.get(i).trim();
+      if (move.equalsIgnoreCase("resign")) {
+        break;
+      }
+      int branchMoveNumber = processedMoves + 1;
+      if (move.equalsIgnoreCase("pass")) {
+        applyPass();
+        processedMoves++;
+        continue;
+      }
+      Optional<int[]> coordOpt = Board.asCoordinates(move);
       if (!coordOpt.isPresent() || !Board.isValid(coordOpt.get()[0], coordOpt.get()[1])) {
         break;
       }
-      int[] coord = coordOpt.get();
-
-      int x = coord[0];
-      int y = coord[1];
-      data.lastMove = coordOpt;
-      data.stones[Board.getIndex(coord[0], coord[1])] =
-          data.blackToPlay ? Stone.BLACK : Stone.WHITE;
-      isNewStone[Board.getIndex(coord[0], coord[1])] = true;
-      // if (Lizzie.frame.floatBoard == null || !Lizzie.frame.floatBoard.isVisible()) {
-      if (Lizzie.config.removeDeadChainInVariation && !Lizzie.config.noCapture) {
-        Board.removeDeadChainForBranch(
-            x + 1, y, data.blackToPlay ? Stone.WHITE : Stone.BLACK, data.stones);
-        Board.removeDeadChainForBranch(
-            x, y + 1, data.blackToPlay ? Stone.WHITE : Stone.BLACK, data.stones);
-        Board.removeDeadChainForBranch(
-            x - 1, y, data.blackToPlay ? Stone.WHITE : Stone.BLACK, data.stones);
-        Board.removeDeadChainForBranch(
-            x, y - 1, data.blackToPlay ? Stone.WHITE : Stone.BLACK, data.stones);
-      }
-      // }
-      data.moveNumberList[Board.getIndex(coord[0], coord[1])] =
-          i + 1; // 待完成,pvVisits也类似保存,选项可选 pvVisits显示全部/最后一手/不显示
-
-      data.lastMoveColor = data.blackToPlay ? Stone.WHITE : Stone.BLACK;
-      data.blackToPlay = !data.blackToPlay;
-      // 待完成,增加是否显示pvvisits的判断
-      //  if (i == variation.size() - 1 || i == length - 1) {
-      if (Lizzie.config.showPvVisitsAllMove || Lizzie.config.showPvVisitsLastMove) {
-        if (pvVisits != null && pvVisits.size() == variation.size())
-          try {
-            //  this.pvVisits = Integer.parseInt(pvVisits.get(i));
-            pvVisitsList[Board.getIndex(coord[0], coord[1])] = Integer.parseInt(pvVisits.get(i));
-          } catch (NumberFormatException e) {
-            e.printStackTrace();
-          }
-      }
+      applyCoordinateMove(coordOpt.get(), branchMoveNumber, i, variation.size(), pvVisits);
+      processedMoves++;
     }
-    //  }
+    return processedMoves;
+  }
+
+  private void applyPass() {
+    Stone moveColor = currentMoveColor();
+    data =
+        rebuildData(
+            BoardNodeKind.PASS,
+            Optional.empty(),
+            moveColor,
+            !data.blackToPlay,
+            data.moveNumber + 1);
+  }
+
+  private void applyCoordinateMove(
+      int[] coord,
+      int branchMoveNumber,
+      int variationIndex,
+      int variationSize,
+      List<String> pvVisits) {
+    int x = coord[0];
+    int y = coord[1];
+    int boardIndex = Board.getIndex(x, y);
+    Stone moveColor = currentMoveColor();
+    data.lastMove = Optional.of(coord);
+    data.stones[boardIndex] = moveColor;
+    isNewStone[boardIndex] = true;
+    if (Lizzie.config.removeDeadChainInVariation && !Lizzie.config.noCapture) {
+      Board.removeDeadChainForBranch(x + 1, y, moveColor.opposite(), data.stones);
+      Board.removeDeadChainForBranch(x, y + 1, moveColor.opposite(), data.stones);
+      Board.removeDeadChainForBranch(x - 1, y, moveColor.opposite(), data.stones);
+      Board.removeDeadChainForBranch(x, y - 1, moveColor.opposite(), data.stones);
+    }
+    data.moveNumberList[boardIndex] = branchMoveNumber;
+    data =
+        rebuildData(
+            BoardNodeKind.MOVE,
+            Optional.of(coord.clone()),
+            moveColor,
+            !data.blackToPlay,
+            data.moveNumber + 1);
+    recordPvVisits(boardIndex, variationIndex, variationSize, pvVisits);
+  }
+
+  private void recordPvVisits(
+      int boardIndex, int variationIndex, int variationSize, List<String> pvVisits) {
+    if (!(Lizzie.config.showPvVisitsAllMove || Lizzie.config.showPvVisitsLastMove)) {
+      return;
+    }
+    if (pvVisits == null || pvVisits.size() != variationSize) {
+      return;
+    }
+    try {
+      pvVisitsList[boardIndex] = Integer.parseInt(pvVisits.get(variationIndex));
+    } catch (NumberFormatException e) {
+      e.printStackTrace();
+    }
+  }
+
+  private Stone currentMoveColor() {
+    return data.blackToPlay ? Stone.BLACK : Stone.WHITE;
+  }
+
+  private BoardData rebuildData(
+      BoardNodeKind nodeKind,
+      Optional<int[]> lastMove,
+      Stone lastMoveColor,
+      boolean blackToPlay,
+      int moveNumber) {
+    BoardData previousData = data;
+    BoardData nextData =
+        createBoardData(
+            nodeKind,
+            previousData.stones,
+            lastMove,
+            lastMoveColor,
+            blackToPlay,
+            previousData.zobrist.clone(),
+            moveNumber,
+            previousData.moveNumberList,
+            previousData.blackCaptures,
+            previousData.whiteCaptures,
+            previousData.winrate,
+            previousData.getPlayouts());
+    copyRenderMetadata(previousData, nextData);
+    return nextData;
+  }
+
+  private static BoardData createBoardData(
+      BoardNodeKind nodeKind,
+      Stone[] stones,
+      Optional<int[]> lastMove,
+      Stone lastMoveColor,
+      boolean blackToPlay,
+      featurecat.lizzie.rules.Zobrist zobrist,
+      int moveNumber,
+      int[] moveNumberList,
+      int blackCaptures,
+      int whiteCaptures,
+      double winrate,
+      int playouts) {
+    switch (nodeKind) {
+      case MOVE:
+        return BoardData.move(
+            stones,
+            lastMove.orElseThrow(
+                () -> new IllegalStateException("MOVE nodes require coordinates.")),
+            lastMoveColor,
+            blackToPlay,
+            zobrist,
+            moveNumber,
+            moveNumberList,
+            blackCaptures,
+            whiteCaptures,
+            winrate,
+            playouts);
+      case PASS:
+        return BoardData.pass(
+            stones,
+            lastMoveColor,
+            blackToPlay,
+            zobrist,
+            moveNumber,
+            moveNumberList,
+            blackCaptures,
+            whiteCaptures,
+            winrate,
+            playouts);
+      case SNAPSHOT:
+        return BoardData.snapshot(
+            stones,
+            copyLastMove(lastMove),
+            lastMoveColor,
+            blackToPlay,
+            zobrist,
+            moveNumber,
+            moveNumberList,
+            blackCaptures,
+            whiteCaptures,
+            winrate,
+            playouts);
+      default:
+        throw new IllegalStateException("Unsupported board node kind: " + nodeKind);
+    }
+  }
+
+  private static void copyRenderMetadata(BoardData sourceData, BoardData targetData) {
+    targetData.dummy = sourceData.dummy;
+    targetData.moveMNNumber = sourceData.moveMNNumber;
+    targetData.verify = sourceData.verify;
+    targetData.comment = sourceData.comment;
+    targetData.setProperties(new HashMap<>(sourceData.getProperties()));
+  }
+
+  private static Optional<int[]> copyLastMove(Optional<int[]> lastMove) {
+    return lastMove.map(coords -> coords.clone());
   }
 }

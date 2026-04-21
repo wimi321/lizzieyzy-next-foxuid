@@ -7,7 +7,10 @@ import featurecat.lizzie.gui.LizzieFrame;
 import featurecat.lizzie.gui.SMessage;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
+import featurecat.lizzie.rules.BoardHistoryList;
 import featurecat.lizzie.rules.BoardHistoryNode;
+import featurecat.lizzie.rules.ExtraStones;
+import featurecat.lizzie.rules.Movelist;
 import featurecat.lizzie.rules.Stone;
 import featurecat.lizzie.rules.Zobrist;
 import featurecat.lizzie.util.Utils;
@@ -22,6 +25,7 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -66,6 +70,8 @@ public class ReadBoard {
   private String javaReadBoardName = "readboard-1.6.2-shaded.jar";
   private boolean waitSocket = true;
   public boolean lastMovePlayByLizzie = false;
+  private OptionalInt pendingFoxMoveNumber = OptionalInt.empty();
+  private boolean waitingForReadBoardLocalMoveAck = false;
   private boolean hideFloadBoardBeforePlace = false;
   private boolean hideFromPlace = false;
   public boolean editMode = false;
@@ -73,6 +79,14 @@ public class ReadBoard {
   private final SyncHistoryJumpTracker historyJumpTracker = new SyncHistoryJumpTracker();
   private final SyncLocalNavigationTracker localNavigationTracker =
       new SyncLocalNavigationTracker();
+  private BoardHistoryNode lastResolvedSnapshotNode;
+
+  private enum CompleteSnapshotRecovery {
+    NO_CHANGE,
+    SINGLE_MOVE_RECOVERY,
+    HOLD,
+    FORCE_REBUILD
+  }
 
   private SyncSnapshotRebuildPolicy rebuildPolicy() {
     return new SyncSnapshotRebuildPolicy(Board.boardWidth);
@@ -299,6 +313,12 @@ public class ReadBoard {
           tempcount.add(Integer.parseInt(params[i].substring(0, 1)));
       }
     }
+    if (line.startsWith("foxMoveNumber")) {
+      OptionalInt foxMoveNumber = parseFoxMoveNumber(line);
+      if (foxMoveNumber.isPresent()) {
+        pendingFoxMoveNumber = foxMoveNumber;
+      }
+    }
     if (line.startsWith("version")) {
       Lizzie.gtpConsole.addLineReadBoard("Board synchronization tool " + line + "\n");
       String[] params = line.trim().split(" ");
@@ -312,14 +332,17 @@ public class ReadBoard {
     }
     if (line.startsWith("end")) {
       if (!isSyncing) syncBoardStones(false);
+      clearPendingFoxMoveNumber();
       tempcount = new ArrayList<Integer>();
     }
     if (line.startsWith("clear")) {
       resetSyncTrackers();
+      clearPendingFoxMoveNumber();
       Lizzie.board.clear(false);
       Lizzie.frame.refresh();
     }
     if (line.startsWith("start")) {
+      clearPendingFoxMoveNumber();
       String[] params = line.trim().split(" ");
       if (params.length >= 3) {
         int boardWidth = Integer.parseInt(params[1]);
@@ -357,6 +380,7 @@ public class ReadBoard {
     if (line.startsWith("endsync")) {
       noMsg = true;
       resetSyncTrackers();
+      clearPendingFoxMoveNumber();
       tempcount = new ArrayList<Integer>();
       Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
@@ -369,6 +393,7 @@ public class ReadBoard {
     }
     if (line.startsWith("stopsync")) {
       resetSyncTrackers();
+      clearPendingFoxMoveNumber();
       tempcount = new ArrayList<Integer>();
       Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
@@ -543,6 +568,7 @@ public class ReadBoard {
       hideFloadBoardBeforePlace = false;
     }
     if (line.startsWith("placeComplete")) {
+      markLocalMoveCommandCompleted();
       if (hideFloadBoardBeforePlace && hideFromPlace) {
         hideFromPlace = false;
         if (Lizzie.frame.floatBoard != null) Lizzie.frame.floatBoard.setVisible(true);
@@ -566,6 +592,7 @@ public class ReadBoard {
     try {
       boolean needReSync = false;
       boolean played = false;
+      boolean singleMoveRecovered = false;
       boolean holdLastMove = false;
       int lastX = 0;
       int lastY = 0;
@@ -576,143 +603,144 @@ public class ReadBoard {
       Stone[] syncStartStones = node2.getData().stones.clone();
       Stone[] stones = Lizzie.board.getHistory().getMainEnd().getData().stones;
       int[] currentSnapshotCodes = getSnapshotCodes();
+      OptionalInt currentFoxMoveNumber = currentPendingFoxMoveNumber();
+      SyncSnapshotClassifier classifier =
+          new SyncSnapshotClassifier(Board.boardWidth, Board.boardHeight);
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta =
+          classifier.summarizeDelta(syncStartStones, currentSnapshotCodes);
       if (!snapshotDiffChecker().isComparable(currentSnapshotCodes, stones)) {
         return;
       }
+      acknowledgeLocalMoveIfSnapshotCaughtUp(stones, currentSnapshotCodes);
 
       boolean needRefresh = false;
-      for (int i = 0; i < tempcount.size(); i++) {
-        int m = tempcount.get(i);
-        int y = i / Board.boardWidth;
-        int x = i % Board.boardWidth;
-        if (((holdLastMove && m == 3) || m == 1) && !stones[Board.getIndex(x, y)].isBlack()) {
-          if (stones[Board.getIndex(x, y)].isWhite()) {
-            Lizzie.board.clear(false);
-            needReSync = true;
-            needRefresh = true;
-            break;
+      if (snapshotDelta.allowsIncrementalSync()) {
+        for (int i = 0; i < tempcount.size(); i++) {
+          int m = tempcount.get(i);
+          int y = i / Board.boardWidth;
+          int x = i % Board.boardWidth;
+          if (((holdLastMove && m == 3) || m == 1) && !stones[Board.getIndex(x, y)].isBlack()) {
+            if (stones[Board.getIndex(x, y)].isWhite()) {
+              Lizzie.board.clear(false);
+              needReSync = true;
+              needRefresh = true;
+              break;
+            }
+            if (!played) {
+              moveToAnyPositionWithoutTracking(node2);
+            }
+            Lizzie.board.placeForSync(x, y, Stone.BLACK, true);
+            if (node2.variations.size() > 0 && node2.variations.get(0).isEndDummay()) {
+              node2.variations.add(0, node2.variations.get(node2.variations.size() - 1));
+              node2.variations.remove(1);
+              node2.variations.remove(node2.variations.size() - 1);
+            }
+            played = true;
+            playedMove = playedMove + 1;
           }
+          if (((holdLastMove && m == 4) || m == 2) && !stones[Board.getIndex(x, y)].isWhite()) {
+            if (stones[Board.getIndex(x, y)].isBlack()) {
+              Lizzie.board.clear(false);
+              needReSync = true;
+              needRefresh = true;
+              break;
+            }
+
+            if (!played) {
+              moveToAnyPositionWithoutTracking(node2);
+            }
+            Lizzie.board.placeForSync(x, y, Stone.WHITE, true);
+            if (node2.variations.size() > 0 && node2.variations.get(0).isEndDummay()) {
+              node2.variations.add(0, node2.variations.get(node2.variations.size() - 1));
+              node2.variations.remove(1);
+              node2.variations.remove(node2.variations.size() - 1);
+            }
+            played = true;
+            playedMove = playedMove + 1;
+          }
+
+          if (!holdLastMove && m == 3 && !stones[Board.getIndex(x, y)].isBlack()) {
+            if (stones[Board.getIndex(x, y)].isWhite()) {
+              Lizzie.board.clear(false);
+              needReSync = true;
+              needRefresh = true;
+              break;
+            }
+            holdLastMove = true;
+            lastX = x;
+            lastY = y;
+            isLastBlack = true;
+          }
+          if (!holdLastMove && m == 4 && !stones[Board.getIndex(x, y)].isWhite()) {
+            if (stones[Board.getIndex(x, y)].isBlack()) {
+              Lizzie.board.clear(false);
+              needReSync = true;
+              needRefresh = true;
+              break;
+            }
+            holdLastMove = true;
+            lastX = x;
+            lastY = y;
+            isLastBlack = false;
+          }
+        }
+        if (firstSync) {
+          Lizzie.board.hasStartStone = true;
+          Lizzie.board.addStartListAll();
+          Lizzie.board.flatten();
+        }
+        // 落最后一步
+        if (holdLastMove && !needReSync) {
           if (!played) {
             moveToAnyPositionWithoutTracking(node2);
           }
-          Lizzie.board.placeForSync(x, y, Stone.BLACK, true);
+          Lizzie.board.placeForSync(lastX, lastY, isLastBlack ? Stone.BLACK : Stone.WHITE, true);
           if (node2.variations.size() > 0 && node2.variations.get(0).isEndDummay()) {
             node2.variations.add(0, node2.variations.get(node2.variations.size() - 1));
             node2.variations.remove(1);
             node2.variations.remove(node2.variations.size() - 1);
           }
           played = true;
-          playedMove = playedMove + 1;
+          if (Lizzie.config.alwaysSyncBoardStat || showInBoard) lastMoveWithoutTracking();
         }
-        if (((holdLastMove && m == 4) || m == 2) && !stones[Board.getIndex(x, y)].isWhite()) {
-          if (stones[Board.getIndex(x, y)].isBlack()) {
-            Lizzie.board.clear(false);
-            needReSync = true;
-            needRefresh = true;
-            break;
-          }
-
-          if (!played) {
-            moveToAnyPositionWithoutTracking(node2);
-          }
-          Lizzie.board.placeForSync(x, y, Stone.WHITE, true);
-          if (node2.variations.size() > 0 && node2.variations.get(0).isEndDummay()) {
-            node2.variations.add(0, node2.variations.get(node2.variations.size() - 1));
-            node2.variations.remove(1);
-            node2.variations.remove(node2.variations.size() - 1);
-          }
-          played = true;
-          playedMove = playedMove + 1;
+        stones = Lizzie.board.getHistory().getMainEnd().getData().stones;
+        if (shouldResyncAfterIncrementalSync(stones, currentSnapshotCodes)) {
+          needReSync = true;
         }
-
-        if (!holdLastMove && m == 3 && !stones[Board.getIndex(x, y)].isBlack()) {
-          if (stones[Board.getIndex(x, y)].isWhite()) {
-            Lizzie.board.clear(false);
-            needReSync = true;
-            needRefresh = true;
-            break;
-          }
-          holdLastMove = true;
-          lastX = x;
-          lastY = y;
-          isLastBlack = true;
-        }
-        if (!holdLastMove && m == 4 && !stones[Board.getIndex(x, y)].isWhite()) {
-          if (stones[Board.getIndex(x, y)].isBlack()) {
-            Lizzie.board.clear(false);
-            needReSync = true;
-            needRefresh = true;
-            break;
-          }
-          holdLastMove = true;
-          lastX = x;
-          lastY = y;
-          isLastBlack = false;
-        }
-      }
-      if (firstSync) {
-        Lizzie.board.hasStartStone = true;
-        Lizzie.board.addStartListAll();
-        Lizzie.board.flatten();
-      }
-      // 落最后一步
-      if (holdLastMove && !needReSync) {
-        if (!played) {
-          moveToAnyPositionWithoutTracking(node2);
-        }
-        Lizzie.board.placeForSync(lastX, lastY, isLastBlack ? Stone.BLACK : Stone.WHITE, true);
-        if (node2.variations.size() > 0 && node2.variations.get(0).isEndDummay()) {
-          node2.variations.add(0, node2.variations.get(node2.variations.size() - 1));
-          node2.variations.remove(1);
-          node2.variations.remove(node2.variations.size() - 1);
-        }
-        played = true;
-        if (Lizzie.config.alwaysSyncBoardStat || showInBoard) lastMoveWithoutTracking();
-      }
-      stones = Lizzie.board.getHistory().getMainEnd().getData().stones;
-      if (shouldResyncAfterIncrementalSync(stones, currentSnapshotCodes)) {
+      } else {
         needReSync = true;
       }
-      if (!needReSync) {
-        BoardHistoryNode currentNode = resolveLocalNavigationTarget(node);
-        BoardHistoryNode currentSyncEndNode = Lizzie.board.getHistory().getMainEnd();
-        boolean restoredSyncEnd = restoreSyncEndAfterHistoryJump(currentNode);
-        if (restoredSyncEnd) {
-          needRefresh = true;
-        }
-        applySyncViewState(
-            played, restoredSyncEnd ? currentSyncEndNode : currentNode, currentSyncEndNode);
-      }
       if (needReSync && !isSecondTime) {
-        if (tryApplySingleMoveRecovery(node, node2, syncStartStones, currentSnapshotCodes)) {
-          played = true;
-          needReSync = false;
-          needRefresh = true;
-        } else {
-          if (!played && !needRefresh) {
-            if (tryApplyHistorySnapshotMatch(node, node2, currentSnapshotCodes)) {
-              played = true;
-              needReSync = false;
-              needRefresh = true;
-            } else if (rebuildPolicy().shouldRebuildImmediatelyWithoutHistory(node2)) {
-              resetSyncTrackers();
-              Lizzie.board.clear(false);
-              syncBoardStones(true);
-              return;
-            } else {
-              SyncConflictTracker.Decision conflictDecision =
-                  conflictTracker.evaluate(currentSnapshotCodes);
-              if (conflictDecision == SyncConflictTracker.Decision.HOLD) {
-                return;
-              }
-            }
-          }
-          if (needReSync) {
-            resetSyncTrackers();
-            Lizzie.board.clear(false);
-            syncBoardStones(true);
-          }
+        CompleteSnapshotRecovery recovery =
+            resolveCompleteSnapshotRecovery(
+                node2, syncStartStones, currentSnapshotCodes, snapshotDelta);
+        if (recovery == CompleteSnapshotRecovery.HOLD) {
+          return;
         }
+        if (recovery == CompleteSnapshotRecovery.FORCE_REBUILD) {
+          rebuildFromSnapshot(node2, currentSnapshotCodes, snapshotDelta, currentFoxMoveNumber);
+          return;
+        }
+        needReSync = false;
+        singleMoveRecovered = recovery == CompleteSnapshotRecovery.SINGLE_MOVE_RECOVERY;
+        played = singleMoveRecovered;
+        needRefresh = played;
+      }
+      if (!needReSync) {
+        BoardHistoryNode currentSyncEndNode = Lizzie.board.getHistory().getMainEnd();
+        if (singleMoveRecovered) {
+          keepViewOnRecoveredMainEnd(currentSyncEndNode);
+        }
+        BoardHistoryNode currentNode =
+            singleMoveRecovered ? currentSyncEndNode : resolveLocalNavigationTarget(node);
+        if (shouldRebuildForFoxMetadataChange(
+            currentSyncEndNode, currentFoxMoveNumber, currentSnapshotCodes)) {
+          rebuildFromSnapshot(
+              currentSyncEndNode, currentSnapshotCodes, snapshotDelta, currentFoxMoveNumber);
+          return;
+        }
+        historyJumpTracker.clear();
+        applySyncViewState(played, currentNode, currentSyncEndNode);
       }
       if (!needReSync) {
         conflictTracker.clear();
@@ -763,9 +791,595 @@ public class ReadBoard {
     return codes;
   }
 
+  private OptionalInt parseFoxMoveNumber(String line) {
+    String[] params = line.trim().split(" ");
+    if (params.length != 2) {
+      return OptionalInt.empty();
+    }
+    try {
+      return OptionalInt.of(Integer.parseInt(params[1]));
+    } catch (NumberFormatException ex) {
+      return OptionalInt.empty();
+    }
+  }
+
+  private OptionalInt currentPendingFoxMoveNumber() {
+    if (pendingFoxMoveNumber == null) {
+      return OptionalInt.empty();
+    }
+    return pendingFoxMoveNumber;
+  }
+
+  private void clearPendingFoxMoveNumber() {
+    pendingFoxMoveNumber = OptionalInt.empty();
+  }
+
+  private boolean shouldRebuildForFoxMetadataChange(
+      BoardHistoryNode syncEndNode, OptionalInt foxMoveNumber, int[] snapshotCodes) {
+    if (!foxMoveNumber.isPresent()) {
+      return false;
+    }
+    if (!syncEndMatchesSnapshot(syncEndNode, snapshotCodes)) {
+      return false;
+    }
+    BoardData currentData = syncEndNode.getData();
+    if (currentData.isHistoryActionNode()) {
+      return false;
+    }
+    int moveNumber = foxMoveNumber.getAsInt();
+    boolean expectedBlackToPlay = explicitPlayerOverride(currentData).orElse(moveNumber % 2 == 0);
+    return currentData.moveNumber != moveNumber || currentData.blackToPlay != expectedBlackToPlay;
+  }
+
+  private Optional<Boolean> explicitPlayerOverride(BoardData data) {
+    String player = data.getProperty("PL");
+    if (player == null || player.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(!"W".equalsIgnoreCase(player));
+  }
+
+  private boolean syncEndMatchesSnapshot(BoardHistoryNode syncEndNode, int[] snapshotCodes) {
+    return !snapshotDiffChecker()
+        .hasDiff(snapshotCodes, syncEndNode.getData().stones, false, Optional.empty());
+  }
+
+  private CompleteSnapshotRecovery resolveCompleteSnapshotRecovery(
+      BoardHistoryNode syncStartNode,
+      Stone[] syncStartStones,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    OptionalInt foxMoveNumber = currentPendingFoxMoveNumber();
+    if (isSyncAlreadyAtTarget(syncStartNode, snapshotCodes, foxMoveNumber)) {
+      return CompleteSnapshotRecovery.NO_CHANGE;
+    }
+    if (snapshotDelta.hasMarker()
+        && tryApplySingleMoveRecovery(syncStartNode, syncStartStones, snapshotCodes)) {
+      return CompleteSnapshotRecovery.SINGLE_MOVE_RECOVERY;
+    }
+    if (shouldHoldConflictingSnapshot(syncStartNode, snapshotCodes)) {
+      return CompleteSnapshotRecovery.HOLD;
+    }
+    return CompleteSnapshotRecovery.FORCE_REBUILD;
+  }
+
+  private boolean shouldHoldConflictingSnapshot(
+      BoardHistoryNode syncStartNode, int[] snapshotCodes) {
+    if (rebuildPolicy().shouldRebuildImmediatelyWithoutHistory(syncStartNode)) {
+      return false;
+    }
+    return conflictTracker.evaluate(snapshotCodes) == SyncConflictTracker.Decision.HOLD;
+  }
+
+  private boolean isSyncAlreadyAtTarget(
+      BoardHistoryNode syncStartNode, int[] snapshotCodes, OptionalInt foxMoveNumber) {
+    return rebuildPolicy()
+        .findMatchingHistoryNode(syncStartNode, snapshotCodes, foxMoveNumber)
+        .isPresent();
+  }
+
+  private void rebuildFromSnapshot(
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    rebuildFromSnapshot(syncStartNode, snapshotCodes, snapshotDelta, currentPendingFoxMoveNumber());
+  }
+
+  private void rebuildFromSnapshot(
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    resetSyncTrackers();
+    BoardHistoryList previousHistory = Lizzie.board.getHistory();
+    RootStartSetupState preservedRootStartSetup = captureRootStartSetupState();
+    BoardHistoryList rebuiltHistory =
+        buildSnapshotHistory(
+            previousHistory, syncStartNode, snapshotCodes, snapshotDelta, foxMoveNumber);
+    if (rebuildPolicy().shouldRebuildImmediatelyWithoutHistory(syncStartNode)) {
+      Lizzie.board.clear(false);
+    }
+    Lizzie.board.hasStartStone = false;
+    Lizzie.board.startStonelist = new ArrayList<>();
+    Lizzie.board.setHistory(rebuiltHistory);
+    restoreRootStartSetupIfNoOrRootSnapshotAnchor(syncStartNode, preservedRootStartSetup);
+    syncEngineToRebuiltSnapshot(rebuiltHistory.getCurrentHistoryNode());
+    rememberResolvedSnapshotNode(rebuiltHistory.getCurrentHistoryNode());
+    Lizzie.frame.renderVarTree(0, 0, false, false);
+    Lizzie.frame.refresh();
+    firstSync = false;
+  }
+
+  private BoardHistoryList buildSnapshotHistory(
+      BoardHistoryList previousHistory,
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    return buildSnapshotHistory(
+        previousHistory,
+        syncStartNode,
+        snapshotCodes,
+        snapshotDelta,
+        currentPendingFoxMoveNumber());
+  }
+
+  private BoardHistoryList buildSnapshotHistory(
+      BoardHistoryList previousHistory,
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    BoardData snapshotData =
+        buildSnapshotBoardData(syncStartNode, snapshotCodes, snapshotDelta, foxMoveNumber);
+    BoardHistoryList rebuiltHistory = new BoardHistoryList(snapshotData);
+    copySnapshotSetupMetadata(syncStartNode, rebuiltHistory.getCurrentHistoryNode());
+    rebuiltHistory.setGameInfo(previousHistory.getGameInfo());
+    return rebuiltHistory;
+  }
+
+  private void copySnapshotSetupMetadata(
+      BoardHistoryNode syncStartNode, BoardHistoryNode rebuiltSnapshotNode) {
+    BoardHistoryNode sourceSnapshotNode = findNearestSnapshotAnchor(syncStartNode);
+    if (sourceSnapshotNode == null) {
+      return;
+    }
+    BoardData rebuiltData = rebuiltSnapshotNode.getData();
+    BoardData sourceData = sourceSnapshotNode.getData();
+    rebuiltData.comment = sourceData.comment;
+    rebuiltData.setProperties(sourceData.getProperties());
+    applyExplicitSetupSnapshotSemantics(rebuiltData);
+    rebuiltSnapshotNode.extraStones = cloneExtraStones(sourceSnapshotNode.extraStones);
+    if (sourceSnapshotNode.hasRemovedStone()) {
+      rebuiltSnapshotNode.setRemovedStone();
+    }
+  }
+
+  private void applyExplicitSetupSnapshotSemantics(BoardData snapshotData) {
+    String player = snapshotData.getProperty("PL");
+    if (player != null && !player.isEmpty()) {
+      snapshotData.blackToPlay = !"W".equalsIgnoreCase(player);
+    }
+    String moveNumber = snapshotData.getProperty("MN");
+    if (moveNumber == null || moveNumber.isEmpty()) {
+      return;
+    }
+    try {
+      snapshotData.moveMNNumber = Integer.parseInt(moveNumber);
+    } catch (NumberFormatException ex) {
+      throw new IllegalStateException("Invalid MN property on rebuilt snapshot: " + moveNumber, ex);
+    }
+  }
+
+  private BoardHistoryNode findNearestSnapshotAnchor(BoardHistoryNode syncStartNode) {
+    BoardHistoryNode node = syncStartNode;
+    while (node != null) {
+      if (node.getData().isSnapshotNode()) {
+        return node;
+      }
+      node = node.previous().orElse(null);
+    }
+    return null;
+  }
+
+  private ArrayList<ExtraStones> cloneExtraStones(ArrayList<ExtraStones> sourceStones) {
+    if (sourceStones == null) {
+      return null;
+    }
+    ArrayList<ExtraStones> clone = new ArrayList<>(sourceStones.size());
+    for (ExtraStones sourceStone : sourceStones) {
+      ExtraStones copy = new ExtraStones();
+      copy.x = sourceStone.x;
+      copy.y = sourceStone.y;
+      copy.isBlack = sourceStone.isBlack;
+      clone.add(copy);
+    }
+    return clone;
+  }
+
+  private RootStartSetupState captureRootStartSetupState() {
+    if (!Lizzie.board.hasStartStone) {
+      return RootStartSetupState.empty();
+    }
+    ArrayList<Movelist> startStones =
+        Lizzie.board.startStonelist == null
+            ? new ArrayList<>()
+            : cloneStartStoneList(Lizzie.board.startStonelist);
+    return new RootStartSetupState(true, startStones);
+  }
+
+  private void restoreRootStartSetupIfNoOrRootSnapshotAnchor(
+      BoardHistoryNode syncStartNode, RootStartSetupState preservedRootStartSetup) {
+    if (!preservedRootStartSetup.hasStartStone()) {
+      return;
+    }
+    BoardHistoryNode snapshotAnchor = findNearestSnapshotAnchor(syncStartNode);
+    if (snapshotAnchor != null && snapshotAnchor.previous().isPresent()) {
+      return;
+    }
+    Lizzie.board.hasStartStone = true;
+    Lizzie.board.startStonelist = cloneStartStoneList(preservedRootStartSetup.startStones());
+  }
+
+  private ArrayList<Movelist> cloneStartStoneList(ArrayList<Movelist> source) {
+    ArrayList<Movelist> clone = new ArrayList<>(source.size());
+    for (Movelist sourceMove : source) {
+      Movelist copy = new Movelist();
+      copy.x = sourceMove.x;
+      copy.y = sourceMove.y;
+      copy.isblack = sourceMove.isblack;
+      copy.ispass = sourceMove.ispass;
+      copy.movenum = sourceMove.movenum;
+      clone.add(copy);
+    }
+    return clone;
+  }
+
+  private BoardData buildSnapshotBoardData(
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    return buildSnapshotBoardData(
+        syncStartNode, snapshotCodes, snapshotDelta, currentPendingFoxMoveNumber());
+  }
+
+  private BoardData buildSnapshotBoardData(
+      BoardHistoryNode syncStartNode,
+      int[] snapshotCodes,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    Stone[] snapshotStones = buildSnapshotStones(snapshotCodes);
+    SnapshotHistoryState historyState =
+        inferSnapshotHistoryState(syncStartNode, snapshotStones, snapshotDelta, foxMoveNumber);
+    int[] moveNumberList = buildSnapshotMoveNumberList(syncStartNode, snapshotStones, historyState);
+    Zobrist zobrist = buildSnapshotZobrist(snapshotStones);
+    SnapshotCaptures captures = inferSnapshotCaptures(syncStartNode, snapshotStones);
+    return BoardData.snapshot(
+        snapshotStones,
+        historyState.lastMove,
+        historyState.lastMoveColor,
+        historyState.blackToPlay,
+        zobrist,
+        historyState.moveNumber,
+        moveNumberList,
+        captures.blackCaptures,
+        captures.whiteCaptures,
+        50,
+        0);
+  }
+
+  private Stone[] buildSnapshotStones(int[] snapshotCodes) {
+    Stone[] stones = new Stone[snapshotCodes.length];
+    for (int x = 0; x < Board.boardWidth; x++) {
+      for (int y = 0; y < Board.boardHeight; y++) {
+        int snapshotIndex = y * Board.boardWidth + x;
+        stones[Board.getIndex(x, y)] = snapshotStone(snapshotCodes[snapshotIndex]);
+      }
+    }
+    return stones;
+  }
+
+  private Stone snapshotStone(int snapshotCode) {
+    if (snapshotCode == 1 || snapshotCode == 3) {
+      return Stone.BLACK;
+    }
+    if (snapshotCode == 2 || snapshotCode == 4) {
+      return Stone.WHITE;
+    }
+    return Stone.EMPTY;
+  }
+
+  private Zobrist buildSnapshotZobrist(Stone[] stones) {
+    Zobrist zobrist = new Zobrist();
+    for (int x = 0; x < Board.boardWidth; x++) {
+      for (int y = 0; y < Board.boardHeight; y++) {
+        Stone stone = stones[Board.getIndex(x, y)];
+        if (!stone.isEmpty()) {
+          zobrist.toggleStone(x, y, stone);
+        }
+      }
+    }
+    return zobrist;
+  }
+
+  private int[] buildSnapshotMoveNumberList(
+      BoardHistoryNode syncStartNode, Stone[] snapshotStones, SnapshotHistoryState historyState) {
+    int[] moveNumberList = new int[Board.boardWidth * Board.boardHeight];
+    copySnapshotMoveNumbersFromSyncStart(
+        syncStartNode, snapshotStones, moveNumberList, historyState.moveNumber);
+    historyState.lastMove.ifPresent(
+        move -> moveNumberList[Board.getIndex(move[0], move[1])] = historyState.moveNumber);
+    return moveNumberList;
+  }
+
+  private void copySnapshotMoveNumbersFromSyncStart(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      int[] moveNumberList,
+      int maxMoveNumber) {
+    if (syncStartNode == null) {
+      return;
+    }
+    BoardData syncStartData = syncStartNode.getData();
+    if (syncStartData.moveNumberList == null) {
+      return;
+    }
+    for (int index = 0; index < snapshotStones.length; index++) {
+      if (!sameStoneState(snapshotStones[index], syncStartData.stones[index])) {
+        continue;
+      }
+      int moveNumber = syncStartData.moveNumberList[index];
+      if (moveNumber > 0 && moveNumber <= maxMoveNumber) {
+        moveNumberList[index] = moveNumber;
+      }
+    }
+  }
+
+  private boolean sameStoneState(Stone left, Stone right) {
+    if (left.isEmpty() || right.isEmpty()) {
+      return left.isEmpty() && right.isEmpty();
+    }
+    return (left.isBlack() && right.isBlack()) || (left.isWhite() && right.isWhite());
+  }
+
+  private SnapshotCaptures inferSnapshotCaptures(
+      BoardHistoryNode syncStartNode, Stone[] snapshotStones) {
+    if (syncStartNode == null) {
+      return SnapshotCaptures.empty();
+    }
+    BoardData syncStartData = syncStartNode.getData();
+    if (!sameStoneLayout(snapshotStones, syncStartData.stones)) {
+      return SnapshotCaptures.empty();
+    }
+    return SnapshotCaptures.from(syncStartData);
+  }
+
+  private boolean sameStoneLayout(Stone[] left, Stone[] right) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (int index = 0; index < left.length; index++) {
+      if (!sameStoneState(left[index], right[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private SnapshotHistoryState inferSnapshotHistoryState(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    int moveNumber =
+        inferSnapshotMoveNumber(syncStartNode, snapshotStones, snapshotDelta, foxMoveNumber);
+    boolean blackToPlay =
+        inferSnapshotBlackToPlay(syncStartNode, snapshotStones, snapshotDelta, foxMoveNumber);
+    if (snapshotDelta.hasMarker()) {
+      return SnapshotHistoryState.fromMarker(
+          snapshotDelta.markerX(),
+          snapshotDelta.markerY(),
+          snapshotDelta.markerColor(),
+          blackToPlay,
+          moveNumber);
+    }
+    return SnapshotHistoryState.markerlessSnapshot(blackToPlay, moveNumber);
+  }
+
+  private int inferSnapshotMoveNumber(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    if (foxMoveNumber.isPresent()) {
+      return foxMoveNumber.getAsInt();
+    }
+    if (isEmptySnapshot(snapshotStones)) {
+      return 0;
+    }
+    if (snapshotDelta.hasMarker()) {
+      return inferMarkedSnapshotMoveNumber(syncStartNode, snapshotStones, snapshotDelta);
+    }
+    return inferMarkerlessSnapshotMoveNumber(syncStartNode, snapshotDelta);
+  }
+
+  private int inferMarkedSnapshotMoveNumber(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    if (syncStartNode != null) {
+      int syncMoveNumber = syncStartNode.getData().moveNumber;
+      if (snapshotDelta.changedStones() == 0) {
+        return syncMoveNumber;
+      }
+      if (snapshotDelta.hasOnlyAdditions()) {
+        return syncMoveNumber + snapshotDelta.additions();
+      }
+    }
+    Stone markerColor = snapshotDelta.markerColor();
+    int occupiedStones = countOccupiedStones(snapshotStones);
+    boolean blackToPlay = markerColor == Stone.WHITE;
+    if ((occupiedStones % 2 == 0) == blackToPlay) {
+      return occupiedStones;
+    }
+    return occupiedStones + 1;
+  }
+
+  private int inferMarkerlessSnapshotMoveNumber(
+      BoardHistoryNode syncStartNode, SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    return syncStartNode == null ? 0 : syncStartNode.getData().moveNumber;
+  }
+
+  private int countOccupiedStones(Stone[] snapshotStones) {
+    int occupiedStones = 0;
+    for (Stone stone : snapshotStones) {
+      if (!stone.isEmpty()) {
+        occupiedStones++;
+      }
+    }
+    return occupiedStones;
+  }
+
+  private boolean inferSnapshotBlackToPlay(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
+      OptionalInt foxMoveNumber) {
+    if (foxMoveNumber.isPresent()) {
+      return foxMoveNumber.getAsInt() % 2 == 0;
+    }
+    if (isEmptySnapshot(snapshotStones)) {
+      return true;
+    }
+    if (snapshotDelta.hasMarker()) {
+      return snapshotDelta.markerColor() == Stone.WHITE;
+    }
+    return inferBlackToPlayWithoutMarker(syncStartNode, snapshotStones, snapshotDelta);
+  }
+
+  private boolean inferBlackToPlayWithoutMarker(
+      BoardHistoryNode syncStartNode,
+      Stone[] snapshotStones,
+      SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
+    if (isEmptySnapshot(snapshotStones)) {
+      return true;
+    }
+    return syncStartNode == null || syncStartNode.getData().blackToPlay;
+  }
+
+  private boolean isEmptySnapshot(Stone[] snapshotStones) {
+    for (Stone stone : snapshotStones) {
+      if (!stone.isEmpty()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private void syncEngineToRebuiltSnapshot(BoardHistoryNode rebuiltNode) {
+    BoardData data = rebuiltNode.getData();
+    Lizzie.leelaz.clear();
+    if (!ExactSnapshotEngineRestore.restoreIfNeeded(Lizzie.leelaz, data)) {
+      throw new IllegalStateException("Snapshot rebuild must sync through snapshot data.");
+    }
+  }
+
+  private static final class SnapshotCaptures {
+    private final int blackCaptures;
+    private final int whiteCaptures;
+
+    private SnapshotCaptures(int blackCaptures, int whiteCaptures) {
+      this.blackCaptures = blackCaptures;
+      this.whiteCaptures = whiteCaptures;
+    }
+
+    private static SnapshotCaptures empty() {
+      return new SnapshotCaptures(0, 0);
+    }
+
+    private static SnapshotCaptures from(BoardData data) {
+      return new SnapshotCaptures(data.blackCaptures, data.whiteCaptures);
+    }
+  }
+
+  private static final class RootStartSetupState {
+    private final boolean hasStartStone;
+    private final ArrayList<Movelist> startStones;
+
+    private RootStartSetupState(boolean hasStartStone, ArrayList<Movelist> startStones) {
+      this.hasStartStone = hasStartStone;
+      this.startStones = startStones;
+    }
+
+    private static RootStartSetupState empty() {
+      return new RootStartSetupState(false, new ArrayList<>());
+    }
+
+    private boolean hasStartStone() {
+      return hasStartStone;
+    }
+
+    private ArrayList<Movelist> startStones() {
+      return startStones;
+    }
+  }
+
+  private List<EngineSyncStone> collectEngineSyncStones(BoardData data) {
+    List<EngineSyncStone> stones = new ArrayList<>();
+    int knownMoves = 0;
+    for (int x = 0; x < Board.boardWidth; x++) {
+      for (int y = 0; y < Board.boardHeight; y++) {
+        int index = Board.getIndex(x, y);
+        Stone stone = data.stones[index];
+        if (stone.isEmpty()) {
+          continue;
+        }
+        int moveNumber = data.moveNumberList == null ? 0 : data.moveNumberList[index];
+        stones.add(new EngineSyncStone(x, y, stone, moveNumber));
+        if (moveNumber > 0) {
+          knownMoves++;
+        }
+      }
+    }
+    if (knownMoves > 1) {
+      stones.sort(this::compareEngineSyncStonesByMoveNumber);
+    } else {
+      stones.sort(this::compareEngineSyncStonesByPosition);
+    }
+    return stones;
+  }
+
+  private int compareEngineSyncStonesByMoveNumber(EngineSyncStone left, EngineSyncStone right) {
+    boolean leftKnown = left.moveNumber > 0;
+    boolean rightKnown = right.moveNumber > 0;
+    if (leftKnown && rightKnown) {
+      int moveNumberComparison = Integer.compare(left.moveNumber, right.moveNumber);
+      if (moveNumberComparison != 0) {
+        return moveNumberComparison;
+      }
+    }
+    if (leftKnown != rightKnown) {
+      return leftKnown ? -1 : 1;
+    }
+    return compareEngineSyncStonesByPosition(left, right);
+  }
+
+  private int compareEngineSyncStonesByPosition(EngineSyncStone left, EngineSyncStone right) {
+    int yComparison = Integer.compare(left.y, right.y);
+    if (yComparison != 0) {
+      return yComparison;
+    }
+    return Integer.compare(left.x, right.x);
+  }
+
+  private Stone turnColor(boolean blackTurn) {
+    return blackTurn ? Stone.BLACK : Stone.WHITE;
+  }
+
   private void resetSyncTrackers() {
     conflictTracker.clear();
     historyJumpTracker.clear();
+    lastResolvedSnapshotNode = null;
+    waitingForReadBoardLocalMoveAck = false;
   }
 
   private void moveToAnyPositionWithoutTracking(BoardHistoryNode node) {
@@ -794,14 +1408,53 @@ public class ReadBoard {
   }
 
   private boolean shouldResyncAfterIncrementalSync(Stone[] stones, int[] snapshotCodes) {
+    Optional<int[]> currentPendingLocalMove = currentPendingLocalMoveCoordinates();
     return snapshotDiffChecker()
         .shouldResyncAfterIncrementalSync(
             Lizzie.config.alwaysSyncBoardStat,
             showInBoard,
             snapshotCodes,
             stones,
-            Lizzie.frame.bothSync && lastMovePlayByLizzie,
-            Lizzie.board.getHistory().getMainEnd().getData().lastMove);
+            shouldIgnoreCurrentLastLocalMove(currentPendingLocalMove),
+            currentPendingLocalMove);
+  }
+
+  private void acknowledgeLocalMoveIfSnapshotCaughtUp(Stone[] stones, int[] snapshotCodes) {
+    if (!Lizzie.frame.bothSync || !lastMovePlayByLizzie) {
+      return;
+    }
+    if (!currentPendingLocalMoveCoordinates().isPresent()) {
+      return;
+    }
+    if (!snapshotDiffChecker().hasDiff(snapshotCodes, stones, false, Optional.empty())) {
+      lastMovePlayByLizzie = false;
+      waitingForReadBoardLocalMoveAck = false;
+    }
+  }
+
+  private void startTrackingLocalMoveFromLizzie() {
+    lastMovePlayByLizzie = true;
+    waitingForReadBoardLocalMoveAck = true;
+  }
+
+  private void markLocalMoveCommandCompleted() {
+    waitingForReadBoardLocalMoveAck = false;
+  }
+
+  private boolean shouldIgnoreCurrentLastLocalMove() {
+    return Lizzie.frame.bothSync && lastMovePlayByLizzie && waitingForReadBoardLocalMoveAck;
+  }
+
+  private boolean shouldIgnoreCurrentLastLocalMove(Optional<int[]> currentPendingLocalMove) {
+    return shouldIgnoreCurrentLastLocalMove() && currentPendingLocalMove.isPresent();
+  }
+
+  private Optional<int[]> currentPendingLocalMoveCoordinates() {
+    BoardData mainEndData = Lizzie.board.getHistory().getMainEnd().getData();
+    if (!mainEndData.isMoveNode()) {
+      return Optional.empty();
+    }
+    return mainEndData.lastMove;
   }
 
   private void restoreViewedNodeAfterSync(
@@ -819,11 +1472,15 @@ public class ReadBoard {
     moveToAnyPositionWithoutTracking(currentNode);
   }
 
+  private void keepViewOnRecoveredMainEnd(BoardHistoryNode syncEndNode) {
+    if (Lizzie.board.getHistory().getCurrentHistoryNode() == syncEndNode) {
+      return;
+    }
+    moveToAnyPositionWithoutTracking(syncEndNode);
+  }
+
   private boolean tryApplySingleMoveRecovery(
-      BoardHistoryNode currentNode,
-      BoardHistoryNode syncStartNode,
-      Stone[] syncStartStones,
-      int[] snapshotCodes) {
+      BoardHistoryNode syncStartNode, Stone[] syncStartStones, int[] snapshotCodes) {
     SyncSnapshotClassifier classifier =
         new SyncSnapshotClassifier(Board.boardWidth, Board.boardHeight);
     Optional<SyncSnapshotClassifier.SingleMove> recoveredMove =
@@ -841,35 +1498,7 @@ public class ReadBoard {
     if (Lizzie.config.alwaysSyncBoardStat || showInBoard) {
       lastMoveWithoutTracking();
     }
-    applySyncViewState(true, resolveLocalNavigationTarget(currentNode), syncStartNode);
-    return true;
-  }
-
-  private boolean tryApplyHistorySnapshotMatch(
-      BoardHistoryNode currentNode, BoardHistoryNode syncStartNode, int[] snapshotCodes) {
-    Optional<BoardHistoryNode> matchedNode =
-        rebuildPolicy().findMatchingHistoryNode(syncStartNode, snapshotCodes);
-    if (!matchedNode.isPresent()) {
-      return false;
-    }
-    BoardHistoryNode resolvedCurrentNode = resolveLocalNavigationTarget(currentNode);
-    historyJumpTracker.remember(resolvedCurrentNode, matchedNode.get(), syncStartNode);
-    if (resolvedCurrentNode != matchedNode.get()) {
-      moveToAnyPositionWithoutTracking(matchedNode.get());
-      Lizzie.frame.renderVarTree(0, 0, false, false);
-    }
-    return true;
-  }
-
-  private boolean restoreSyncEndAfterHistoryJump(BoardHistoryNode currentNode) {
-    Optional<BoardHistoryNode> restoreTarget =
-        historyJumpTracker.consumeStableSnapshotTarget(
-            currentNode, () -> Lizzie.board.getHistory().getMainEnd());
-    if (!restoreTarget.isPresent()) {
-      return false;
-    }
-    moveToAnyPositionWithoutTracking(restoreTarget.get());
-    Lizzie.frame.renderVarTree(0, 0, false, false);
+    rememberResolvedSnapshotNode(Lizzie.board.getHistory().getMainEnd());
     return true;
   }
 
@@ -878,6 +1507,49 @@ public class ReadBoard {
     restoreViewedNodeAfterSync(played, currentNode, syncEndNode);
     if (editMode) moveToAnyPositionWithoutTracking(currentNode);
     if (played) Lizzie.frame.renderVarTree(0, 0, false, false);
+  }
+
+  private void rememberResolvedSnapshotNode(BoardHistoryNode resolvedNode) {
+    lastResolvedSnapshotNode = resolvedNode;
+  }
+
+  private static final class SnapshotHistoryState {
+    private final Optional<int[]> lastMove;
+    private final Stone lastMoveColor;
+    private final boolean blackToPlay;
+    private final int moveNumber;
+
+    private SnapshotHistoryState(
+        Optional<int[]> lastMove, Stone lastMoveColor, boolean blackToPlay, int moveNumber) {
+      this.lastMove = lastMove;
+      this.lastMoveColor = lastMoveColor;
+      this.blackToPlay = blackToPlay;
+      this.moveNumber = moveNumber;
+    }
+
+    private static SnapshotHistoryState fromMarker(
+        int x, int y, Stone color, boolean blackToPlay, int moveNumber) {
+      return new SnapshotHistoryState(
+          Optional.of(new int[] {x, y}), color, blackToPlay, moveNumber);
+    }
+
+    private static SnapshotHistoryState markerlessSnapshot(boolean blackToPlay, int moveNumber) {
+      return new SnapshotHistoryState(Optional.empty(), Stone.EMPTY, blackToPlay, moveNumber);
+    }
+  }
+
+  private static final class EngineSyncStone {
+    private final int x;
+    private final int y;
+    private final Stone color;
+    private final int moveNumber;
+
+    private EngineSyncStone(int x, int y, Stone color, int moveNumber) {
+      this.x = x;
+      this.y = y;
+      this.color = color;
+      this.moveNumber = moveNumber;
+    }
   }
 
   private boolean canApplySingleMoveRecovery(
@@ -920,12 +1592,13 @@ public class ReadBoard {
   }
 
   private boolean hasSnapshotDiff(Stone[] stones, int[] snapshotCodes) {
+    Optional<int[]> currentPendingLocalMove = currentPendingLocalMoveCoordinates();
     return snapshotDiffChecker()
         .hasDiff(
             snapshotCodes,
             stones,
-            Lizzie.frame.bothSync && lastMovePlayByLizzie,
-            Lizzie.board.getHistory().getMainEnd().getData().lastMove);
+            shouldIgnoreCurrentLastLocalMove(currentPendingLocalMove),
+            currentPendingLocalMove);
   }
 
   private boolean isStoneDiff(int m, Stone[] stones, int x, int y) {
@@ -963,6 +1636,7 @@ public class ReadBoard {
   public void shutdown() {
     noMsg = true;
     resetSyncTrackers();
+    clearPendingFoxMoveNumber();
     tempcount = new ArrayList<Integer>();
     if (Lizzie.frame != null) {
       Lizzie.frame.syncBoard = false;
@@ -1003,7 +1677,7 @@ public class ReadBoard {
         Lizzie.frame.floatBoard.setVisible(false);
         hideFromPlace = true;
       }
-      lastMovePlayByLizzie = true;
+      startTrackingLocalMoveFromLizzie();
       if (Lizzie.frame.isPlayingAgainstLeelaz) needGenmove = true;
     }
     if (usePipe) {

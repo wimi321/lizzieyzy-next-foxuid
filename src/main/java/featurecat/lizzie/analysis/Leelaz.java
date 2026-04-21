@@ -22,18 +22,25 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.Box;
@@ -51,6 +58,8 @@ import org.json.JSONObject;
  */
 public class Leelaz {
   // private static final long MINUTE = 60 * 1000; // number of milliseconds in a minute
+  private static final Runnable NO_OP_RESPONSE_HANDLER = () -> {};
+  private static final int NO_RESPONSE_COMMAND_ID = -1;
 
   // private long maxAnalyzeTimeMillis; // , maxThinkingTimeMillis;
   int cmdNumber;
@@ -58,7 +67,11 @@ public class Leelaz {
   private int currentCmdNum;
   // public int modifyCmdNum;
   // private boolean isResponse=false;
-  private ArrayDeque<String> cmdQueue;
+  private ArrayDeque<QueuedCommand> cmdQueue;
+  private ArrayDeque<PendingResponseHandler> pendingResponseHandlers;
+  private final AtomicInteger loadSgfResponseCommandIds = new AtomicInteger(1);
+  private volatile boolean currentCommandResponseError;
+  private volatile String currentCommandResponseLine = "";
 
   private Process process;
 
@@ -137,7 +150,14 @@ public class Leelaz {
   public boolean autoAnalysed = false;
   private static final long BUNDLED_ENGINE_START_TIMEOUT_MS = 90000L;
   private static final long NVIDIA_ENGINE_START_TIMEOUT_MS = 180000L;
+  private static final long LOAD_SGF_SEND_FAILURE_CLEANUP_TIMEOUT_MILLIS = 1000L;
+  private static final long LOAD_SGF_PENDING_RESPONSE_GRACE_TIMEOUT_MILLIS = 3000L;
+  private static final long LOAD_SGF_NO_RESPONSE_EXTRA_TIMEOUT_MILLIS = 2000L;
+  private static final long LOAD_SGF_NO_RESPONSE_TIMEOUT_MILLIS =
+      LOAD_SGF_PENDING_RESPONSE_GRACE_TIMEOUT_MILLIS + LOAD_SGF_NO_RESPONSE_EXTRA_TIMEOUT_MILLIS;
   private static final int ENGINE_DIAGNOSTIC_TAIL_LINES = 40;
+  private static final ScheduledExecutorService LOAD_SGF_CLEANUP_EXECUTOR =
+      Executors.newSingleThreadScheduledExecutor(Leelaz::newLoadSgfCleanupThread);
   //	private boolean isSaving = false;
   public boolean isResigning = false;
   //	public boolean isClosingAutoAna = false;
@@ -251,7 +271,8 @@ public class Leelaz {
     startPonderTime = System.currentTimeMillis();
     cmdNumber = 1;
     currentCmdNum = 0;
-    cmdQueue = new ArrayDeque<>();
+    cmdQueue = new ArrayDeque<QueuedCommand>();
+    pendingResponseHandlers = new ArrayDeque<PendingResponseHandler>();
     setEngineCommand(engineCommand);
   }
 
@@ -332,7 +353,7 @@ public class Leelaz {
       if (loginStatus) {
         this.javaSSHClosed = false;
         this.inputStream = new BufferedReader(new InputStreamReader(this.javaSSH.getStdout()));
-        this.outputStream = new BufferedOutputStream(this.javaSSH.getStdin());
+        this.outputStream = createCommandOutputStream(this.javaSSH.getStdin());
         this.errorStream = new BufferedReader(new InputStreamReader(this.javaSSH.getSterr()));
       } else {
         isDownWithError = true;
@@ -555,14 +576,15 @@ public class Leelaz {
                 e.printStackTrace();
               }
             }
-            if (isPondering) Lizzie.board.resendMoveToEngine(thisLeelz, true);
-            else {
-              Lizzie.board.resetMoves();
-            }
+            thisLeelz.restoreClosedEngineBoardState(isPondering);
           }
         };
     Thread syncBoardTh = new Thread(syncBoard);
     syncBoardTh.start();
+  }
+
+  void restoreClosedEngineBoardState(boolean resumePonder) {
+    Lizzie.board.resendMoveToEngine(this, resumePonder);
   }
 
   public void normalQuit() {
@@ -634,7 +656,7 @@ public class Leelaz {
   /** Initializes the input and output streams */
   public void initializeStreams() {
     inputStream = new BufferedReader(new InputStreamReader(process.getInputStream()));
-    outputStream = new BufferedOutputStream(process.getOutputStream());
+    outputStream = createCommandOutputStream(process.getOutputStream());
     errorStream = new BufferedReader(new InputStreamReader(process.getErrorStream()));
   }
 
@@ -912,10 +934,7 @@ public class Leelaz {
         if (!isPassingLose && params[1].startsWith("pass")) {
           pkMoveTime = System.currentTimeMillis() - pkMoveStartTime;
           pkMoveTimeGame = pkMoveTimeGame + pkMoveTime;
-          Optional<int[]> passStep = Optional.empty();
-          Optional<int[]> lastMove = Lizzie.board.getLastMove();
-
-          if (lastMove == passStep) {
+          if (Lizzie.board.getData().isPassNode()) {
             doublePass = true;
             nameCmdfornoponder();
             genmoveResign(true);
@@ -2487,16 +2506,7 @@ public class Leelaz {
             Thread thread = new Thread(runnable);
             thread.start();
           }
-          currentCmdNum++;
-
-          //						if(isModifying&&isResponseUpToDate())
-          //							setModifyEnd();
-          if (currentCmdNum > cmdNumber - 1) currentCmdNum = cmdNumber - 1;
-          try {
-            trySendCommandFromQueue();
-          } catch (Exception e) {
-            e.printStackTrace();
-          }
+          processCommandResponseLine(line);
         }
         isCommandLine = false;
         // line = new StringBuilder();
@@ -2577,7 +2587,29 @@ public class Leelaz {
    *
    * @param command a GTP command containing no newline characters
    */
+  public void loadSgf(Path sgfFile) {
+    sendLoadSgfCommand(this, sgfFile, null, null);
+  }
+
   public void sendCommand(String command) {
+    sendCommand(command, null);
+  }
+
+  private void sendCommand(String command, Runnable onResponse) {
+    sendCommand(command, onResponse, null, false, true);
+  }
+
+  private void sendCommand(
+      String command, Runnable onResponse, boolean failOnSendError, boolean mirrorToSecondEngine) {
+    sendCommand(command, onResponse, null, failOnSendError, mirrorToSecondEngine);
+  }
+
+  private void sendCommand(
+      String command,
+      Runnable onResponse,
+      CommandSendFailureHandler onSendFailure,
+      boolean failOnSendError,
+      boolean mirrorToSecondEngine) {
     if (Lizzie.config.isDoubleEngineMode()) {
       if ((command.startsWith("heat") || command.startsWith("kata-raw"))
           && !this.isKatago
@@ -2614,36 +2646,148 @@ public class Leelaz {
         }
       }
     }
-    synchronized (cmdQueue) {
+    synchronized (commandQueue()) {
       // For efficiency, delete unnecessary "lz-analyze" that will be stopped
       // immediately
       cmdNumber++;
       calculateModifyNumber();
-      if (!cmdQueue.isEmpty()) {
+      if (!commandQueue().isEmpty()) {
+        String lastQueuedCommand = commandQueue().peekLast().command;
         if ((isKatago
-                && (cmdQueue.peekLast().startsWith("kata-analyze")
-                    || cmdQueue.peekLast().startsWith("kata-raw")
-                    || cmdQueue.peekLast().startsWith("stop-ponder")))
+                && (lastQueuedCommand.startsWith("kata-analyze")
+                    || lastQueuedCommand.startsWith("kata-raw")
+                    || lastQueuedCommand.startsWith("stop-ponder")))
             || (!isKatago
-                && (cmdQueue.peekLast().startsWith("lz-analyze")
-                    || cmdQueue.peekLast().startsWith("analyze")
-                    || cmdQueue.peekLast().startsWith("heatmap")))) {
-          cmdQueue.removeLast();
+                && (lastQueuedCommand.startsWith("lz-analyze")
+                    || lastQueuedCommand.startsWith("analyze")
+                    || lastQueuedCommand.startsWith("heatmap")))) {
+          commandQueue().removeLast();
           cmdNumber--;
         }
       }
-      cmdQueue.addLast(command);
+      commandQueue()
+          .addLast(new QueuedCommand(command, onResponse, onSendFailure, failOnSendError));
       trySendCommandFromQueue();
     }
     if (Lizzie.frame.isAutocounting) {
       Lizzie.frame.zen.sendAndEstimate(command, true);
     }
-    if (Lizzie.config.isDoubleEngineMode()) {
-      if (Lizzie.leelaz2 != null && this != Lizzie.leelaz2) {
-        Lizzie.leelaz2.sendCommand(command);
-        Lizzie.leelaz2.startPonderTime = this.startPonderTime;
-      }
+    Leelaz mirroredEngine = mirrorToSecondEngine ? resolveDefaultCommandMirrorEngine() : null;
+    if (mirroredEngine != null) {
+      mirroredEngine.sendCommand(command);
+      mirroredEngine.startPonderTime = this.startPonderTime;
     }
+  }
+
+  private Leelaz resolveDefaultCommandMirrorEngine() {
+    if (Lizzie.config == null || !Lizzie.config.isDoubleEngineMode()) {
+      return null;
+    }
+    Leelaz primaryEngine = Lizzie.leelaz;
+    Leelaz secondaryEngine = Lizzie.leelaz2;
+    if (primaryEngine == null || secondaryEngine == null || primaryEngine == secondaryEngine) {
+      return null;
+    }
+    if (this == primaryEngine) {
+      return secondaryEngine;
+    }
+    return null;
+  }
+
+  public void loadSgf(Path sgfFile, Runnable afterConsumed) {
+    if (afterConsumed == null) {
+      loadSgf(sgfFile);
+      return;
+    }
+    if (getClass() != Leelaz.class) {
+      try {
+        loadSgf(sgfFile);
+      } catch (RuntimeException ex) {
+        afterConsumed.run();
+        throw ex;
+      }
+      afterConsumed.run();
+      return;
+    }
+    Leelaz mirroredEngine = resolveLoadSgfMirrorEngine();
+    LoadSgfDispatch dispatch = new LoadSgfDispatch(afterConsumed);
+    RuntimeException sendFailure = sendTrackedLoadSgfCommand(this, sgfFile, dispatch);
+    RuntimeException mirroredSendFailure = null;
+    if (mirroredEngine != null) {
+      mirroredSendFailure = sendTrackedLoadSgfCommand(mirroredEngine, sgfFile, dispatch);
+    }
+    if (sendFailure == null) {
+      sendFailure = mirroredSendFailure;
+    }
+    if (sendFailure == null) {
+      sendFailure = dispatch.failure();
+    }
+    dispatch.finishDispatch();
+    if (sendFailure != null) {
+      dispatch.recordFailure(sendFailure);
+      dispatch.scheduleFallbackCleanupAfterSendFailure();
+      throw sendFailure;
+    }
+    dispatch.awaitCompletion();
+    RuntimeException responseFailure = dispatch.failure();
+    if (responseFailure != null) {
+      throw responseFailure;
+    }
+  }
+
+  private Leelaz resolveLoadSgfMirrorEngine() {
+    if (Lizzie.config == null || !Lizzie.config.isDoubleEngineMode()) {
+      return null;
+    }
+    Leelaz primaryEngine = Lizzie.leelaz;
+    Leelaz secondaryEngine = Lizzie.leelaz2;
+    if (primaryEngine == null || secondaryEngine == null || primaryEngine == secondaryEngine) {
+      return null;
+    }
+    if (this == primaryEngine) {
+      return secondaryEngine;
+    }
+    if (this == secondaryEngine) {
+      return primaryEngine;
+    }
+    return null;
+  }
+
+  private void sendLoadSgfCommand(
+      Leelaz targetEngine,
+      Path sgfFile,
+      Runnable onResponse,
+      CommandSendFailureHandler onSendFailure) {
+    targetEngine.sendCommand(
+        "loadsgf " + sgfFile.toAbsolutePath(), onResponse, onSendFailure, true, false);
+  }
+
+  private RuntimeException sendTrackedLoadSgfCommand(
+      Leelaz targetEngine, Path sgfFile, LoadSgfDispatch dispatch) {
+    TrackedLoadSgfConsumer trackedConsumer =
+        new TrackedLoadSgfConsumer(targetEngine, sgfFile, dispatch);
+    try {
+      sendLoadSgfCommand(
+          targetEngine, sgfFile, trackedConsumer.responseHandler(), trackedConsumer::failFromSend);
+      return null;
+    } catch (RuntimeException ex) {
+      trackedConsumer.failFromSend(ex);
+      return ex;
+    }
+  }
+
+  private RuntimeException buildLoadSgfResponseFailure(Path sgfFile, String responseLine) {
+    String line = responseLine == null ? "" : responseLine.trim();
+    String detail = line.isEmpty() ? "? loadsgf failed" : line;
+    String message =
+        "GTP loadsgf failed for '" + sgfFile.toAbsolutePath() + "' with response: " + detail;
+    return new IllegalStateException(message);
+  }
+
+  private static Thread newLoadSgfCleanupThread(Runnable runnable) {
+    Thread thread = new Thread(runnable, "lizzie-loadsgf-cleanup");
+    thread.setDaemon(true);
+    return thread;
   }
 
   public void sendCommandNoLeelaz2(String command) {
@@ -2682,17 +2826,19 @@ public class Leelaz {
         }
       }
     }
-    synchronized (cmdQueue) {
+    synchronized (commandQueue()) {
       // For efficiency, delete unnecessary "lz-analyze" that will be stopped
       // immediately
-      if (!cmdQueue.isEmpty()
-          && (cmdQueue.peekLast().startsWith("lz-analyze")
-              || cmdQueue.peekLast().startsWith("kata-analyze")
-              || cmdQueue.peekLast().startsWith("kata-raw")
-              || cmdQueue.peekLast().startsWith("heatmap"))) {
-        cmdQueue.removeLast();
+      if (!commandQueue().isEmpty()) {
+        String lastQueuedCommand = commandQueue().peekLast().command;
+        if (lastQueuedCommand.startsWith("lz-analyze")
+            || lastQueuedCommand.startsWith("kata-analyze")
+            || lastQueuedCommand.startsWith("kata-raw")
+            || lastQueuedCommand.startsWith("heatmap")) {
+          commandQueue().removeLast();
+        }
       }
-      cmdQueue.addLast(command);
+      commandQueue().addLast(new QueuedCommand(command, null, null, false));
       trySendCommandFromQueue();
     }
     if (Lizzie.frame.isAutocounting) {
@@ -2712,26 +2858,35 @@ public class Leelaz {
     // possible hang-up by missing response for some reason.
     // cmdQueue can be replaced with a mere String variable in this case,
     // but it is kept for future change of our mind.
-    synchronized (cmdQueue) {
+    synchronized (commandQueue()) {
       if (requireResponseBeforeSend && !isResponseUpToPreDate()) {
         return;
       }
-      if (cmdQueue.isEmpty()) {
+      if (commandQueue().isEmpty()) {
         return;
       }
       if (!isResponseUpToPreCommand()) {
+        String lastQueuedCommand = commandQueue().peekLast().command;
         if ((isKatago
-                && (cmdQueue.peekLast().startsWith("kata-analyze")
-                    || cmdQueue.peekLast().startsWith("kata-raw")
-                    || cmdQueue.peekLast().startsWith("stop-ponder")))
+                && (lastQueuedCommand.startsWith("kata-analyze")
+                    || lastQueuedCommand.startsWith("kata-raw")
+                    || lastQueuedCommand.startsWith("stop-ponder")))
             || (!isKatago
-                && (cmdQueue.peekLast().startsWith("lz-analyze")
-                    || cmdQueue.peekLast().startsWith("analyze")
-                    || cmdQueue.peekLast().startsWith("heatmap")))) return;
+                && (lastQueuedCommand.startsWith("lz-analyze")
+                    || lastQueuedCommand.startsWith("analyze")
+                    || lastQueuedCommand.startsWith("heatmap")))) return;
       }
-      String command = cmdQueue.removeFirst();
+      QueuedCommand queuedCommand = commandQueue().removeFirst();
+      String command = queuedCommand.command;
       if (command.equals("stop-ponder")) command = "stop";
-      sendCommandToLeelaz(command);
+      try {
+        sendCommandToLeelaz(command, queuedCommand.onResponse, queuedCommand.failOnSendError);
+      } catch (RuntimeException ex) {
+        if (queuedCommand.onSendFailure != null) {
+          queuedCommand.onSendFailure.onSendFailure(ex);
+        }
+        throw ex;
+      }
     }
   }
 
@@ -2740,24 +2895,42 @@ public class Leelaz {
    *
    * @param command a GTP command containing no newline characters
    */
-  private void sendCommandToLeelaz(String command) {
+  private void sendCommandToLeelaz(String command, Runnable onResponse, boolean failOnSendError) {
     if (command.startsWith("fixed_handicap")
         || (isKatago && command.startsWith("place_free_handicap"))) isSettingHandicap = true;
     if (command.startsWith("benchmark")) {
       currentCmdNum++;
     }
-    if (outputStream != null) {
+    Runnable responseHandler = onResponse == null ? NO_OP_RESPONSE_HANDLER : onResponse;
+    PendingResponseHandler pendingHandler = buildPendingResponseHandler(command, responseHandler);
+    String commandLine = buildCommandLine(command, pendingHandler.responseCommandId);
+    BufferedOutputStream currentOutputStream = outputStream;
+    if (currentOutputStream != null) {
+      addPendingResponseHandler(pendingHandler);
       try {
-        outputStream.write((command + "\n").getBytes());
-        outputStream.flush();
+        currentOutputStream.write((commandLine + "\n").getBytes());
+        currentOutputStream.flush();
       } catch (Exception e) {
+        boolean pollutedStreamDetected =
+            clearBufferedCommandBytesAfterSendFailure(currentOutputStream);
+        if (pollutedStreamDetected) {
+          invalidateCommandOutputStreamAfterPartialWrite(currentOutputStream, commandLine);
+        }
+        removePendingResponseHandler(pendingHandler);
+        retireOutstandingResponseCountOnSendFailure(pendingHandler);
         String detail = e.getLocalizedMessage();
         if (detail == null || detail.trim().isEmpty()) {
           detail = e.getClass().getSimpleName();
         }
         rememberRecentLine(
-            recentStderrLines, "Failed to send GTP command '" + command + "': " + detail);
-        System.err.println("Failed to send GTP command '" + command + "': " + detail);
+            recentStderrLines, "Failed to send GTP command '" + commandLine + "': " + detail);
+        System.err.println("Failed to send GTP command '" + commandLine + "': " + detail);
+        if (failOnSendError) {
+          throw buildCommandSendFailure(commandLine, detail, e);
+        }
+        if (onResponse != null) {
+          onResponse.run();
+        }
       }
       if (EngineManager.isEngineGame()) {
         Lizzie.gtpConsole.addCommandForEngineGame(
@@ -2768,10 +2941,632 @@ public class Leelaz {
 
       } else if (Lizzie.config.alwaysGtp || Lizzie.gtpConsole.isVisible())
         Lizzie.gtpConsole.addCommand(command, cmdNumber, oriEnginename);
+    } else {
+      String detail = "outputStream unavailable";
+      rememberRecentLine(
+          recentStderrLines, "Failed to send GTP command '" + commandLine + "': " + detail);
+      System.err.println("Failed to send GTP command '" + commandLine + "': " + detail);
+      if (failOnSendError) {
+        retireOutstandingResponseCountOnSendFailure(pendingHandler);
+        throw buildCommandSendFailure(commandLine, detail, null);
+      }
+      if (onResponse != null) {
+        onResponse.run();
+      }
     }
     if (canSetNotPlayed) {
       canSetNotPlayed = false;
       played = false;
+    }
+  }
+
+  private RuntimeException buildCommandSendFailure(String command, String detail, Exception cause) {
+    String message = "Failed to send GTP command '" + command + "': " + detail;
+    return cause == null
+        ? new IllegalStateException(message)
+        : new IllegalStateException(message, cause);
+  }
+
+  private boolean clearBufferedCommandBytesAfterSendFailure(BufferedOutputStream stream) {
+    if (stream instanceof RecoverableBufferedOutputStream) {
+      RecoverableBufferedOutputStream recoverableStream = (RecoverableBufferedOutputStream) stream;
+      boolean partialWriteDetected = recoverableStream.consumePartialWriteDetected();
+      recoverableStream.discardBufferedBytes();
+      return partialWriteDetected;
+    }
+    return false;
+  }
+
+  private void invalidateCommandOutputStreamAfterPartialWrite(
+      BufferedOutputStream failedOutputStream, String commandLine) {
+    synchronized (commandQueue()) {
+      if (outputStream == failedOutputStream) {
+        outputStream = null;
+      }
+    }
+    String diagnostic =
+        "Invalidated polluted GTP output stream after partial write failure on command '"
+            + commandLine
+            + "'";
+    rememberRecentLine(recentStderrLines, diagnostic);
+    System.err.println(diagnostic);
+  }
+
+  public static BufferedOutputStream createCommandOutputStream(OutputStream stream) {
+    if (stream == null) {
+      return null;
+    }
+    return new RecoverableBufferedOutputStream(stream);
+  }
+
+  private void retireOutstandingResponseCountOnSendFailure(PendingResponseHandler pendingHandler) {
+    if (pendingHandler.responseCommandId == NO_RESPONSE_COMMAND_ID) {
+      return;
+    }
+    synchronized (commandQueue()) {
+      cmdNumber = Math.max(1, cmdNumber - 1);
+      if (currentCmdNum > cmdNumber - 1) {
+        currentCmdNum = cmdNumber - 1;
+      }
+    }
+    try {
+      trySendCommandFromQueue();
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+  }
+
+  private void retireOutstandingResponseCountOnNoResponseTimeout() {
+    synchronized (commandQueue()) {
+      if (currentCmdNum < cmdNumber - 1) {
+        currentCmdNum++;
+      }
+      if (currentCmdNum > cmdNumber - 1) {
+        currentCmdNum = cmdNumber - 1;
+      }
+    }
+    try {
+      trySendCommandFromQueue();
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+  }
+
+  private ArrayDeque<QueuedCommand> commandQueue() {
+    if (cmdQueue == null) {
+      cmdQueue = new ArrayDeque<QueuedCommand>();
+    }
+    return cmdQueue;
+  }
+
+  private PendingResponseHandler buildPendingResponseHandler(String command, Runnable handler) {
+    return new PendingResponseHandler(handler, nextResponseCommandId(command));
+  }
+
+  private int nextResponseCommandId(String command) {
+    if (command == null || !command.startsWith("loadsgf ")) {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+    return loadSgfResponseCommandIds.getAndIncrement();
+  }
+
+  private String buildCommandLine(String command, int responseCommandId) {
+    if (responseCommandId == NO_RESPONSE_COMMAND_ID) {
+      return command;
+    }
+    return responseCommandId + " " + command;
+  }
+
+  private ArrayDeque<PendingResponseHandler> pendingResponseHandlers() {
+    if (pendingResponseHandlers == null) {
+      pendingResponseHandlers = new ArrayDeque<PendingResponseHandler>();
+    }
+    return pendingResponseHandlers;
+  }
+
+  private void addPendingResponseHandler(PendingResponseHandler handler) {
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      handlers.addLast(handler);
+    }
+  }
+
+  private void removePendingResponseHandler(PendingResponseHandler handler) {
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      handlers.remove(handler);
+    }
+  }
+
+  private void removePendingResponseHandler(Runnable handler) {
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      Iterator<PendingResponseHandler> iterator = handlers.descendingIterator();
+      while (iterator.hasNext()) {
+        if (iterator.next().handler == handler) {
+          iterator.remove();
+          return;
+        }
+      }
+    }
+  }
+
+  private boolean removeQueuedLoadSgfCommand(Runnable handler) {
+    if (handler == null) {
+      return false;
+    }
+    synchronized (commandQueue()) {
+      Iterator<QueuedCommand> iterator = commandQueue().iterator();
+      while (iterator.hasNext()) {
+        QueuedCommand queuedCommand = iterator.next();
+        if (queuedCommand.onResponse != handler) {
+          continue;
+        }
+        if (queuedCommand.command == null || !queuedCommand.command.startsWith("loadsgf ")) {
+          continue;
+        }
+        iterator.remove();
+        cmdNumber = Math.max(1, cmdNumber - 1);
+        if (currentCmdNum > cmdNumber - 1) {
+          currentCmdNum = cmdNumber - 1;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean hasPendingResponseHandler(Runnable handler) {
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      for (PendingResponseHandler pendingHandler : handlers) {
+        if (pendingHandler.handler == handler) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
+  private void runNextPendingResponseHandler() {
+    PendingResponseHandler handler;
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      if (handlers.isEmpty()) {
+        return;
+      }
+      handler = handlers.removeFirst();
+    }
+    handler.run();
+  }
+
+  private int parseResponseCommandId(String line) {
+    if (line == null || line.length() < 2) {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+    char prefix = line.charAt(0);
+    if (prefix != '=' && prefix != '?') {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+    if (!isAsciiDigit(line.charAt(1))) {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+    int end = 1;
+    while (end < line.length() && isAsciiDigit(line.charAt(end))) {
+      end++;
+    }
+    if (end < line.length() && !Character.isWhitespace(line.charAt(end))) {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+    try {
+      return Integer.parseInt(line.substring(1, end));
+    } catch (NumberFormatException ex) {
+      return NO_RESPONSE_COMMAND_ID;
+    }
+  }
+
+  private boolean isAsciiDigit(char value) {
+    return value >= '0' && value <= '9';
+  }
+
+  private PendingResponseHandler pollPendingResponseHandler(String line) {
+    int responseCommandId = parseResponseCommandId(line);
+    ArrayDeque<PendingResponseHandler> handlers = pendingResponseHandlers();
+    synchronized (handlers) {
+      if (handlers.isEmpty()) {
+        return null;
+      }
+      if (responseCommandId == NO_RESPONSE_COMMAND_ID) {
+        return handlers.removeFirst();
+      }
+      Iterator<PendingResponseHandler> iterator = handlers.iterator();
+      while (iterator.hasNext()) {
+        PendingResponseHandler handler = iterator.next();
+        if (handler.responseCommandId == responseCommandId) {
+          iterator.remove();
+          return handler;
+        }
+      }
+      return null;
+    }
+  }
+
+  private boolean runPendingResponseHandlerForLine(String line) {
+    currentCommandResponseLine = line == null ? "" : line;
+    currentCommandResponseError = line != null && line.startsWith("?");
+    try {
+      PendingResponseHandler handler = pollPendingResponseHandler(line);
+      if (handler != null) {
+        handler.run();
+        return true;
+      }
+      return false;
+    } finally {
+      currentCommandResponseLine = "";
+      currentCommandResponseError = false;
+    }
+  }
+
+  private void processCommandResponseLine(String line) {
+    boolean matchedPendingHandler = runPendingResponseHandlerForLine(line);
+    if (!matchedPendingHandler && parseResponseCommandId(line) != NO_RESPONSE_COMMAND_ID) {
+      return;
+    }
+    currentCmdNum++;
+    if (currentCmdNum > cmdNumber - 1) {
+      currentCmdNum = cmdNumber - 1;
+    }
+    try {
+      trySendCommandFromQueue();
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+  }
+
+  private boolean isCurrentCommandResponseError() {
+    return currentCommandResponseError;
+  }
+
+  private String currentCommandResponseLine() {
+    return currentCommandResponseLine;
+  }
+
+  @FunctionalInterface
+  private interface CommandSendFailureHandler {
+    void onSendFailure(RuntimeException ex);
+  }
+
+  private static final class RecoverableBufferedOutputStream extends BufferedOutputStream {
+    private boolean partialWriteDetected;
+
+    private RecoverableBufferedOutputStream(OutputStream out) {
+      super(out);
+    }
+
+    @Override
+    public synchronized void write(int value) throws IOException {
+      if (count >= buf.length) {
+        flushBufferedBytesToUnderlying();
+      }
+      buf[count++] = (byte) value;
+    }
+
+    @Override
+    public synchronized void write(byte[] bytes, int offset, int length) throws IOException {
+      if (bytes == null) {
+        throw new NullPointerException("bytes");
+      }
+      if (offset < 0 || length < 0 || length > bytes.length - offset) {
+        throw new IndexOutOfBoundsException();
+      }
+      if (length == 0) {
+        return;
+      }
+      if (length >= buf.length) {
+        flushBufferedBytesToUnderlying();
+        writeDirectToUnderlying(bytes, offset, length);
+        return;
+      }
+      if (length > buf.length - count) {
+        flushBufferedBytesToUnderlying();
+      }
+      System.arraycopy(bytes, offset, buf, count, length);
+      count += length;
+    }
+
+    @Override
+    public synchronized void flush() throws IOException {
+      flushBufferedBytesToUnderlying();
+      out.flush();
+    }
+
+    private void flushBufferedBytesToUnderlying() throws IOException {
+      if (count <= 0) {
+        return;
+      }
+      int bufferedByteCount = count;
+      count = 0;
+      writeDirectToUnderlying(buf, 0, bufferedByteCount);
+    }
+
+    private void writeDirectToUnderlying(byte[] bytes, int offset, int length) throws IOException {
+      int writtenBytes = 0;
+      try {
+        while (writtenBytes < length) {
+          out.write(bytes[offset + writtenBytes]);
+          writtenBytes++;
+        }
+      } catch (IOException ex) {
+        if (writtenBytes > 0) {
+          partialWriteDetected = true;
+        }
+        throw ex;
+      }
+    }
+
+    private void discardBufferedBytes() {
+      count = 0;
+    }
+
+    private boolean consumePartialWriteDetected() {
+      boolean detected = partialWriteDetected;
+      partialWriteDetected = false;
+      return detected;
+    }
+  }
+
+  private static final class PendingResponseHandler {
+    private final Runnable handler;
+    private final int responseCommandId;
+
+    private PendingResponseHandler(Runnable handler, int responseCommandId) {
+      this.handler = handler;
+      this.responseCommandId = responseCommandId;
+    }
+
+    private void run() {
+      handler.run();
+    }
+  }
+
+  private static final class TrackedLoadSgfConsumer {
+    private final Leelaz targetEngine;
+    private final Path sgfFile;
+    private final LoadSgfDispatch dispatch;
+    private final AtomicBoolean settled = new AtomicBoolean(false);
+    private final Runnable responseHandler = this::onResponse;
+
+    private TrackedLoadSgfConsumer(Leelaz targetEngine, Path sgfFile, LoadSgfDispatch dispatch) {
+      this.targetEngine = targetEngine;
+      this.sgfFile = sgfFile;
+      this.dispatch = dispatch;
+      this.dispatch.registerPendingConsumer(this);
+    }
+
+    private Runnable responseHandler() {
+      return responseHandler;
+    }
+
+    private void onResponse() {
+      if (targetEngine.isCurrentCommandResponseError()) {
+        failFromResponse(
+            targetEngine.buildLoadSgfResponseFailure(
+                sgfFile, targetEngine.currentCommandResponseLine()));
+        return;
+      }
+      complete();
+    }
+
+    private void complete() {
+      settle(false, null, false, false);
+    }
+
+    private void failFromSend(RuntimeException ex) {
+      settle(true, ex, false, false);
+    }
+
+    private void failFromResponse(RuntimeException ex) {
+      settle(true, ex, false, true);
+    }
+
+    private void cancelWithoutResponse() {
+      settle(false, null, true, false);
+    }
+
+    private boolean shouldCancelForSendFailureFallback(boolean noResponseTimeoutReached) {
+      if (!targetEngine.hasPendingResponseHandler(responseHandler)) {
+        return true;
+      }
+      return noResponseTimeoutReached;
+    }
+
+    private void settle(
+        boolean shouldRecordFailure,
+        RuntimeException ex,
+        boolean removeHandler,
+        boolean cancelOtherConsumers) {
+      if (!settled.compareAndSet(false, true)) {
+        return;
+      }
+      if (removeHandler) {
+        boolean hadPendingHandler = targetEngine.hasPendingResponseHandler(responseHandler);
+        targetEngine.removePendingResponseHandler(responseHandler);
+        boolean removedQueued = targetEngine.removeQueuedLoadSgfCommand(responseHandler);
+        if (hadPendingHandler && !removedQueued) {
+          targetEngine.retireOutstandingResponseCountOnNoResponseTimeout();
+        }
+      }
+      if (shouldRecordFailure && ex != null) {
+        if (cancelOtherConsumers) {
+          dispatch.recordFailureAndCancelPendingConsumers(ex);
+        } else {
+          dispatch.recordFailure(ex);
+        }
+      }
+      dispatch.completePendingConsumer(this);
+    }
+  }
+
+  private static final class LoadSgfDispatch {
+    private static final long PENDING_RESPONSE_TIMEOUT_NANOS =
+        TimeUnit.MILLISECONDS.toNanos(LOAD_SGF_NO_RESPONSE_TIMEOUT_MILLIS);
+
+    private final Runnable afterConsumed;
+    private final AtomicInteger pendingConsumers = new AtomicInteger(0);
+    private final ArrayDeque<TrackedLoadSgfConsumer> pendingTrackedConsumers =
+        new ArrayDeque<TrackedLoadSgfConsumer>();
+    private final AtomicBoolean dispatchFinished = new AtomicBoolean(false);
+    private final AtomicBoolean cleanupFinished = new AtomicBoolean(false);
+    private final AtomicBoolean fallbackCleanupScheduled = new AtomicBoolean(false);
+    private final AtomicLong dispatchFinishedAtNanos = new AtomicLong(-1L);
+    private final AtomicReference<RuntimeException> failure = new AtomicReference<>();
+    private final CountDownLatch completion = new CountDownLatch(1);
+
+    private LoadSgfDispatch(Runnable afterConsumed) {
+      this.afterConsumed = afterConsumed;
+    }
+
+    private void registerPendingConsumer(TrackedLoadSgfConsumer consumer) {
+      synchronized (pendingTrackedConsumers) {
+        pendingTrackedConsumers.addLast(consumer);
+      }
+      pendingConsumers.incrementAndGet();
+    }
+
+    private void completePendingConsumer(TrackedLoadSgfConsumer consumer) {
+      synchronized (pendingTrackedConsumers) {
+        pendingTrackedConsumers.remove(consumer);
+      }
+      if (pendingConsumers.decrementAndGet() == 0 && dispatchFinished.get()) {
+        finishCleanup();
+      }
+    }
+
+    private void finishDispatch() {
+      if (dispatchFinished.compareAndSet(false, true)) {
+        dispatchFinishedAtNanos.compareAndSet(-1L, System.nanoTime());
+      }
+      if (pendingConsumers.get() == 0) {
+        finishCleanup();
+      }
+    }
+
+    private void recordFailure(RuntimeException ex) {
+      failure.compareAndSet(null, ex);
+    }
+
+    private void recordFailureAndCancelPendingConsumers(RuntimeException ex) {
+      recordFailure(ex);
+      cancelAllPendingConsumersWithoutResponse();
+    }
+
+    private RuntimeException failure() {
+      return failure.get();
+    }
+
+    private void scheduleFallbackCleanupAfterSendFailure() {
+      if (pendingConsumers.get() == 0) {
+        finishCleanup();
+        return;
+      }
+      if (!fallbackCleanupScheduled.compareAndSet(false, true)) {
+        return;
+      }
+      LOAD_SGF_CLEANUP_EXECUTOR.schedule(
+          this::runSendFailureFallbackCleanup,
+          LOAD_SGF_SEND_FAILURE_CLEANUP_TIMEOUT_MILLIS,
+          TimeUnit.MILLISECONDS);
+    }
+
+    private List<TrackedLoadSgfConsumer> snapshotPendingConsumers() {
+      synchronized (pendingTrackedConsumers) {
+        return new ArrayList<>(pendingTrackedConsumers);
+      }
+    }
+
+    private void cancelAllPendingConsumersWithoutResponse() {
+      for (TrackedLoadSgfConsumer consumer : snapshotPendingConsumers()) {
+        consumer.cancelWithoutResponse();
+      }
+    }
+
+    private void runSendFailureFallbackCleanup() {
+      fallbackCleanupScheduled.set(false);
+      if (cleanupFinished.get()) {
+        return;
+      }
+      cancelPendingConsumersAfterNoResponseTimeout();
+      if (pendingConsumers.get() == 0) {
+        finishCleanup();
+        return;
+      }
+      if (dispatchFinished.get()) {
+        scheduleFallbackCleanupAfterSendFailure();
+      }
+    }
+
+    private void cancelPendingConsumersAfterNoResponseTimeout() {
+      boolean noResponseTimeoutReached = isNoResponseTimeoutReached(System.nanoTime());
+      for (TrackedLoadSgfConsumer consumer : snapshotPendingConsumers()) {
+        if (consumer.shouldCancelForSendFailureFallback(noResponseTimeoutReached)) {
+          consumer.cancelWithoutResponse();
+        }
+      }
+    }
+
+    private boolean isNoResponseTimeoutReached(long nowNanos) {
+      long finishedAtNanos = dispatchFinishedAtNanos.get();
+      if (finishedAtNanos < 0L) {
+        return false;
+      }
+      return nowNanos - finishedAtNanos >= PENDING_RESPONSE_TIMEOUT_NANOS;
+    }
+
+    private void awaitCompletion() {
+      try {
+        if (completion.await(LOAD_SGF_NO_RESPONSE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+          return;
+        }
+        recordFailureAndCancelPendingConsumers(
+            new IllegalStateException(
+                "Timed out while waiting for loadsgf response after "
+                    + LOAD_SGF_NO_RESPONSE_TIMEOUT_MILLIS
+                    + " ms"));
+        completion.await();
+      } catch (InterruptedException ex) {
+        Thread.currentThread().interrupt();
+        recordFailureAndCancelPendingConsumers(
+            new IllegalStateException("Interrupted while waiting for loadsgf response", ex));
+      }
+    }
+
+    private void finishCleanup() {
+      if (!cleanupFinished.compareAndSet(false, true)) {
+        return;
+      }
+      try {
+        afterConsumed.run();
+      } finally {
+        completion.countDown();
+      }
+    }
+  }
+
+  private static final class QueuedCommand {
+    private final String command;
+    private final Runnable onResponse;
+    private final CommandSendFailureHandler onSendFailure;
+    private final boolean failOnSendError;
+
+    private QueuedCommand(
+        String command,
+        Runnable onResponse,
+        CommandSendFailureHandler onSendFailure,
+        boolean failOnSendError) {
+      this.command = command;
+      this.onResponse = onResponse;
+      this.onSendFailure = onSendFailure;
+      this.failOnSendError = failOnSendError;
     }
   }
 
@@ -2865,17 +3660,12 @@ public class Leelaz {
   }
 
   public void playMove(Stone color, String move, boolean addPlayer, boolean blackToPlay) {
-    if (!isKatago || isSai) {
-      if (move == "pass") {
-        if (Lizzie.board.getHistory().getCurrentHistoryNode()
-            != Lizzie.board.getHistory().getStart()) {
-          Optional<int[]> lastMove = Lizzie.board.getLastMove();
-          if (!lastMove.isPresent()) {
-            this.setModifyEnd();
-            return;
-          }
-        }
-      }
+    if ((!isKatago || isSai)
+        && "pass".equals(move)
+        && Lizzie.board.getHistory().getCurrentHistoryNode() != Lizzie.board.getHistory().getStart()
+        && Lizzie.board.getData().isPassNode()) {
+      this.setModifyEnd();
+      return;
     }
     //		canGetGenmoveInfoGen = true;
     //	getGenmoveInfoPrevious = true;

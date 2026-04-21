@@ -4,6 +4,7 @@ import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.Stone;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 final class SyncSnapshotRebuildPolicy {
   private final int boardWidth;
@@ -17,7 +18,7 @@ final class SyncSnapshotRebuildPolicy {
   }
 
   Optional<BoardHistoryNode> findMatchingHistoryNode(
-      BoardHistoryNode syncStartNode, int[] snapshotCodes) {
+      BoardHistoryNode syncStartNode, int[] snapshotCodes, OptionalInt foxMoveNumber) {
     if (syncStartNode == null || snapshotCodes.length == 0) {
       return Optional.empty();
     }
@@ -25,48 +26,24 @@ final class SyncSnapshotRebuildPolicy {
     if (!marker.valid) {
       return Optional.empty();
     }
-    if (!marker.present) {
-      return findUniqueStoneMatch(syncStartNode, snapshotCodes);
+    BoardData currentData = syncStartNode.getData();
+    if (marker.present) {
+      return matchesSnapshot(currentData, snapshotCodes, marker)
+          ? Optional.of(syncStartNode)
+          : Optional.empty();
     }
-    return findMarkedMatch(syncStartNode, snapshotCodes, marker);
+    return matchesStones(currentData.stones, snapshotCodes)
+        ? Optional.of(syncStartNode)
+        : Optional.empty();
+  }
+
+  Optional<BoardHistoryNode> findAdjacentMatchFromLastResolvedNode(
+      BoardHistoryNode lastResolvedNode, int[] snapshotCodes, OptionalInt foxMoveNumber) {
+    return Optional.empty();
   }
 
   private boolean matchesSnapshot(BoardData candidate, int[] snapshotCodes, SnapshotMarker marker) {
     return matchesStones(candidate.stones, snapshotCodes) && matchesMarker(candidate, marker);
-  }
-
-  private Optional<BoardHistoryNode> findUniqueStoneMatch(
-      BoardHistoryNode syncStartNode, int[] snapshotCodes) {
-    BoardHistoryNode candidate = syncStartNode;
-    BoardHistoryNode matchedNode = null;
-    while (true) {
-      if (matchesStones(candidate.getData().stones, snapshotCodes)) {
-        if (matchedNode != null) {
-          return Optional.empty();
-        }
-        matchedNode = candidate;
-      }
-      Optional<BoardHistoryNode> previous = candidate.previous();
-      if (!previous.isPresent()) {
-        return Optional.ofNullable(matchedNode);
-      }
-      candidate = previous.get();
-    }
-  }
-
-  private Optional<BoardHistoryNode> findMarkedMatch(
-      BoardHistoryNode syncStartNode, int[] snapshotCodes, SnapshotMarker marker) {
-    BoardHistoryNode candidate = syncStartNode;
-    while (true) {
-      if (matchesSnapshot(candidate.getData(), snapshotCodes, marker)) {
-        return Optional.of(candidate);
-      }
-      Optional<BoardHistoryNode> previous = candidate.previous();
-      if (!previous.isPresent()) {
-        return Optional.empty();
-      }
-      candidate = previous.get();
-    }
   }
 
   private boolean matchesStones(Stone[] stones, int[] snapshotCodes) {

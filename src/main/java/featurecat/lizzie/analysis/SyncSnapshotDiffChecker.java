@@ -46,9 +46,6 @@ final class SyncSnapshotDiffChecker {
       Stone[] stones,
       boolean ignoreCurrentLastLocalMove,
       Optional<int[]> currentLastMove) {
-    if (!alwaysSyncBoardState && !showInBoard) {
-      return false;
-    }
     return hasDiff(snapshotCodes, stones, ignoreCurrentLastLocalMove, currentLastMove);
   }
 

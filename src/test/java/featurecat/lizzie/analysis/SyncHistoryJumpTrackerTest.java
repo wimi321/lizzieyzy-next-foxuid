@@ -7,13 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.Stone;
-import featurecat.lizzie.rules.Zobrist;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 public class SyncHistoryJumpTrackerTest {
+  private static final int BOARD_SIZE = 3;
   private static final int BOARD_AREA = 9;
 
   @Test
@@ -167,19 +167,7 @@ public class SyncHistoryJumpTrackerTest {
   }
 
   private BoardHistoryNode createNode() {
-    return new BoardHistoryNode(
-        new BoardData(
-            emptyStones(),
-            Optional.empty(),
-            Stone.EMPTY,
-            true,
-            new Zobrist(),
-            0,
-            new int[BOARD_AREA],
-            0,
-            0,
-            50,
-            0));
+    return new BoardHistoryNode(BoardData.empty(BOARD_SIZE, BOARD_SIZE));
   }
 
   private Stone[] emptyStones() {

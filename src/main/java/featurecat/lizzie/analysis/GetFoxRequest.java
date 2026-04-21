@@ -20,7 +20,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONObject;
@@ -722,12 +721,15 @@ public class GetFoxRequest {
       BoardHistoryNode node = history.getStart();
       while (node.next().isPresent()) {
         node = node.next().get();
-        Optional<int[]> lastMove = node.getData().lastMove;
-        Stone color = node.getData().lastMoveColor;
-        if (!lastMove.isPresent() || color == null || color == Stone.EMPTY) {
+        BoardData data = node.getData();
+        Stone color = data.lastMoveColor;
+        if (!data.isHistoryActionNode() || color == null || color == Stone.EMPTY) {
           continue;
         }
-        String coordinate = SGFParser.asCoord(lastMove.get()).toLowerCase();
+        String coordinate =
+            data.isPassNode()
+                ? SGFParser.passPos()
+                : SGFParser.asCoord(data.lastMove.get()).toLowerCase();
         moves.add(new SgfMove(color.isBlack() ? "B" : "W", coordinate));
       }
       return moves;
