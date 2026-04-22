@@ -53,8 +53,6 @@ public class ReadBoard {
   public String currentEnginename = "";
   private int port = -1;
 
-  boolean firstcount = true;
-  public int numberofcount = 0;
   public boolean firstSync = true;
   // public boolean syncBoth = Lizzie.config.syncBoth;
   private ReadBoardStream readBoardStream;
@@ -1556,58 +1554,6 @@ public class ReadBoard {
     }
   }
 
-  private List<EngineSyncStone> collectEngineSyncStones(BoardData data) {
-    List<EngineSyncStone> stones = new ArrayList<>();
-    int knownMoves = 0;
-    for (int x = 0; x < Board.boardWidth; x++) {
-      for (int y = 0; y < Board.boardHeight; y++) {
-        int index = Board.getIndex(x, y);
-        Stone stone = data.stones[index];
-        if (stone.isEmpty()) {
-          continue;
-        }
-        int moveNumber = data.moveNumberList == null ? 0 : data.moveNumberList[index];
-        stones.add(new EngineSyncStone(x, y, stone, moveNumber));
-        if (moveNumber > 0) {
-          knownMoves++;
-        }
-      }
-    }
-    if (knownMoves > 1) {
-      stones.sort(this::compareEngineSyncStonesByMoveNumber);
-    } else {
-      stones.sort(this::compareEngineSyncStonesByPosition);
-    }
-    return stones;
-  }
-
-  private int compareEngineSyncStonesByMoveNumber(EngineSyncStone left, EngineSyncStone right) {
-    boolean leftKnown = left.moveNumber > 0;
-    boolean rightKnown = right.moveNumber > 0;
-    if (leftKnown && rightKnown) {
-      int moveNumberComparison = Integer.compare(left.moveNumber, right.moveNumber);
-      if (moveNumberComparison != 0) {
-        return moveNumberComparison;
-      }
-    }
-    if (leftKnown != rightKnown) {
-      return leftKnown ? -1 : 1;
-    }
-    return compareEngineSyncStonesByPosition(left, right);
-  }
-
-  private int compareEngineSyncStonesByPosition(EngineSyncStone left, EngineSyncStone right) {
-    int yComparison = Integer.compare(left.y, right.y);
-    if (yComparison != 0) {
-      return yComparison;
-    }
-    return Integer.compare(left.x, right.x);
-  }
-
-  private Stone turnColor(boolean blackTurn) {
-    return blackTurn ? Stone.BLACK : Stone.WHITE;
-  }
-
   private void resetActiveSyncState() {
     conflictTracker.clear();
     historyJumpTracker.clear();
@@ -1841,20 +1787,6 @@ public class ReadBoard {
 
     private static SnapshotHistoryState markerlessSnapshot(boolean blackToPlay, int moveNumber) {
       return new SnapshotHistoryState(Optional.empty(), Stone.EMPTY, blackToPlay, moveNumber);
-    }
-  }
-
-  private static final class EngineSyncStone {
-    private final int x;
-    private final int y;
-    private final Stone color;
-    private final int moveNumber;
-
-    private EngineSyncStone(int x, int y, Stone color, int moveNumber) {
-      this.x = x;
-      this.y = y;
-      this.color = color;
-      this.moveNumber = moveNumber;
     }
   }
 
