@@ -39,9 +39,11 @@ KataGo 引擎 ─ GTP ─▶ Leelaz.java ─ 事件 ─▶ WebBoardDataCollector
 
 ### 接入点（最小侵入）
 
-- `Leelaz.java` 的 `parseInfoKatago()` 方法末尾 — 分析数据更新后通知 `WebBoardDataCollector`
-- `Board.java` 的落子/导航方法 — 棋盘状态变化后通知 `WebBoardDataCollector`
-- `LizzieFrame` 菜单 — 添加「工具 → Web 旁观」开关菜单项
+- `LizzieFrame.refresh(int mode)` — `mode=1`（来自引擎 info 输出）时通知 `WebBoardDataCollector` 发送分析增量更新
+- `LizzieFrame.refresh()` — 棋盘状态变化时通知 `WebBoardDataCollector` 发送完整状态快照
+- `LizzieFrame` 菜单 — 添加「同步 → Web 旁观」开关菜单项
+
+选择 hook `LizzieFrame.refresh()` 而非分散在 `Leelaz` 和 `Board` 多处，因为 `refresh()` 是所有状态变化的汇聚点，只需修改一个文件。
 
 ### 生命周期
 
@@ -205,7 +207,7 @@ KataGo 引擎 ─ GTP ─▶ Leelaz.java ─ 事件 ─▶ WebBoardDataCollector
 
 ## 菜单集成
 
-`LizzieFrame` 菜单栏 → 「工具」 → 「Web 旁观」子菜单：
+`LizzieFrame` 菜单栏 → 「同步」 → 「Web 旁观」子菜单：
 - **启动/停止**：切换 Web 服务开关
 - **复制访问地址**：将 `http://<局域网IP>:<HTTP端口>` 复制到剪贴板
 
