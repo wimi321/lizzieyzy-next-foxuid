@@ -71,6 +71,23 @@ KataGo 引擎 ─ GTP ─▶ Leelaz.java ─ 事件 ─▶ WebBoardDataCollector
 
 默认端口被占用时，自动尝试 +1 递增，最多尝试 10 次。端口可在 `config.json` 中配置。
 
+WebSocket 端口在启动前通过 `ServerSocket` 预检可用性（`WebSocketServer.start()` 的 bind 是异步的，无法通过 try/catch 捕获端口冲突）。HTTP 端口由 `ServerSocket` 构造函数同步 bind，异常可直接捕获。
+
+### 连接上限语义
+
+`maxConnections` 表示允许的最大同时连接数。检查时机在 `onOpen` 回调中，此时新连接已计入 `getConnections()` 集合，因此使用 `size() > maxConnections` 而非 `>=`。
+
+### HTTP 请求路径处理
+
+请求路径在安全检查前先经过：URL 解码 → strip query string (`?` 后部分) → strip fragment (`#` 后部分) → 路径遍历检查（`..` 和 `\\`）。
+
+### GTP 坐标解析
+
+Java 和 JS 端的 `gtpToXY` 均处理以下边界：
+- null / 空字符串 → 返回 null
+- "pass" / 非标准坐标（字母后跟非数字）→ 返回 null
+- 正常坐标（A1-T19，跳过 I 列）→ 返回 `[x, y]`
+
 ### 关闭顺序
 
 停止时按以下顺序：

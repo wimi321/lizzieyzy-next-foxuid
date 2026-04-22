@@ -44,6 +44,7 @@
     var x = col - 65; // A=0
     if (x > 7) x--; // skip I
     var row = parseInt(coord.substring(1), 10);
+    if (isNaN(row)) return null;
     var y = boardHeight - row;
     return [x, y];
   }

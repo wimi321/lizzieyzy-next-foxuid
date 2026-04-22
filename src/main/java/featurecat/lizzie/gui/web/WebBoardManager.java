@@ -1,10 +1,12 @@
 package featurecat.lizzie.gui.web;
 
 import featurecat.lizzie.Lizzie;
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.ServerSocket;
 import java.net.SocketException;
 import java.util.Enumeration;
 import org.json.JSONObject;
@@ -40,10 +42,12 @@ public class WebBoardManager {
 
     wsServer = null;
     for (int i = 0; i < 10; i++) {
+      int candidatePort = wsPort + i;
+      if (!isPortAvailable(candidatePort)) continue;
       try {
-        wsServer = new WebBoardServer(new InetSocketAddress("0.0.0.0", wsPort + i), maxConn);
+        wsServer = new WebBoardServer(new InetSocketAddress("0.0.0.0", candidatePort), maxConn);
         wsServer.start();
-        actualWsPort = wsPort + i;
+        actualWsPort = candidatePort;
         break;
       } catch (Exception e) {
         wsServer = null;
@@ -74,6 +78,8 @@ public class WebBoardManager {
     if (wsServer != null) {
       try {
         wsServer.stop(500);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
       } catch (Exception ignored) {
       }
       wsServer = null;
@@ -119,5 +125,14 @@ public class WebBoardManager {
     } catch (SocketException ignored) {
     }
     return "127.0.0.1";
+  }
+
+  private static boolean isPortAvailable(int port) {
+    try (ServerSocket ss = new ServerSocket(port)) {
+      ss.setReuseAddress(true);
+      return true;
+    } catch (IOException e) {
+      return false;
+    }
   }
 }
