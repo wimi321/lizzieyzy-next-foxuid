@@ -47,9 +47,13 @@ public class WebBoardHttpServerTest {
   @Test
   void servesIndexHtml() throws Exception {
     String response = httpGet("/");
-    // index.html exists in classpath (created by Task 7), should return 200
-    // If it somehow doesn't find it, it should NOT be 403
-    assertFalse(response.contains("403"));
+    assertTrue(response.contains("200"));
+  }
+
+  @Test
+  void servesFileWithQueryString() throws Exception {
+    String response = httpGet("/index.html?v=123&nocache=true");
+    assertTrue(response.contains("200"));
   }
 
   @Test

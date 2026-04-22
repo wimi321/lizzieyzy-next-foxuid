@@ -60,6 +60,13 @@ public class WebBoardHttpServer {
     } catch (IOException ignored) {
     }
     if (clientPool != null) clientPool.shutdownNow();
+    if (acceptThread != null) {
+      try {
+        acceptThread.join(1000);
+      } catch (InterruptedException ignored) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   private void acceptLoop() {
@@ -98,6 +105,10 @@ public class WebBoardHttpServer {
       }
 
       String path = java.net.URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
+      int qIdx = path.indexOf('?');
+      if (qIdx >= 0) path = path.substring(0, qIdx);
+      int fIdx = path.indexOf('#');
+      if (fIdx >= 0) path = path.substring(0, fIdx);
       if (path.contains("..") || path.contains("\\")) {
         sendError(out, 403, "Forbidden");
         return;
@@ -106,14 +117,14 @@ public class WebBoardHttpServer {
       if ("/".equals(path)) path = "/index.html";
 
       String resourcePath = "/web" + path;
-      InputStream resource = getClass().getResourceAsStream(resourcePath);
-      if (resource == null) {
-        sendError(out, 404, "Not Found");
-        return;
+      byte[] body;
+      try (InputStream resource = getClass().getResourceAsStream(resourcePath)) {
+        if (resource == null) {
+          sendError(out, 404, "Not Found");
+          return;
+        }
+        body = resource.readAllBytes();
       }
-
-      byte[] body = resource.readAllBytes();
-      resource.close();
 
       if (resourcePath.endsWith("index.html")) {
         String html = new String(body, StandardCharsets.UTF_8);
@@ -155,7 +166,7 @@ public class WebBoardHttpServer {
             + "\r\n"
             + "\r\n"
             + body;
-    out.write(response.getBytes());
+    out.write(response.getBytes(StandardCharsets.UTF_8));
     out.flush();
   }
 

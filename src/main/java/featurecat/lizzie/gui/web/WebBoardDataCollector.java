@@ -108,7 +108,8 @@ public class WebBoardDataCollector {
       BoardHistoryNode root = Lizzie.board.getHistory().getStart();
       JSONObject history = buildWinrateHistoryJson(root, currentNode);
       server.broadcastMessage(history.toString());
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      e.printStackTrace();
     }
   }
 

@@ -189,13 +189,20 @@
       ctx.stroke();
     }
 
-    // Star points (hoshi) for 19x19
+    // Star points (hoshi)
+    var stars;
     if (boardWidth === 19 && boardHeight === 19) {
-      var stars = [
+      stars = [
         [3, 3], [3, 9], [3, 15],
         [9, 3], [9, 9], [9, 15],
         [15, 3], [15, 9], [15, 15]
       ];
+    } else if (boardWidth === 13 && boardHeight === 13) {
+      stars = [[3, 3], [3, 9], [6, 6], [9, 3], [9, 9]];
+    } else if (boardWidth === 9 && boardHeight === 9) {
+      stars = [[2, 2], [2, 6], [4, 4], [6, 2], [6, 6]];
+    }
+    if (stars) {
       ctx.fillStyle = "#8B7355";
       for (var i = 0; i < stars.length; i++) {
         var sx = margin + stars[i][0] * gridSize;
@@ -329,10 +336,15 @@
 
     var radius = gridSize * 0.44;
     var player = currentPlayer === "W" ? 2 : 1; // start color
+    var moveNum = 0;
 
     for (var i = 0; i < variation.length; i++) {
+      moveNum++;
       var xy = gtpToXY(variation[i], boardHeight);
-      if (!xy) continue;
+      if (!xy) {
+        player = player === 1 ? 2 : 1;
+        continue;
+      }
 
       var px = margin + xy[0] * gridSize;
       var py = margin + xy[1] * gridSize;
@@ -348,7 +360,7 @@
       ctx.font = "bold " + Math.max(10, gridSize * 0.36) + "px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(String(i + 1), px, py);
+      ctx.fillText(String(moveNum), px, py);
 
       // Alternate colour
       player = player === 1 ? 2 : 1;
@@ -399,10 +411,14 @@
     var h = chartCanvas.clientHeight || 120;
     if (w <= 0 || h <= 0) return;
 
-    chartCanvas.width = w;
-    chartCanvas.height = h;
+    var dpr = window.devicePixelRatio || 1;
+    chartCanvas.width = w * dpr;
+    chartCanvas.height = h * dpr;
+    chartCanvas.style.width = w + "px";
+    chartCanvas.style.height = h + "px";
 
     var ctx = chartCtx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Background
     ctx.fillStyle = "#111";
     ctx.fillRect(0, 0, w, h);
