@@ -2,6 +2,7 @@ package featurecat.lizzie.analysis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
@@ -105,6 +106,43 @@ class ReadBoardEngineResumeTest {
 
       assertEquals(1, harness.frame.scheduleResumeAnalysisCount);
       assertNotNull(harness.frame.lastScheduledResumeAction);
+    }
+  }
+
+  @Test
+  void syncCommandDoesNotStartPonderWhenEngineIsNotStarted() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      harness.leelaz.started = false;
+
+      harness.readBoard.parseLine("sync");
+
+      assertEquals(0, harness.leelaz.ponderCount);
+      assertEquals(true, harness.frame.syncBoard);
+    }
+  }
+
+  @Test
+  void boardOnlyForceRebuildDoesNotScheduleResumeAnalysis() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      HistoryPath path =
+          buildHistory(harness.board, placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
+      BoardHistoryNode mainEnd = path.nodes.get(path.nodes.size() - 1);
+
+      harness.leelaz.started = false;
+      harness.readBoard.parseLine("forceRebuild");
+      harness.sync(
+          snapshot(
+              mainEnd.getData().stones,
+              mainEnd.getData().lastMove,
+              mainEnd.getData().lastMoveColor));
+
+      assertEquals(0, harness.frame.scheduleResumeAnalysisCount);
+      assertNull(harness.frame.lastScheduledResumeAction);
+
+      harness.leelaz.started = true;
+      assertEquals(0, harness.leelaz.ponderCount);
     }
   }
 

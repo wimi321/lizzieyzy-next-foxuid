@@ -37,6 +37,7 @@ class SnapshotTrackingLeelaz extends Leelaz {
     leelaz.ponderCount = 0;
     leelaz.playedMoves = new ArrayList<>();
     leelaz.sentCommands = new ArrayList<>();
+    leelaz.started = true;
     leelaz.resetBoardState();
     return leelaz;
   }

@@ -282,6 +282,261 @@ class ReadBoardSyncDecisionTest {
   }
 
   @Test
+  void foxLiveAncestorMatchIgnoresMarkerMismatchInsteadOfRebuilding() throws Exception {
+    Stone[] ancestorStones = stones(placement(1, 1, Stone.BLACK));
+
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      HistoryPath path =
+          buildHistory(
+              harness.board,
+              placement(1, 1, Stone.BLACK),
+              placement(0, 0, Stone.WHITE),
+              placement(2, 2, Stone.BLACK));
+      BoardHistoryNode ancestorNode = path.nodes.get(0);
+      BoardHistoryNode mainEnd = path.nodes.get(path.nodes.size() - 1);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("roomToken 43581号");
+      harness.readBoard.parseLine("liveTitleMove 1");
+      harness.readBoard.parseLine("foxMoveNumber 1");
+      harness.sync(snapshot(ancestorStones, Optional.of(new int[] {1, 1}), Stone.WHITE));
+
+      assertSame(
+          mainEnd,
+          harness.board.getHistory().getMainEnd(),
+          "marker mismatch should not force rebuild when fox live identity already matches an ancestor.");
+      assertSame(
+          ancestorNode,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "fox live ancestor hit should navigate back to the matched ancestor.");
+      assertEquals(0, harness.leelaz.clearCount, "ancestor hit should not clear the engine state.");
+    }
+  }
+
+  @Test
+  void foxLiveForwardToExistingNextNodeNavigatesInsteadOfRestoringOldView() throws Exception {
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      HistoryPath path =
+          buildHistory(
+              harness.board,
+              placement(0, 0, Stone.BLACK),
+              placement(1, 0, Stone.WHITE),
+              placement(0, 1, Stone.BLACK));
+      BoardHistoryNode moveOne = path.nodes.get(0);
+      BoardHistoryNode moveTwo = path.nodes.get(1);
+      BoardHistoryNode mainEnd = path.nodes.get(2);
+      harness.board.getHistory().setHead(moveOne);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("roomToken 43581号");
+      harness.readBoard.parseLine("liveTitleMove 2");
+      harness.readBoard.parseLine("foxMoveNumber 2");
+      harness.sync(
+          snapshot(moveTwo.getData().stones, moveTwo.getData().lastMove, moveTwo.getData().lastMoveColor));
+
+      assertSame(mainEnd, harness.board.getHistory().getMainEnd());
+      assertSame(
+          moveTwo,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "forwarding to an already-existing next node should leave the view on that node.");
+      assertEquals(0, harness.leelaz.clearCount, "existing-node forward navigation should not rebuild.");
+    }
+  }
+
+  @Test
+  void foxLiveForwardToExistingMainEndNavigatesInsteadOfStallingOnAncestor() throws Exception {
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      HistoryPath path =
+          buildHistory(
+              harness.board,
+              placement(0, 0, Stone.BLACK),
+              placement(1, 0, Stone.WHITE),
+              placement(0, 1, Stone.BLACK));
+      BoardHistoryNode moveOne = path.nodes.get(0);
+      BoardHistoryNode mainEnd = path.nodes.get(2);
+      harness.board.getHistory().setHead(moveOne);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("roomToken 43581号");
+      harness.readBoard.parseLine("liveTitleMove 3");
+      harness.readBoard.parseLine("foxMoveNumber 3");
+      harness.sync(
+          snapshot(
+              mainEnd.getData().stones,
+              mainEnd.getData().lastMove,
+              mainEnd.getData().lastMoveColor));
+
+      assertSame(mainEnd, harness.board.getHistory().getMainEnd());
+      assertSame(
+          mainEnd,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "forwarding to the already-existing main end should not be treated as a stale steady-state frame.");
+      assertEquals(0, harness.leelaz.clearCount, "existing main-end navigation should not rebuild.");
+    }
+  }
+
+  @Test
+  void foxLiveRollbackWithinMainlineWindowDoesNotRebuild() throws Exception {
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      HistoryPath path =
+          buildHistory(
+              harness.board,
+              placement(0, 0, Stone.BLACK),
+              placement(1, 0, Stone.WHITE),
+              placement(0, 1, Stone.BLACK),
+              placement(1, 1, Stone.WHITE));
+      BoardHistoryNode moveTwo = path.nodes.get(1);
+      BoardHistoryNode mainEnd = path.nodes.get(3);
+      harness.board.getHistory().setHead(mainEnd);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("roomToken 43581号");
+      harness.readBoard.parseLine("liveTitleMove 2");
+      harness.readBoard.parseLine("foxMoveNumber 2");
+      harness.sync(
+          snapshot(moveTwo.getData().stones, moveTwo.getData().lastMove, moveTwo.getData().lastMoveColor));
+
+      assertSame(mainEnd, harness.board.getHistory().getMainEnd());
+      assertSame(
+          moveTwo,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "rolling back to an already-existing ancestor inside the retained window should navigate directly.");
+      assertEquals(0, harness.leelaz.clearCount, "window-contained rollback should not rebuild.");
+    }
+  }
+
+  @Test
+  void recordViewForwardToExistingNodeNavigatesInsideMainlineWindow() throws Exception {
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      HistoryPath path =
+          buildHistory(
+              harness.board,
+              placement(0, 0, Stone.BLACK),
+              placement(1, 0, Stone.WHITE),
+              placement(0, 1, Stone.BLACK));
+      BoardHistoryNode moveOne = path.nodes.get(0);
+      BoardHistoryNode moveTwo = path.nodes.get(1);
+      BoardHistoryNode mainEnd = path.nodes.get(2);
+      harness.board.getHistory().setHead(moveOne);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("recordCurrentMove 2");
+      harness.readBoard.parseLine("recordTotalMove 333");
+      harness.readBoard.parseLine("recordAtEnd 0");
+      harness.readBoard.parseLine("recordTitleFingerprint record-fingerprint");
+      harness.readBoard.parseLine("foxMoveNumber 2");
+      harness.sync(
+          snapshot(moveTwo.getData().stones, moveTwo.getData().lastMove, moveTwo.getData().lastMoveColor));
+
+      assertSame(mainEnd, harness.board.getHistory().getMainEnd());
+      assertSame(
+          moveTwo,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "record-view forward navigation should land on the existing target node instead of restoring the old view.");
+      assertEquals(0, harness.leelaz.clearCount, "record-view window hit should not rebuild.");
+    }
+  }
+
+  @Test
+  void forceRebuildWithoutStartedEngineStillRebuildsBoardLocally() throws Exception {
+    Stone[] target = stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
+
+    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
+      harness.leelaz.started = false;
+      armFoxMoveNumber(harness.readBoard, 57);
+
+      harness.sync(snapshot(target, Optional.empty(), Stone.EMPTY));
+
+      assertStaticSnapshotRootWithoutMarker(harness.board, target, 57, false);
+      assertTrue(
+          harness.leelaz.sentCommands.isEmpty(),
+          "board-only rebuild should not send loadsgf when the engine is unavailable.");
+    }
+  }
+
+  @Test
+  void foxConflictAcrossMarkerPresenceJitterOnlyHoldsOnceBeforeRebuild() throws Exception {
+    ReadBoard readBoard = allocate(ReadBoard.class);
+    setField(readBoard, "conflictTracker", new SyncConflictTracker());
+
+    Stone[] firstMoveStones = stones(placement(0, 0, Stone.BLACK));
+    Stone[] secondMoveStones = stones(placement(0, 0, Stone.BLACK), placement(0, 1, Stone.WHITE));
+    BoardHistoryNode root =
+        new BoardHistoryNode(
+            BoardData.snapshot(
+                emptyStones(),
+                Optional.empty(),
+                Stone.EMPTY,
+                true,
+                zobrist(emptyStones()),
+                0,
+                new int[BOARD_AREA],
+                0,
+                0,
+                50,
+                0));
+    BoardHistoryNode firstMove =
+        root.add(
+            new BoardHistoryNode(
+                BoardData.move(
+                    firstMoveStones,
+                    new int[] {0, 0},
+                    Stone.BLACK,
+                    false,
+                    zobrist(firstMoveStones),
+                    1,
+                    new int[BOARD_AREA],
+                    0,
+                    0,
+                    50,
+                    0)));
+    BoardHistoryNode syncStartNode =
+        firstMove.add(
+            new BoardHistoryNode(
+                BoardData.move(
+                    secondMoveStones,
+                    new int[] {0, 1},
+                    Stone.WHITE,
+                    true,
+                    zobrist(secondMoveStones),
+                    2,
+                    new int[BOARD_AREA],
+                    0,
+                    0,
+                    50,
+                    0)));
+    SyncRemoteContext remoteContext =
+        SyncRemoteContext.forFoxLive(OptionalInt.of(2), "43581号", OptionalInt.of(2), false);
+    Stone[] target = stones(placement(2, 2, Stone.BLACK), placement(1, 1, Stone.WHITE));
+
+    Method shouldHold =
+        ReadBoard.class.getDeclaredMethod(
+            "shouldHoldConflictingSnapshot",
+            BoardHistoryNode.class,
+            int[].class,
+            SyncRemoteContext.class);
+    shouldHold.setAccessible(true);
+
+    boolean firstHold =
+        (boolean)
+            shouldHold.invoke(
+                readBoard,
+                syncStartNode,
+                snapshot(target, Optional.of(new int[] {1, 1}), Stone.WHITE),
+                remoteContext);
+    boolean secondHold =
+        (boolean)
+            shouldHold.invoke(
+                readBoard,
+                syncStartNode,
+                snapshot(target, Optional.empty(), Stone.EMPTY),
+                remoteContext);
+
+    assertTrue(firstHold, "the first normalized fox conflict should still HOLD once.");
+    assertFalse(secondHold, "marker presence jitter should not create a second HOLD bucket.");
+  }
+
+  @Test
   void foxRollbackPastRetainedHistoryWindowRebuildsImmediately() throws Exception {
     Stone[] rootStones = stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
     Stone[] target = stones(placement(0, 0, Stone.BLACK));
@@ -1634,6 +1889,43 @@ class ReadBoardSyncDecisionTest {
           "record-title conflict should rebuild to a new snapshot root.");
       assertTrue(rebuiltMainEnd.getData().isSnapshotNode());
       assertArrayEquals(ancestorStones, rebuiltMainEnd.getData().stones);
+    }
+  }
+
+  @Test
+  void recordViewAtEndUsesTotalMoveForAncestorRecovery() throws Exception {
+    Stone[] ancestorStones = stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
+
+    try (SyncHarness harness =
+        SyncHarness.create(
+            false,
+            rootHistory(
+                ancestorStones,
+                Optional.empty(),
+                Stone.EMPTY,
+                true,
+                333,
+                BoardNodeKind.SNAPSHOT))) {
+      BoardHistoryNode ancestorNode = harness.board.getHistory().getMainEnd();
+      HistoryPath path = buildHistory(harness.board, placement(0, 1, Stone.BLACK));
+      BoardHistoryNode mainEnd = path.nodes.get(path.nodes.size() - 1);
+
+      harness.readBoard.parseLine("syncPlatform fox");
+      harness.readBoard.parseLine("recordTotalMove 333");
+      harness.readBoard.parseLine("recordAtEnd 1");
+      harness.readBoard.parseLine("recordTitleFingerprint record-fingerprint");
+      harness.readBoard.parseLine("foxMoveNumber 333");
+      harness.sync(snapshot(ancestorStones, Optional.empty(), Stone.EMPTY));
+
+      assertSame(
+          mainEnd,
+          harness.board.getHistory().getMainEnd(),
+          "record-at-end ancestor recovery should keep later local history available.");
+      assertSame(
+          ancestorNode,
+          harness.board.getHistory().getCurrentHistoryNode(),
+          "record-at-end title metadata should recover the ancestor snapshot directly.");
+      assertEquals(0, harness.leelaz.clearCount, "record-at-end ancestor recovery should not rebuild.");
     }
   }
 

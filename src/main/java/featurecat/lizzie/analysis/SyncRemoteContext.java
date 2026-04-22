@@ -283,6 +283,9 @@ final class SyncRemoteContext {
       return liveTitleMove;
     }
     if (windowKind == WindowKind.RECORD_VIEW) {
+      if (!recordCurrentMove.isPresent() && recordAtEnd && recordTotalMove.isPresent()) {
+        return recordTotalMove;
+      }
       return recordCurrentMove;
     }
     return OptionalInt.empty();

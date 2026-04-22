@@ -12,13 +12,17 @@ class ReadBoardFoxMoveNumberParsingTest {
   @Test
   void invalidFoxMoveNumberDoesNotThrowOrClearPendingMetadata() throws Exception {
     ReadBoard readBoard = allocate(ReadBoard.class);
-    setField(readBoard, "pendingFoxMoveNumber", OptionalInt.of(18));
+    setField(
+        readBoard,
+        "pendingRemoteContext",
+        SyncRemoteContext.forFoxLive(OptionalInt.of(18), "43581号", OptionalInt.empty(), false));
 
     assertDoesNotThrow(() -> readBoard.parseLine("foxMoveNumber nope"));
 
-    OptionalInt pendingFoxMoveNumber = (OptionalInt) getField(readBoard, "pendingFoxMoveNumber");
-    assertTrue(pendingFoxMoveNumber.isPresent());
-    assertEquals(18, pendingFoxMoveNumber.getAsInt());
+    SyncRemoteContext pendingRemoteContext =
+        (SyncRemoteContext) getField(readBoard, "pendingRemoteContext");
+    assertTrue(pendingRemoteContext.foxMoveNumber.isPresent());
+    assertEquals(18, pendingRemoteContext.foxMoveNumber.getAsInt());
   }
 
   @Test
@@ -27,9 +31,25 @@ class ReadBoardFoxMoveNumberParsingTest {
 
     readBoard.parseLine("foxMoveNumber 42");
 
-    OptionalInt pendingFoxMoveNumber = (OptionalInt) getField(readBoard, "pendingFoxMoveNumber");
-    assertTrue(pendingFoxMoveNumber.isPresent());
-    assertEquals(42, pendingFoxMoveNumber.getAsInt());
+    SyncRemoteContext pendingRemoteContext =
+        (SyncRemoteContext) getField(readBoard, "pendingRemoteContext");
+    assertTrue(pendingRemoteContext.foxMoveNumber.isPresent());
+    assertEquals(42, pendingRemoteContext.foxMoveNumber.getAsInt());
+  }
+
+  @Test
+  void recordAtEndFallsBackToTotalMoveForFoxRecovery() {
+    SyncRemoteContext remoteContext =
+        SyncRemoteContext.forFoxRecord(
+            OptionalInt.of(256),
+            OptionalInt.empty(),
+            OptionalInt.of(256),
+            true,
+            "record-fingerprint",
+            false);
+
+    assertTrue(remoteContext.recoveryMoveNumber().isPresent());
+    assertEquals(256, remoteContext.recoveryMoveNumber().getAsInt());
   }
 
   @SuppressWarnings("unchecked")

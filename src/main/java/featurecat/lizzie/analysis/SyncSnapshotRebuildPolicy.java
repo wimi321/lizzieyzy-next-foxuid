@@ -37,6 +37,35 @@ final class SyncSnapshotRebuildPolicy {
         : Optional.empty();
   }
 
+  Optional<BoardHistoryNode> findMatchingNodeInMainlineWindow(
+      BoardHistoryNode currentNode,
+      BoardHistoryNode mainEnd,
+      int[] snapshotCodes,
+      SyncRemoteContext remoteContext) {
+    if (currentNode == null
+        || mainEnd == null
+        || snapshotCodes.length == 0
+        || remoteContext == null
+        || !remoteContext.supportsFoxRecovery()) {
+      return Optional.empty();
+    }
+
+    Optional<BoardHistoryNode> currentOrAncestor =
+        findMatchingHistoryNode(currentNode, snapshotCodes, remoteContext);
+    if (currentOrAncestor.isPresent()) {
+      return currentOrAncestor;
+    }
+
+    for (BoardHistoryNode cursor = nextMainlineNode(currentNode);
+        cursor != null;
+        cursor = cursor == mainEnd ? null : nextMainlineNode(cursor)) {
+      if (matchesRemoteIdentity(cursor.getData(), snapshotCodes, remoteContext)) {
+        return Optional.of(cursor);
+      }
+    }
+    return Optional.empty();
+  }
+
   Optional<BoardHistoryNode> findMatchingHistoryNode(
       BoardHistoryNode syncStartNode, int[] snapshotCodes, OptionalInt foxMoveNumber) {
     SyncRemoteContext remoteContext =
@@ -79,9 +108,7 @@ final class SyncSnapshotRebuildPolicy {
 
   String buildConflictKey(int[] snapshotCodes, SyncRemoteContext remoteContext) {
     StringBuilder builder = new StringBuilder(snapshotCodes.length + 64);
-    for (int snapshotCode : snapshotCodes) {
-      builder.append(normalizeSnapshot(snapshotCode));
-    }
+    appendStoneIdentity(builder, snapshotCodes, remoteContext);
     if (remoteContext == null) {
       return builder.toString();
     }
@@ -109,25 +136,31 @@ final class SyncSnapshotRebuildPolicy {
     return remoteContext != null && remoteContext.supportsFoxRecovery();
   }
 
+  private BoardHistoryNode nextMainlineNode(BoardHistoryNode node) {
+    return node == null ? null : node.next().filter(BoardHistoryNode::isMainTrunk).orElse(null);
+  }
+
   private boolean matchesRemoteIdentity(
       BoardData candidate, int[] snapshotCodes, SyncRemoteContext remoteContext) {
     SnapshotMarker marker = findSnapshotMarker(snapshotCodes);
     if (!marker.valid) {
       return false;
     }
-    if (!matchesStones(candidate.stones, snapshotCodes)) {
+    boolean foxRecovery = remoteContext != null && remoteContext.supportsFoxRecovery();
+    if (!matchesStones(candidate.stones, snapshotCodes, remoteContext)) {
       return false;
+    }
+    if (foxRecovery) {
+      return candidate.moveNumber == remoteContext.recoveryMoveNumber().getAsInt();
     }
     if (marker.present && !matchesMarker(candidate, marker)) {
       return false;
     }
-    if (remoteContext != null && remoteContext.supportsFoxRecovery()) {
-      return candidate.moveNumber == remoteContext.recoveryMoveNumber().getAsInt();
-    }
     return true;
   }
 
-  private boolean matchesStones(Stone[] stones, int[] snapshotCodes) {
+  private boolean matchesStones(
+      Stone[] stones, int[] snapshotCodes, SyncRemoteContext remoteContext) {
     if (stones.length != snapshotCodes.length || snapshotCodes.length % boardWidth != 0) {
       return false;
     }
@@ -136,7 +169,8 @@ final class SyncSnapshotRebuildPolicy {
       int x = snapshotIndex % boardWidth;
       int y = snapshotIndex / boardWidth;
       int stoneIndex = x * boardHeight + y;
-      if (normalizeSnapshot(snapshotCodes[snapshotIndex]) != normalizeStone(stones[stoneIndex])) {
+      if (normalizeConflictSnapshot(snapshotCodes[snapshotIndex], remoteContext)
+          != normalizeStone(stones[stoneIndex])) {
         return false;
       }
     }
@@ -189,6 +223,26 @@ final class SyncSnapshotRebuildPolicy {
       return 2;
     }
     return 0;
+  }
+
+  private void appendStoneIdentity(
+      StringBuilder builder, int[] snapshotCodes, SyncRemoteContext remoteContext) {
+    for (int snapshotCode : snapshotCodes) {
+      builder.append(normalizeConflictSnapshot(snapshotCode, remoteContext));
+    }
+  }
+
+  private int normalizeConflictSnapshot(int value, SyncRemoteContext remoteContext) {
+    if ((value == 3 || value == 4)
+        && remoteContext != null
+        && remoteContext.supportsFoxRecovery()) {
+      return inferredFoxLastMoveColor(remoteContext);
+    }
+    return normalizeSnapshot(value);
+  }
+
+  private int inferredFoxLastMoveColor(SyncRemoteContext remoteContext) {
+    return remoteContext.recoveryMoveNumber().getAsInt() % 2 == 0 ? 2 : 1;
   }
 
   private int normalizeStone(Stone stone) {

@@ -85,11 +85,47 @@ public class ReadBoard {
   private int historyOverwriteSuppressionDepth = 0;
   private volatile long syncAnalysisEpoch = 0L;
 
-  private enum CompleteSnapshotRecovery {
+  private enum CompleteSnapshotRecoveryOutcome {
     NO_CHANGE,
     SINGLE_MOVE_RECOVERY,
     HOLD,
     FORCE_REBUILD
+  }
+
+  private static final class CompleteSnapshotRecoveryDecision {
+    private final CompleteSnapshotRecoveryOutcome outcome;
+    private final BoardHistoryNode resolvedNode;
+    private final boolean shouldResumeAnalysis;
+
+    private CompleteSnapshotRecoveryDecision(
+        CompleteSnapshotRecoveryOutcome outcome,
+        BoardHistoryNode resolvedNode,
+        boolean shouldResumeAnalysis) {
+      this.outcome = outcome;
+      this.resolvedNode = resolvedNode;
+      this.shouldResumeAnalysis = shouldResumeAnalysis;
+    }
+
+    private static CompleteSnapshotRecoveryDecision noChange(
+        BoardHistoryNode resolvedNode, boolean shouldResumeAnalysis) {
+      return new CompleteSnapshotRecoveryDecision(
+          CompleteSnapshotRecoveryOutcome.NO_CHANGE, resolvedNode, shouldResumeAnalysis);
+    }
+
+    private static CompleteSnapshotRecoveryDecision singleMoveRecovery() {
+      return new CompleteSnapshotRecoveryDecision(
+          CompleteSnapshotRecoveryOutcome.SINGLE_MOVE_RECOVERY, null, false);
+    }
+
+    private static CompleteSnapshotRecoveryDecision hold() {
+      return new CompleteSnapshotRecoveryDecision(
+          CompleteSnapshotRecoveryOutcome.HOLD, null, false);
+    }
+
+    private static CompleteSnapshotRecoveryDecision forceRebuild() {
+      return new CompleteSnapshotRecoveryDecision(
+          CompleteSnapshotRecoveryOutcome.FORCE_REBUILD, null, false);
+    }
   }
 
   private SyncSnapshotRebuildPolicy rebuildPolicy() {
@@ -440,7 +476,9 @@ public class ReadBoard {
     }
     if (line.trim().equals("sync")) {
       Lizzie.frame.syncBoard = true;
-      if (!Lizzie.leelaz.isPondering()) Lizzie.leelaz.togglePonder();
+      if (isReadBoardAnalysisEngineAvailable() && !Lizzie.leelaz.isPondering()) {
+        Lizzie.leelaz.togglePonder();
+      }
     }
     if (line.startsWith("both")) {
       Lizzie.frame.bothSync = true;
@@ -791,20 +829,32 @@ public class ReadBoard {
         needReSync = true;
       }
       if (needReSync && !isSecondTime) {
-        CompleteSnapshotRecovery recovery =
+        CompleteSnapshotRecoveryDecision recovery =
             resolveCompleteSnapshotRecovery(
-                node2, syncStartStones, currentSnapshotCodes, snapshotDelta);
-        if (recovery == CompleteSnapshotRecovery.HOLD) {
+                node2, node, syncStartStones, currentSnapshotCodes, snapshotDelta);
+        if (recovery.outcome == CompleteSnapshotRecoveryOutcome.HOLD) {
           return;
         }
-        if (recovery == CompleteSnapshotRecovery.FORCE_REBUILD) {
+        if (recovery.outcome == CompleteSnapshotRecoveryOutcome.FORCE_REBUILD) {
           rebuildFromSnapshot(node2, currentSnapshotCodes, snapshotDelta, currentFoxMoveNumber);
           return;
         }
+        if (recovery.outcome == CompleteSnapshotRecoveryOutcome.NO_CHANGE
+            && recovery.resolvedNode != null) {
+          if (recovery.resolvedNode != Lizzie.board.getHistory().getCurrentHistoryNode()) {
+            moveToAnyPositionWithoutTracking(recovery.resolvedNode);
+            needRefresh = true;
+          }
+          if (recovery.shouldResumeAnalysis) {
+            rememberResolvedSnapshotNode(recovery.resolvedNode);
+            scheduleResumeAnalysisAfterSync(recovery.resolvedNode);
+          }
+        }
         needReSync = false;
-        singleMoveRecovered = recovery == CompleteSnapshotRecovery.SINGLE_MOVE_RECOVERY;
+        singleMoveRecovered =
+            recovery.outcome == CompleteSnapshotRecoveryOutcome.SINGLE_MOVE_RECOVERY;
         played = singleMoveRecovered;
-        needRefresh = played;
+        needRefresh = needRefresh || played;
       }
       if (!needReSync) {
         BoardHistoryNode currentSyncEndNode = Lizzie.board.getHistory().getMainEnd();
@@ -812,7 +862,9 @@ public class ReadBoard {
           keepViewOnRecoveredMainEnd(currentSyncEndNode);
         }
         BoardHistoryNode currentNode =
-            singleMoveRecovered ? currentSyncEndNode : resolveLocalNavigationTarget(node);
+            singleMoveRecovered
+                ? currentSyncEndNode
+                : resolveLocalNavigationTarget(Lizzie.board.getHistory().getCurrentHistoryNode());
         if (shouldRebuildForFoxMetadataChange(
             currentSyncEndNode, currentRemoteContext, currentSnapshotCodes)) {
           rebuildFromSnapshot(
@@ -951,55 +1003,52 @@ public class ReadBoard {
         .hasDiff(snapshotCodes, syncEndNode.getData().stones, false, Optional.empty());
   }
 
-  private CompleteSnapshotRecovery resolveCompleteSnapshotRecovery(
+  private CompleteSnapshotRecoveryDecision resolveCompleteSnapshotRecovery(
       BoardHistoryNode syncStartNode,
+      BoardHistoryNode currentNode,
       Stone[] syncStartStones,
       int[] snapshotCodes,
       SyncSnapshotClassifier.SnapshotDelta snapshotDelta) {
     SyncRemoteContext remoteContext = currentPendingRemoteContext();
     if (remoteContext.forceRebuild) {
-      return CompleteSnapshotRecovery.FORCE_REBUILD;
+      return CompleteSnapshotRecoveryDecision.forceRebuild();
     }
     if (shouldForceRebuildOnResumeConflict(remoteContext)) {
-      return CompleteSnapshotRecovery.FORCE_REBUILD;
+      return CompleteSnapshotRecoveryDecision.forceRebuild();
     }
 
     Optional<BoardHistoryNode> matchingNode =
-        rebuildPolicy().findMatchingHistoryNode(syncStartNode, snapshotCodes, remoteContext);
+        remoteContext != null && remoteContext.supportsFoxRecovery()
+            ? rebuildPolicy()
+                .findMatchingNodeInMainlineWindow(
+                    currentNode, syncStartNode, snapshotCodes, remoteContext)
+            : rebuildPolicy().findMatchingHistoryNode(syncStartNode, snapshotCodes, remoteContext);
     if (matchingNode.isPresent()) {
       BoardHistoryNode matchedNode = matchingNode.get();
-      boolean needsAnalysisResume = matchedNode != syncStartNode || awaitingFirstSyncFrame;
-      if (matchedNode != syncStartNode) {
-        moveToAnyPositionWithoutTracking(matchedNode);
-      }
-      if (needsAnalysisResume) {
-        rememberResolvedSnapshotNode(matchedNode);
-        scheduleResumeAnalysisAfterSync(matchedNode);
-      }
-      return CompleteSnapshotRecovery.NO_CHANGE;
+      return CompleteSnapshotRecoveryDecision.noChange(
+          matchedNode, matchedNode != currentNode || awaitingFirstSyncFrame);
     }
 
     Optional<BoardHistoryNode> adjacentMatch =
         rebuildPolicy()
             .findAdjacentMatchFromLastResolvedNode(resumeState, snapshotCodes, remoteContext);
     if (adjacentMatch.isPresent()) {
-      moveToAnyPositionWithoutTracking(adjacentMatch.get());
-      rememberResolvedSnapshotNode(adjacentMatch.get());
-      scheduleResumeAnalysisAfterSync(adjacentMatch.get());
-      return CompleteSnapshotRecovery.NO_CHANGE;
+      BoardHistoryNode matchedNode = adjacentMatch.get();
+      return CompleteSnapshotRecoveryDecision.noChange(
+          matchedNode, matchedNode != currentNode || awaitingFirstSyncFrame);
     }
 
     if (snapshotDelta.hasMarker()
         && tryApplySingleMoveRecovery(syncStartNode, syncStartStones, snapshotCodes)) {
-      return CompleteSnapshotRecovery.SINGLE_MOVE_RECOVERY;
+      return CompleteSnapshotRecoveryDecision.singleMoveRecovery();
     }
     if (shouldForceRebuildWithoutWaiting(syncStartNode, remoteContext)) {
-      return CompleteSnapshotRecovery.FORCE_REBUILD;
+      return CompleteSnapshotRecoveryDecision.forceRebuild();
     }
     if (shouldHoldConflictingSnapshot(syncStartNode, snapshotCodes, remoteContext)) {
-      return CompleteSnapshotRecovery.HOLD;
+      return CompleteSnapshotRecoveryDecision.hold();
     }
-    return CompleteSnapshotRecovery.FORCE_REBUILD;
+    return CompleteSnapshotRecoveryDecision.forceRebuild();
   }
 
   private boolean shouldForceRebuildWithoutWaiting(
@@ -1043,6 +1092,7 @@ public class ReadBoard {
       SyncSnapshotClassifier.SnapshotDelta snapshotDelta,
       OptionalInt foxMoveNumber) {
     SyncRemoteContext resolvedRemoteContext = currentPendingRemoteContext().withoutForceRebuild();
+    boolean analysisEngineAvailable = isReadBoardAnalysisEngineAvailable();
     resetActiveSyncState();
     BoardHistoryList previousHistory = Lizzie.board.getHistory();
     RootStartSetupState preservedRootStartSetup = captureRootStartSetupState();
@@ -1056,9 +1106,13 @@ public class ReadBoard {
     Lizzie.board.startStonelist = new ArrayList<>();
     setHistoryWithoutInvalidatingResumeState(rebuiltHistory);
     restoreRootStartSetupIfNoOrRootSnapshotAnchor(syncStartNode, preservedRootStartSetup);
-    syncEngineToRebuiltSnapshot(rebuiltHistory.getCurrentHistoryNode());
+    if (analysisEngineAvailable) {
+      syncEngineToRebuiltSnapshot(rebuiltHistory.getCurrentHistoryNode());
+    }
     rememberResolvedSnapshotNode(rebuiltHistory.getCurrentHistoryNode(), resolvedRemoteContext);
-    scheduleResumeAnalysisAfterSync(rebuiltHistory.getCurrentHistoryNode());
+    if (analysisEngineAvailable) {
+      scheduleResumeAnalysisAfterSync(rebuiltHistory.getCurrentHistoryNode());
+    }
     Lizzie.frame.renderVarTree(0, 0, false, false);
     Lizzie.frame.refresh();
     firstSync = false;
@@ -1430,6 +1484,9 @@ public class ReadBoard {
   }
 
   private void syncEngineToRebuiltSnapshot(BoardHistoryNode rebuiltNode) {
+    if (!isReadBoardAnalysisEngineAvailable()) {
+      return;
+    }
     BoardData data = rebuiltNode.getData();
     Lizzie.leelaz.clear();
     if (!ExactSnapshotEngineRestore.restoreIfNeeded(Lizzie.leelaz, data)) {
@@ -1711,7 +1768,7 @@ public class ReadBoard {
   }
 
   private void scheduleResumeAnalysisAfterSync(BoardHistoryNode targetNode) {
-    if (Lizzie.frame == null || targetNode == null) {
+    if (Lizzie.frame == null || targetNode == null || !isReadBoardAnalysisEngineAvailable()) {
       return;
     }
     long scheduledEpoch = ++syncAnalysisEpoch;
@@ -1726,13 +1783,18 @@ public class ReadBoard {
         || Lizzie.frame == null
         || Lizzie.board == null
         || Lizzie.config == null
-        || !Lizzie.config.readBoardPonder) {
+        || !Lizzie.config.readBoardPonder
+        || !isReadBoardAnalysisEngineAvailable()) {
       return;
     }
     if (Lizzie.board.getHistory().getCurrentHistoryNode() != targetNode) {
       return;
     }
     Lizzie.frame.ensureAnalysisResumedAfterLoad();
+  }
+
+  private boolean isReadBoardAnalysisEngineAvailable() {
+    return Lizzie.leelaz != null && Lizzie.leelaz.isStarted();
   }
 
   private static final class SnapshotHistoryState {

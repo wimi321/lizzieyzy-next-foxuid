@@ -1,5 +1,6 @@
 package featurecat.lizzie.analysis;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -180,6 +181,190 @@ public class SyncSnapshotRebuildPolicyTest {
             OptionalInt.empty());
 
     assertFalse(matchedNode.isPresent());
+  }
+
+  @Test
+  void foxLiveAncestorMatchDoesNotRequireMarkerAgreement() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    BoardHistoryNode root = createNode(emptyStones(), Optional.empty(), Stone.EMPTY);
+    BoardHistoryNode ancestorNode =
+        root.add(
+            createMoveHistoryNode(
+                stones(placement(1, 1, Stone.BLACK)), new int[] {1, 1}, Stone.BLACK, false, 1));
+    BoardHistoryNode currentNode =
+        ancestorNode.add(
+            createMoveHistoryNode(
+                stones(placement(1, 1, Stone.BLACK), placement(0, 0, Stone.WHITE)),
+                new int[] {0, 0},
+                Stone.WHITE,
+                true,
+                2));
+
+    Optional<BoardHistoryNode> matchedNode =
+        policy.findMatchingHistoryNode(
+            currentNode,
+            snapshot(ancestorNode.getData().stones, Optional.of(new int[] {1, 1}), 4),
+            SyncRemoteContext.forFoxLive(OptionalInt.of(1), "43581号", OptionalInt.of(1), false));
+
+    assertTrue(matchedNode.isPresent());
+    assertSame(ancestorNode, matchedNode.get());
+  }
+
+  @Test
+  void foxLiveConflictKeyIgnoresMarkerColorJitter() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    Stone[] stones = stones(placement(1, 1, Stone.BLACK), placement(0, 0, Stone.WHITE));
+    SyncRemoteContext remoteContext =
+        SyncRemoteContext.forFoxLive(OptionalInt.of(58), "43581号", OptionalInt.of(58), false);
+
+    String blackMarkerConflictKey =
+        policy.buildConflictKey(snapshot(stones, Optional.of(new int[] {1, 1}), 3), remoteContext);
+    String whiteMarkerConflictKey =
+        policy.buildConflictKey(snapshot(stones, Optional.of(new int[] {1, 1}), 4), remoteContext);
+
+    assertEquals(blackMarkerConflictKey, whiteMarkerConflictKey);
+  }
+
+  @Test
+  void foxLiveConflictKeyIgnoresMarkerPresenceJitter() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    Stone[] stones = stones(placement(1, 1, Stone.WHITE), placement(0, 0, Stone.BLACK));
+    SyncRemoteContext remoteContext =
+        SyncRemoteContext.forFoxLive(OptionalInt.of(58), "43581号", OptionalInt.of(58), false);
+
+    String markedConflictKey =
+        policy.buildConflictKey(snapshot(stones, Optional.of(new int[] {1, 1}), 3), remoteContext);
+    String markerlessConflictKey =
+        policy.buildConflictKey(snapshot(stones, Optional.empty(), 0), remoteContext);
+
+    assertEquals(markedConflictKey, markerlessConflictKey);
+  }
+
+  @Test
+  void foxRecordAtEndUsesTotalMoveAsRecoveryMoveNumber() {
+    SyncRemoteContext remoteContext =
+        SyncRemoteContext.forFoxRecord(
+            OptionalInt.of(333),
+            OptionalInt.empty(),
+            OptionalInt.of(333),
+            true,
+            "record-fingerprint",
+            false);
+
+    assertTrue(remoteContext.supportsFoxRecovery());
+    assertTrue(remoteContext.recoveryMoveNumber().isPresent());
+    assertEquals(333, remoteContext.recoveryMoveNumber().getAsInt());
+  }
+
+  @Test
+  void foxLiveWindowMatchFindsExistingForwardMainlineNode() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    BoardHistoryNode root = createNode(emptyStones(), Optional.empty(), Stone.EMPTY);
+    BoardHistoryNode moveOne =
+        root.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK)), new int[] {0, 0}, Stone.BLACK, false, 1));
+    BoardHistoryNode moveTwo =
+        moveOne.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE)),
+                new int[] {1, 0},
+                Stone.WHITE,
+                true,
+                2));
+    BoardHistoryNode moveThree =
+        moveTwo.add(
+            createMoveHistoryNode(
+                stones(
+                    placement(0, 0, Stone.BLACK),
+                    placement(1, 0, Stone.WHITE),
+                    placement(0, 1, Stone.BLACK)),
+                new int[] {0, 1},
+                Stone.BLACK,
+                false,
+                3));
+
+    Optional<BoardHistoryNode> matchedNode =
+        policy.findMatchingNodeInMainlineWindow(
+            moveOne,
+            moveThree,
+            snapshot(moveTwo.getData().stones, moveTwo.getData().lastMove, 4),
+            foxLiveContext(2, "43581号"));
+
+    assertTrue(matchedNode.isPresent());
+    assertSame(moveTwo, matchedNode.get());
+  }
+
+  @Test
+  void mainlineWindowMatchDoesNotUseVariationNode() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    BoardHistoryNode root = createNode(emptyStones(), Optional.empty(), Stone.EMPTY);
+    BoardHistoryNode moveOne =
+        root.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK)), new int[] {0, 0}, Stone.BLACK, false, 1));
+    BoardHistoryNode mainlineMoveTwo =
+        moveOne.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE)),
+                new int[] {1, 0},
+                Stone.WHITE,
+                true,
+                2));
+    BoardHistoryNode variationMoveTwo =
+        createMoveHistoryNode(
+            stones(placement(0, 0, Stone.BLACK), placement(2, 2, Stone.WHITE)),
+            new int[] {2, 2},
+            Stone.WHITE,
+            true,
+            2);
+    moveOne.variations.add(variationMoveTwo);
+
+    Optional<BoardHistoryNode> matchedNode =
+        policy.findMatchingNodeInMainlineWindow(
+            moveOne,
+            mainlineMoveTwo,
+            snapshot(
+                variationMoveTwo.getData().stones,
+                variationMoveTwo.getData().lastMove,
+                4),
+            foxLiveContext(2, "43581号"));
+
+    assertFalse(matchedNode.isPresent());
+  }
+
+  @Test
+  void foxRecordWindowMatchFindsExistingForwardMainlineNode() {
+    SyncSnapshotRebuildPolicy policy = new SyncSnapshotRebuildPolicy(BOARD_WIDTH);
+    BoardHistoryNode root = createNode(emptyStones(), Optional.empty(), Stone.EMPTY);
+    BoardHistoryNode moveOne =
+        root.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK)), new int[] {0, 0}, Stone.BLACK, false, 1));
+    BoardHistoryNode moveTwo =
+        moveOne.add(
+            createMoveHistoryNode(
+                stones(placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE)),
+                new int[] {1, 0},
+                Stone.WHITE,
+                true,
+                2));
+
+    Optional<BoardHistoryNode> matchedNode =
+        policy.findMatchingNodeInMainlineWindow(
+            moveOne,
+            moveTwo,
+            snapshot(moveTwo.getData().stones, moveTwo.getData().lastMove, 4),
+            SyncRemoteContext.forFoxRecord(
+                OptionalInt.of(2),
+                OptionalInt.of(2),
+                OptionalInt.of(333),
+                false,
+                "record-fingerprint",
+                false));
+
+    assertTrue(matchedNode.isPresent());
+    assertSame(moveTwo, matchedNode.get());
   }
 
   @Test
