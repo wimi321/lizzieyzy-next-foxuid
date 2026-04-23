@@ -294,7 +294,7 @@ public class WebBoardDataCollectorTest {
     Stone[] stones = new Stone[361];
     Arrays.fill(stones, Stone.EMPTY);
     BoardData d =
-        new BoardData(
+        BoardData.snapshot(
             stones,
             Optional.empty(),
             Stone.EMPTY,
