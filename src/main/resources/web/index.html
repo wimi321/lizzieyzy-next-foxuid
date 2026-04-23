@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LizzieYzy Web Viewer</title>
+  <link rel="stylesheet" href="board.css">
+</head>
+<body>
+  <div id="app">
+    <div id="board-container">
+      <canvas id="board-canvas"></canvas>
+    </div>
+    <div id="info-panel">
+      <div id="status-bar">
+        <span id="move-number">-</span>
+        <span id="current-player">-</span>
+        <span id="winrate">-</span>
+        <span id="score-mean">-</span>
+        <span id="playouts">-</span>
+      </div>
+      <div id="controls">
+        <button id="toggle-heatmap" style="display:none">形势判断</button>
+        <button id="toggle-perspective">切换白方视角</button>
+        <select id="coord-style">
+          <option value="off">坐标: 关</option>
+          <option value="standard">标准 (跳I)</option>
+          <option value="withI">含 I</option>
+          <option value="fox">野狐风格</option>
+        </select>
+      </div>
+      <div id="candidate-info-controls">
+        <span class="ci-label">选点显示:</span>
+        <label><input type="checkbox" id="ci-winrate" checked> 胜率</label>
+        <label><input type="checkbox" id="ci-playouts" checked> 计算量</label>
+        <label><input type="checkbox" id="ci-score" checked> 目差</label>
+      </div>
+      <div id="chart-label-winrate" class="chart-label">胜率曲线（黑方视角）</div>
+      <canvas id="winrate-chart"></canvas>
+      <div id="chart-label-score" class="chart-label">目差曲线（黑方视角）</div>
+      <canvas id="score-chart"></canvas>
+      <div class="chart-label">问题手</div>
+      <div id="blunder-list"></div>
+      <div id="chart-tooltip"></div>
+    </div>
+  </div>
+  <div id="connection-overlay" style="display:none">
+    <div id="connection-message">连接断开，正在重连...</div>
+  </div>
+  <script>window.WS_PORT = __WS_PORT__;</script>
+  <script src="board.js"></script>
+</body>
+</html>

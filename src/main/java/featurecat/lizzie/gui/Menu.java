@@ -4069,6 +4069,71 @@ public class Menu extends JMenuBar {
         });
     live.addSeparator();
 
+    final JFontMenu webBoardMenu = new JFontMenu(resourceBundle.getString("Menu.webBoard"));
+    live.add(webBoardMenu);
+
+    final JFontMenuItem webBoardToggle =
+        new JFontMenuItem(resourceBundle.getString("Menu.webBoardStart"));
+    webBoardMenu.add(webBoardToggle);
+    webBoardToggle.addActionListener(
+        e -> {
+          if (Lizzie.webBoardManager.isRunning()) {
+            Lizzie.webBoardManager.stop();
+            webBoardToggle.setText(resourceBundle.getString("Menu.webBoardStart"));
+            Lizzie.frame.webBoardSuffix = "";
+            Lizzie.frame.updateTitle();
+          } else {
+            webBoardToggle.setEnabled(false);
+            new Thread(
+                    () -> {
+                      boolean ok = Lizzie.webBoardManager.start();
+                      javax.swing.SwingUtilities.invokeLater(
+                          () -> {
+                            webBoardToggle.setEnabled(true);
+                            if (ok) {
+                              webBoardToggle.setText(resourceBundle.getString("Menu.webBoardStop"));
+                              Lizzie.frame.webBoardSuffix =
+                                  " | Web: " + Lizzie.webBoardManager.getAccessUrl();
+                              Lizzie.frame.updateTitle();
+                            }
+                          });
+                    },
+                    "WebBoardStart")
+                .start();
+          }
+        });
+
+    final JFontMenuItem webBoardCopyUrl =
+        new JFontMenuItem(resourceBundle.getString("Menu.webBoardCopyUrl"));
+    webBoardMenu.add(webBoardCopyUrl);
+
+    webBoardMenu.addMenuListener(
+        new javax.swing.event.MenuListener() {
+          public void menuSelected(javax.swing.event.MenuEvent e) {
+            webBoardToggle.setText(
+                resourceBundle.getString(
+                    Lizzie.webBoardManager.isRunning()
+                        ? "Menu.webBoardStop"
+                        : "Menu.webBoardStart"));
+          }
+
+          public void menuDeselected(javax.swing.event.MenuEvent e) {}
+
+          public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
+
+    webBoardCopyUrl.addActionListener(
+        e -> {
+          if (Lizzie.webBoardManager.isRunning()) {
+            String url = Lizzie.webBoardManager.getAccessUrl();
+            java.awt.datatransfer.StringSelection sel =
+                new java.awt.datatransfer.StringSelection(url);
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, null);
+          }
+        });
+
+    live.addSeparator();
+
     final JFontCheckBoxMenuItem EnableEnterYikeGame =
         new JFontCheckBoxMenuItem(
             resourceBundle.getString("Menu.EnableEnterYikeGame")); // //允许弈客直播/大厅进入对居室
