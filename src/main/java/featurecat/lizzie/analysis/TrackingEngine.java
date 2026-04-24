@@ -31,6 +31,8 @@ public class TrackingEngine {
   private volatile List<MoveData> currentTrackedMoves = new ArrayList<>();
   private final AtomicInteger requestId = new AtomicInteger(0);
   private volatile TrackingConsolePane consolePane;
+  private final java.util.Map<Integer, java.util.Set<String>> pendingTrackedCoords =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   public void startEngine(String engineCommand) {
     String analysisCommand = toAnalysisCommand(engineCommand);
@@ -69,6 +71,11 @@ public class TrackingEngine {
       cleanupPartialStart();
       isLoaded = false;
       updateConsoleTitle(getStatusString("statusFailed"));
+      return;
+    }
+    if (Lizzie.frame != null && Lizzie.frame.trackingEngine != this) {
+      cleanupPartialStart();
+      isLoaded = false;
       return;
     }
     isLoaded = true;
@@ -167,28 +174,44 @@ public class TrackingEngine {
       JSONArray moveInfos = result.getJSONArray("moveInfos");
       boolean isBlack = board.getHistory().isBlacksTurn();
       List<MoveData> moves = Utils.getBestMovesFromJsonArray(moveInfos, true, isBlack);
+      java.util.Set<String> allowed = pendingTrackedCoords.get(expectedId);
+      if (allowed != null && !allowed.isEmpty()) {
+        List<MoveData> filtered = new ArrayList<>(moves.size());
+        for (MoveData mv : moves) {
+          if (mv.coordinate != null && allowed.contains(mv.coordinate)) {
+            filtered.add(mv);
+          }
+        }
+        moves = filtered;
+      }
       if (requestId.get() != expectedId) return;
+      if (!pendingTrackedCoords.containsKey(expectedId)) return;
       currentTrackedMoves = moves;
-      frame.refresh(1);
+      if (Lizzie.frame != null) frame.refresh(1);
     } catch (Exception e) {
       e.printStackTrace();
     }
   }
 
   public void sendTrackingRequest(BoardHistoryNode node, Set<String> trackedCoords) {
-    if (!isLoaded || trackedCoords.isEmpty() || Lizzie.board == null) return;
+    if (!isLoaded || trackedCoords.isEmpty() || Lizzie.board == null) {
+      clearTrackedMoves();
+      return;
+    }
     boolean isBlack = Lizzie.board.getHistory().isBlacksTurn();
+    int currentId = requestId.incrementAndGet();
+    java.util.Set<String> snapshot = new java.util.LinkedHashSet<>(trackedCoords);
+    pendingTrackedCoords.keySet().removeIf(k -> k < currentId);
+    pendingTrackedCoords.put(currentId, snapshot);
+    int totalVisits =
+        Math.max(
+            Lizzie.config.trackingEngineMaxVisits,
+            Lizzie.config.trackingEngineMaxVisits * snapshot.size());
     JSONObject request =
         AnalysisRequestBuilder.buildRequest(
-            "track-" + requestId.incrementAndGet(),
-            node,
-            Lizzie.config.trackingEngineMaxVisits,
-            false,
-            false,
-            false);
+            "track-" + currentId, node, totalVisits, false, false, false);
     request.put("reportDuringSearchEvery", 0.1);
-    request.put(
-        "allowMoves", buildAllowMoves(new java.util.LinkedHashSet<>(trackedCoords), isBlack));
+    request.put("allowMoves", buildAllowMoves(snapshot, isBlack));
     sendCommand(request.toString());
   }
 
@@ -219,7 +242,9 @@ public class TrackingEngine {
   }
 
   static String toAnalysisCommand(String cmd) {
-    String result = cmd.replaceFirst("(?i)\\bgtp\\b", "analysis");
+    // Only replace the standalone 'gtp' subcommand token (preceded by whitespace,
+    // followed by whitespace or end-of-string). Avoids touching paths that contain "gtp".
+    String result = cmd.replaceFirst("(?i)(\\s)gtp(\\s|$)", "$1analysis$2");
     String analysisDefaults = "numAnalysisThreads=1,nnMaxBatchSize=8";
     if (!result.toLowerCase().contains("-override-config")) {
       result += " -override-config " + analysisDefaults;
@@ -245,6 +270,7 @@ public class TrackingEngine {
   public void clearTrackedMoves() {
     requestId.incrementAndGet();
     currentTrackedMoves = new ArrayList<>();
+    pendingTrackedCoords.clear();
   }
 
   public void setConsolePane(TrackingConsolePane pane) {
@@ -266,6 +292,13 @@ public class TrackingEngine {
       if (inputStream != null) inputStream.close();
     } catch (IOException ignored) {
     }
+    if (executor != null) {
+      try {
+        executor.awaitTermination(2, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
     if (process != null && process.isAlive()) {
       process.destroyForcibly();
       try {
@@ -274,5 +307,6 @@ public class TrackingEngine {
         Thread.currentThread().interrupt();
       }
     }
+    pendingTrackedCoords.clear();
   }
 }

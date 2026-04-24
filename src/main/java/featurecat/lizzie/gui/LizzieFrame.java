@@ -11695,9 +11695,12 @@ public class LizzieFrame extends JFrame {
     boolean threadStarted = false;
     try {
       if (trackingEngine != null && trackingEngine.isLoaded()) return;
-      if (trackingEngine != null) trackingEngine.shutdown();
+      TrackingEngine previous = trackingEngine;
       TrackingEngine engine = new TrackingEngine();
-      trackingEngine = engine;
+      synchronized (trackedCoords) {
+        trackingEngine = engine;
+        lastTrackingPonderNode = null;
+      }
       SwingUtilities.invokeLater(
           () -> {
             if (trackingConsolePane == null || !trackingConsolePane.isDisplayable()) {
@@ -11712,6 +11715,13 @@ public class LizzieFrame extends JFrame {
       new Thread(
               () -> {
                 try {
+                  if (previous != null) {
+                    try {
+                      previous.shutdown();
+                    } catch (Throwable t) {
+                      t.printStackTrace();
+                    }
+                  }
                   if (engine != trackingEngine) return;
                   engine.startEngine(engineCmd);
                 } finally {
@@ -11757,8 +11767,12 @@ public class LizzieFrame extends JFrame {
   }
 
   public void destroyTrackingEngine() {
-    TrackingEngine te = trackingEngine;
-    trackingEngine = null;
+    TrackingEngine te;
+    synchronized (trackedCoords) {
+      te = trackingEngine;
+      trackingEngine = null;
+      lastTrackingPonderNode = null;
+    }
     if (te != null) {
       new Thread(
               () -> {
@@ -11773,8 +11787,12 @@ public class LizzieFrame extends JFrame {
   }
 
   public void destroyTrackingEngineSync() {
-    TrackingEngine te = trackingEngine;
-    trackingEngine = null;
+    TrackingEngine te;
+    synchronized (trackedCoords) {
+      te = trackingEngine;
+      trackingEngine = null;
+      lastTrackingPonderNode = null;
+    }
     if (te != null) {
       try {
         te.shutdown();
@@ -11797,20 +11815,67 @@ public class LizzieFrame extends JFrame {
   }
 
   public void clearTrackedCoords() {
-    trackedCoords.clear();
-    isKeepTracking = false;
+    synchronized (trackedCoords) {
+      trackedCoords.clear();
+      isKeepTracking = false;
+      lastTrackingPonderNode = null;
+    }
     TrackingEngine te = trackingEngine;
     if (te != null) te.clearTrackedMoves();
     refresh();
   }
 
   public void triggerTrackingAnalysis() {
-    TrackingEngine te = trackingEngine;
-    if (te == null || !te.isLoaded()) return;
-    if (trackedCoords.isEmpty()) return;
     if (Lizzie.board == null) return;
     BoardHistoryNode node = Lizzie.board.getHistory().getCurrentHistoryNode();
-    te.sendTrackingRequest(node, trackedCoords);
+    TrackingEngine teSnapshot;
+    Set<String> snapshot;
+    synchronized (trackedCoords) {
+      lastTrackingPonderNode = node;
+      teSnapshot = trackingEngine;
+      if (teSnapshot == null || !teSnapshot.isLoaded()) return;
+      if (trackedCoords.isEmpty()) return;
+      snapshot = new java.util.LinkedHashSet<>(trackedCoords);
+    }
+    teSnapshot.sendTrackingRequest(node, snapshot);
+  }
+
+  private volatile BoardHistoryNode lastTrackingPonderNode;
+
+  public void onMainEnginePonder() {
+    if (Lizzie.board == null) return;
+    BoardHistoryNode currentNode = Lizzie.board.getHistory().getCurrentHistoryNode();
+    boolean shouldTrigger = false;
+    boolean shouldClearAndRefresh = false;
+    Set<String> snapshot = null;
+    TrackingEngine teSnapshot = null;
+    synchronized (trackedCoords) {
+      if (trackedCoords.isEmpty()) {
+        lastTrackingPonderNode = null;
+        return;
+      }
+      if (currentNode == lastTrackingPonderNode) return;
+      lastTrackingPonderNode = currentNode;
+      if (isKeepTracking) {
+        teSnapshot = trackingEngine;
+        if (teSnapshot == null || !teSnapshot.isLoaded()) {
+          lastTrackingPonderNode = null;
+          return;
+        }
+        snapshot = new java.util.LinkedHashSet<>(trackedCoords);
+        shouldTrigger = true;
+      } else {
+        trackedCoords.clear();
+        teSnapshot = trackingEngine;
+        shouldClearAndRefresh = true;
+      }
+    }
+    if (shouldTrigger) {
+      teSnapshot.sendTrackingRequest(currentNode, snapshot);
+    } else if (shouldClearAndRefresh) {
+      if (teSnapshot != null) teSnapshot.clearTrackedMoves();
+      refresh();
+    }
   }
 
   public void flashAnalyzeGameBatch(int firstMove, int lastMove, boolean isAllBranches) {

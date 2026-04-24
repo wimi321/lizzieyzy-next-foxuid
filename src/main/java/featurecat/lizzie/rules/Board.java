@@ -1901,6 +1901,7 @@ public class Board {
       }
       history.addOrGoto(newState, newBranch);
       updateIsBest();
+      if (Lizzie.frame != null) Lizzie.frame.onMainEnginePonder();
       if (needGenmove) Lizzie.leelaz.genmove((color.isWhite() ? "B" : "W"));
       //   modifyEnd(false);
       if (Lizzie.config.playSound) Utils.playVoiceFile();

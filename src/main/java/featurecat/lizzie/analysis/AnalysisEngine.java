@@ -468,7 +468,7 @@ public class AnalysisEngine {
     return withinStart && withinEnd;
   }
 
-  private static BoardHistoryNode resolveInitialStateAnchor(BoardHistoryNode snapshotAnchor) {
+  static BoardHistoryNode resolveInitialStateAnchor(BoardHistoryNode snapshotAnchor) {
     if (snapshotAnchor == null) {
       return null;
     }
@@ -487,7 +487,7 @@ public class AnalysisEngine {
     return null;
   }
 
-  private static ArrayList<String[]> collectInitialStones(BoardHistoryNode initialStateAnchor) {
+  static ArrayList<String[]> collectInitialStones(BoardHistoryNode initialStateAnchor) {
     if (initialStateAnchor != null) {
       return collectSnapshotAnchorStones(initialStateAnchor.getData().stones);
     }
@@ -522,7 +522,7 @@ public class AnalysisEngine {
     return initialStoneList;
   }
 
-  private static String collectInitialPlayer(BoardHistoryNode initialStateAnchor) {
+  static String collectInitialPlayer(BoardHistoryNode initialStateAnchor) {
     if (initialStateAnchor != null) {
       return initialStateAnchor.getData().blackToPlay ? "B" : "W";
     }
@@ -533,7 +533,7 @@ public class AnalysisEngine {
     return null;
   }
 
-  private static BoardHistoryNode findSnapshotAnchor(BoardHistoryNode analyzeNode) {
+  static BoardHistoryNode findSnapshotAnchor(BoardHistoryNode analyzeNode) {
     BoardHistoryNode current = analyzeNode;
     while (true) {
       if (isSnapshotAnchor(current)) {
@@ -572,7 +572,7 @@ public class AnalysisEngine {
     return collectHistoryActions(analyzeNode, findSnapshotAnchor(analyzeNode));
   }
 
-  private static ArrayList<String[]> collectHistoryActions(
+  static ArrayList<String[]> collectHistoryActions(
       BoardHistoryNode analyzeNode, BoardHistoryNode snapshotAnchor) {
     ArrayList<String[]> reversedMoves = new ArrayList<String[]>();
     BoardHistoryNode node = analyzeNode;

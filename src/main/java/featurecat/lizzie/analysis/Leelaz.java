@@ -3980,6 +3980,9 @@ public class Leelaz {
       leela0110Ponder(true);
       return;
     }
+    if (this == Lizzie.leelaz && Lizzie.frame != null) {
+      Lizzie.frame.onMainEnginePonder();
+    }
     if (Lizzie.frame.isKeepingForce || LizzieFrame.isKeepForcing) {
       if (LizzieFrame.allowcoords != "") {
         Lizzie.leelaz.analyzeAvoid(

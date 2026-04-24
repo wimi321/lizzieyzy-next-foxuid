@@ -2063,8 +2063,12 @@ public class EngineManager {
       else Lizzie.leelaz2 = newEng;
       if (isMain && Lizzie.frame != null) {
         if (newEng.isKatago) {
-          if (!Lizzie.frame.trackedCoords.isEmpty()) {
-            Lizzie.frame.destroyTrackingEngineSync();
+          Lizzie.frame.destroyTrackingEngineSync();
+          boolean hasTracked;
+          synchronized (Lizzie.frame.trackedCoords) {
+            hasTracked = !Lizzie.frame.trackedCoords.isEmpty();
+          }
+          if (hasTracked) {
             Lizzie.frame.ensureTrackingEngine();
           }
         } else {
