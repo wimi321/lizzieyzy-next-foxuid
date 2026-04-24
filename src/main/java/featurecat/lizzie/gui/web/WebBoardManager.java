@@ -66,6 +66,7 @@ public class WebBoardManager {
     String ip = getLanIp();
     accessUrl = "http://" + ip + ":" + actualHttpPort;
     running = true;
+    collector.onBoardStateChanged();
     return true;
   }
 

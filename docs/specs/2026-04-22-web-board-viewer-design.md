@@ -87,6 +87,10 @@ WebSocket 端口在启动前通过 `ServerSocket` 预检可用性（`WebSocketSe
 
 `maxConnections` 表示允许的最大同时连接数。检查时机在 `onOpen` 回调中，此时新连接已计入 `getConnections()` 集合，因此使用 `size() > maxConnections` 而非 `>=`。
 
+### 首屏盘面推送
+
+`WebBoardManager.start()` 在服务就绪后必须立即触发一次 `WebBoardDataCollector.onBoardStateChanged()`，将当前盘面写入 `WebBoardServer.lastFullState`。这样首个浏览器连接的 `onOpen` 回放即可立即显示当前棋局，而不必等待下一次棋盘变化。
+
 ### HTTP 请求路径处理
 
 请求路径在安全检查前先经过：URL 解码 → strip query string (`?` 后部分) → strip fragment (`#` 后部分) → 路径遍历检查（`..` 和 `\\`）。
