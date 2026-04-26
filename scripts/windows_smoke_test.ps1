@@ -309,6 +309,30 @@ function Assert-PackagedJavaRuntimeLauncher {
     }
 }
 
+function Assert-NoForcedJavaUiScale {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppExe
+    )
+
+    $appDir = Split-Path -Parent $AppExe
+    $cfgPath = Join-Path (Join-Path $appDir "app") ("{0}.cfg" -f [System.IO.Path]::GetFileNameWithoutExtension($AppExe))
+    if (-not (Test-Path -LiteralPath $cfgPath)) {
+        throw "Packaged app cfg file was not found: $cfgPath"
+    }
+
+    $content = Get-Content -LiteralPath $cfgPath -Raw
+    $blockedOptions = @(
+        "sun.java2d.uiScale=1.0",
+        "sun.java2d.uiScale.enabled=false"
+    )
+    foreach ($option in $blockedOptions) {
+        if ($content -match [regex]::Escape($option)) {
+            throw "Packaged app cfg must not force Java UI scaling with '$option': $cfgPath"
+        }
+    }
+}
+
 function Add-AppJavaOption {
     param(
         [Parameter(Mandatory = $true)]
@@ -392,6 +416,8 @@ if (-not $PreserveConfig) {
 
 Get-ChildItem -Path $consoleLogs -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 Get-ChildItem -Path $errorLogs -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+Assert-NoForcedJavaUiScale -AppExe $AppExe
 
 if ($ProbeBoardSync) {
     Assert-PackagedJavaRuntimeLauncher -AppExe $AppExe

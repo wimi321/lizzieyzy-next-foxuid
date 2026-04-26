@@ -1926,7 +1926,7 @@ public class BoardRenderer {
 
         // Allow to display only last move number
 
-        if (!showAllinBranch) {
+        if (!showAllinBranch && !branchOpt.isPresent()) {
           if (!Lizzie.frame.isTrying && !EngineManager.isEngineGame) {
             if ((Lizzie.config.allowMoveNumber > -1
                 && lastMoveNumber - moveNumberList[here] >= Lizzie.config.allowMoveNumber)) {

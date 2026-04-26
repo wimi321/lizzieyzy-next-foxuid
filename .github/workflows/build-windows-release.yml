@@ -146,6 +146,16 @@ jobs:
           test -f "dist/windows/app-image-without.engine/LizzieYzy Next/app/readboard/readboard.exe"
           test -f "dist/windows/app-image-without.engine/LizzieYzy Next/runtime/bin/java.exe"
           test -f "dist/windows/app-image-with-katago/LizzieYzy Next/runtime/bin/java.exe"
+          for app_cfg in \
+            "dist/windows/app-image-with-katago/LizzieYzy Next/app/LizzieYzy Next.cfg" \
+            "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/LizzieYzy Next OpenCL.cfg" \
+            "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/LizzieYzy Next NVIDIA.cfg" \
+            "dist/windows/app-image-without.engine/LizzieYzy Next/app/LizzieYzy Next.cfg"; do
+            if grep -qE 'sun\.java2d\.uiScale=1\.0|sun\.java2d\.uiScale\.enabled=false' "$app_cfg"; then
+              echo "Windows package must not force Java UI scaling: $app_cfg"
+              exit 1
+            fi
+          done
           for readboard_exe in \
             "dist/windows/input-with-katago/readboard/readboard.exe" \
             "dist/windows/input-opencl/readboard/readboard.exe" \

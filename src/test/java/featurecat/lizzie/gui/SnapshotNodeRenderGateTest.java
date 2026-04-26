@@ -60,10 +60,12 @@ class SnapshotNodeRenderGateTest {
 
       BoardRenderer mainBoard = new BoardRenderer(false);
       mainBoard.branchOpt = Optional.of(branch);
+      mainBoard.setDisplayedBranchLength(branch.length);
       configureOverlayRenderer(mainBoard);
 
       SubBoardRenderer subBoard = new SubBoardRenderer(false);
       subBoard.branchOpt = Optional.of(branch);
+      subBoard.setDisplayedBranchLength(branch.length);
       configureOverlayRenderer(subBoard);
 
       assertFalse(
@@ -72,6 +74,35 @@ class SnapshotNodeRenderGateTest {
       assertFalse(
           hasVisiblePaint(renderOverlay(subBoard, SubBoardRenderer.class, "drawMoveNumbers")),
           "sub board branch previews should treat SNAPSHOT as board-only state.");
+    } finally {
+      env.close();
+    }
+  }
+
+  @Test
+  void branchPreviewMoveNumbersRenderWhenMainMoveNumbersAreDisabled() throws Exception {
+    TestEnvironment env = TestEnvironment.open();
+    try {
+      Board board = boardWithRoot(BoardData.empty(BOARD_SIZE, BOARD_SIZE));
+      Lizzie.board = board;
+      Branch branch = branchWith(branchLinePreview());
+
+      BoardRenderer mainBoard = new BoardRenderer(false);
+      mainBoard.branchOpt = Optional.of(branch);
+      mainBoard.setDisplayedBranchLength(branch.length);
+      configureOverlayRenderer(mainBoard);
+
+      SubBoardRenderer subBoard = new SubBoardRenderer(false);
+      subBoard.branchOpt = Optional.of(branch);
+      subBoard.setDisplayedBranchLength(branch.length);
+      configureOverlayRenderer(subBoard);
+
+      assertTrue(
+          hasVisiblePaint(renderOverlay(mainBoard, BoardRenderer.class, "drawMoveNumbers")),
+          "main board candidate preview should still draw variation order numbers.");
+      assertTrue(
+          hasVisiblePaint(renderOverlay(subBoard, SubBoardRenderer.class, "drawMoveNumbers")),
+          "sub board candidate preview should still draw variation order numbers.");
     } finally {
       env.close();
     }
@@ -162,6 +193,27 @@ class SnapshotNodeRenderGateTest {
     int[] moveNumberList = new int[BOARD_AREA];
     moveNumberList[Board.getIndex(x, y)] = moveNumber;
     return moveNumberList;
+  }
+
+  private static BoardData branchLinePreview() {
+    Stone[] stones = emptyStones();
+    stones[Board.getIndex(0, 0)] = Stone.BLACK;
+    stones[Board.getIndex(1, 0)] = Stone.WHITE;
+    int[] moveNumberList = new int[BOARD_AREA];
+    moveNumberList[Board.getIndex(0, 0)] = 1;
+    moveNumberList[Board.getIndex(1, 0)] = 2;
+    return BoardData.move(
+        stones,
+        new int[] {1, 0},
+        Stone.WHITE,
+        true,
+        new Zobrist(),
+        2,
+        moveNumberList,
+        0,
+        0,
+        50,
+        0);
   }
 
   private static Board boardWithRoot(BoardData root) throws Exception {

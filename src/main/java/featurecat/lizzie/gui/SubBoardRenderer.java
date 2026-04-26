@@ -1072,12 +1072,6 @@ public class SubBoardRenderer {
         int stoneY = y + scaledMarginHeight + squareHeight * j;
         int here = Board.getIndex(i, j);
 
-        // Allow to display only last move number
-        if (Lizzie.config.allowMoveNumber > -1
-            && lastMoveNumber - moveNumberList[here] >= Lizzie.config.allowMoveNumber) {
-          continue;
-        }
-
         Stone stoneHere = branchOpt.map(b -> b.data.stones[here]).orElse(board.getStones()[here]);
 
         // don't write the move number if either: the move number is 0, or there will
