@@ -7,7 +7,7 @@ import java.awt.geom.*;
 import javax.swing.*;
 
 public class SidebarHeaderPanel extends JPanel {
-  private SidebarPanel parentPanel;
+  private final SidebarPanel parentPanel;
   private ProblemListSnapshot currentSnapshot;
 
   private static final Color TEXT_NORMAL = new Color(255, 255, 255, 128);
@@ -15,6 +15,26 @@ public class SidebarHeaderPanel extends JPanel {
   private static final Color BG_TRACK = new Color(255, 255, 255, 15);
   private static final Color BG_THUMB = new Color(255, 255, 255, 40);
   private static final Color PILL_BG = new Color(255, 255, 255, 20);
+  private static final int NO_SEGMENT = -1;
+  private static final int FIRST_SEGMENT = 0;
+  private static final int SECOND_SEGMENT = 1;
+  private static final int CONTROL_X = 10;
+  private static final int APPLE_PRIMARY_Y = 14;
+  private static final int APPLE_PRIMARY_WIDTH = 132;
+  private static final int APPLE_PRIMARY_HEIGHT = 30;
+  private static final int APPLE_SIDE_Y = 52;
+  private static final int APPLE_SIDE_WIDTH = 112;
+  private static final int APPLE_SIDE_HEIGHT = 24;
+  private static final int CLASSIC_PRIMARY_Y = 12;
+  private static final int CLASSIC_SIDE_Y = 44;
+  private static final int CLASSIC_ROW_HEIGHT = 32;
+  private static final int CLASSIC_PRIMARY_BASELINE = 25;
+  private static final int CLASSIC_SIDE_BASELINE = 55;
+  private static final int CLASSIC_PRIMARY_LEGACY_WIDTH = 132;
+  private static final int CLASSIC_SIDE_LEGACY_WIDTH = 112;
+  private static final int CLASSIC_SEPARATOR_OFFSET = 30;
+  private static final int CLASSIC_SECOND_LABEL_OFFSET = 45;
+  private static final int CLASSIC_HIT_PADDING_X = 8;
 
   public SidebarHeaderPanel(SidebarPanel parentPanel) {
     this.parentPanel = parentPanel;
@@ -25,25 +45,28 @@ public class SidebarHeaderPanel extends JPanel {
         new MouseAdapter() {
           @Override
           public void mouseClicked(MouseEvent e) {
-            int x = e.getX();
-            int y = e.getY();
+            Point point = e.getPoint();
+            FontMetrics metrics = getFontMetrics(headerFont());
 
-            // Click on [ 评论 | 问题手 ]
-            if (y >= 12 && y <= 44 && x >= 10 && x <= 142) {
-              if (x < 76) {
-                parentPanel.switchTo("COMMENTS");
-              } else {
-                parentPanel.switchTo("BLUNDERS");
-              }
+            int primarySegment = primarySegmentIndexAt(point, Lizzie.config.isAppleStyle, metrics);
+            if (primarySegment == FIRST_SEGMENT) {
+              parentPanel.switchTo("COMMENTS");
+              return;
+            }
+            if (primarySegment == SECOND_SEGMENT) {
+              parentPanel.switchTo("BLUNDERS");
+              return;
             }
 
-            // Click on [ 黑 | 白 ]
-            if (y >= 44 && y <= 76 && x >= 10 && x <= 122) {
-              if (x < 66) {
-                Lizzie.frame.setProblemListSideFilter(ProblemListSideFilter.BLACK);
-              } else {
-                Lizzie.frame.setProblemListSideFilter(ProblemListSideFilter.WHITE);
-              }
+            if (!Lizzie.config.isShowingBlunderTabel) {
+              return;
+            }
+
+            int sideSegment = sideSegmentIndexAt(point, Lizzie.config.isAppleStyle, metrics);
+            if (sideSegment == FIRST_SEGMENT) {
+              Lizzie.frame.setProblemListSideFilter(ProblemListSideFilter.BLACK);
+            } else if (sideSegment == SECOND_SEGMENT) {
+              Lizzie.frame.setProblemListSideFilter(ProblemListSideFilter.WHITE);
             }
           }
         });
@@ -64,21 +87,21 @@ public class SidebarHeaderPanel extends JPanel {
     ProblemListSideFilter sideFilter = Lizzie.frame.getProblemListSideFilter();
     if (sideFilter == ProblemListSideFilter.ALL) sideFilter = ProblemListSideFilter.BLACK;
 
-    g2.setFont(new Font(Lizzie.config.uiFontName, Font.BOLD, 12));
+    g2.setFont(headerFont());
     FontMetrics fm = g2.getFontMetrics();
 
     if (!Lizzie.config.isAppleStyle) {
       g2.setColor(new Color(36, 38, 42));
       g2.fillRect(0, 0, getWidth(), getHeight());
 
-      int x = 10;
-      int y = 25;
+      int x = CONTROL_X;
+      int y = CLASSIC_PRIMARY_BASELINE;
       g2.setColor(showBlunders ? TEXT_NORMAL : TEXT_SELECTED);
       g2.drawString("评论", x, y);
       g2.setColor(TEXT_NORMAL);
-      g2.drawString("｜", x + 30, y);
+      g2.drawString("｜", x + CLASSIC_SEPARATOR_OFFSET, y);
       g2.setColor(showBlunders ? TEXT_SELECTED : TEXT_NORMAL);
-      g2.drawString("问题手", x + 45, y);
+      g2.drawString("问题手", x + CLASSIC_SECOND_LABEL_OFFSET, y);
 
       if (currentSnapshot != null) {
         String pillText = currentSnapshot.analysisRunning ? "..." : "";
@@ -88,13 +111,13 @@ public class SidebarHeaderPanel extends JPanel {
       }
 
       if (showBlunders) {
-        y = 55;
+        y = CLASSIC_SIDE_BASELINE;
         g2.setColor(sideFilter == ProblemListSideFilter.BLACK ? TEXT_SELECTED : TEXT_NORMAL);
         g2.drawString("黑棋", x, y);
         g2.setColor(TEXT_NORMAL);
-        g2.drawString("｜", x + 30, y);
+        g2.drawString("｜", x + CLASSIC_SEPARATOR_OFFSET, y);
         g2.setColor(sideFilter == ProblemListSideFilter.WHITE ? TEXT_SELECTED : TEXT_NORMAL);
-        g2.drawString("白棋", x + 45, y);
+        g2.drawString("白棋", x + CLASSIC_SECOND_LABEL_OFFSET, y);
       }
       g2.dispose();
       return;
@@ -116,10 +139,10 @@ public class SidebarHeaderPanel extends JPanel {
     g2.drawLine(4, getHeight() - 1, getWidth() - 8, getHeight() - 1);
 
     // 1. [ 评论 | 问题手 ] (Apple Style Segmented Control)
-    int x = 10;
-    int y = 14;
-    int segW = 132;
-    int segH = 30;
+    int x = CONTROL_X;
+    int y = APPLE_PRIMARY_Y;
+    int segW = APPLE_PRIMARY_WIDTH;
+    int segH = APPLE_PRIMARY_HEIGHT;
     int arc = 15;
     int baseline = y + segH / 2 + fm.getAscent() / 2 - 1;
 
@@ -168,9 +191,9 @@ public class SidebarHeaderPanel extends JPanel {
 
     // 3. [ 黑 | 白 ]
     if (showBlunders) {
-      y = 52;
-      segW = 112;
-      segH = 24;
+      y = APPLE_SIDE_Y;
+      segW = APPLE_SIDE_WIDTH;
+      segH = APPLE_SIDE_HEIGHT;
       halfW = segW / 2;
       arc = 12;
       baseline = y + segH / 2 + fm.getAscent() / 2 - 1;
@@ -197,6 +220,70 @@ public class SidebarHeaderPanel extends JPanel {
     }
 
     g2.dispose();
+  }
+
+  static int primarySegmentIndexAt(Point point, boolean appleStyle, FontMetrics metrics) {
+    if (appleStyle) {
+      return segmentedIndexAt(
+          point,
+          new Rectangle(CONTROL_X, APPLE_PRIMARY_Y, APPLE_PRIMARY_WIDTH, APPLE_PRIMARY_HEIGHT));
+    }
+    return classicTextIndexAt(point, metrics, CLASSIC_PRIMARY_Y, "评论", "问题手");
+  }
+
+  static int sideSegmentIndexAt(Point point, boolean appleStyle, FontMetrics metrics) {
+    if (appleStyle) {
+      return segmentedIndexAt(
+          point, new Rectangle(CONTROL_X, APPLE_SIDE_Y, APPLE_SIDE_WIDTH, APPLE_SIDE_HEIGHT));
+    }
+    return classicTextIndexAt(point, metrics, CLASSIC_SIDE_Y, "黑棋", "白棋");
+  }
+
+  private static int classicTextIndexAt(
+      Point point, FontMetrics metrics, int rowY, String firstText, String secondText) {
+    if (classicTextBounds(metrics, firstText, CONTROL_X, rowY).contains(point)) {
+      return FIRST_SEGMENT;
+    }
+    if (classicSecondTextBounds(metrics, secondText, rowY).contains(point)) {
+      return SECOND_SEGMENT;
+    }
+    return NO_SEGMENT;
+  }
+
+  private static Rectangle classicTextBounds(
+      FontMetrics metrics, String text, int textX, int rowY) {
+    int textWidth = Math.max(1, metrics.stringWidth(text));
+    return new Rectangle(
+        textX - CLASSIC_HIT_PADDING_X,
+        rowY,
+        textWidth + CLASSIC_HIT_PADDING_X * 2,
+        CLASSIC_ROW_HEIGHT);
+  }
+
+  private static Rectangle classicSecondTextBounds(FontMetrics metrics, String text, int rowY) {
+    int textX = CONTROL_X + CLASSIC_SECOND_LABEL_OFFSET;
+    Rectangle textBounds = classicTextBounds(metrics, text, textX, rowY);
+    int legacyRight =
+        CONTROL_X
+            + (rowY == CLASSIC_SIDE_Y ? CLASSIC_SIDE_LEGACY_WIDTH : CLASSIC_PRIMARY_LEGACY_WIDTH);
+    int right = Math.max(textBounds.x + textBounds.width, legacyRight);
+    textBounds.width = right - textBounds.x;
+    return textBounds;
+  }
+
+  private static int segmentedIndexAt(Point point, Rectangle bounds) {
+    if (!bounds.contains(point)) {
+      return NO_SEGMENT;
+    }
+    return point.x < bounds.x + bounds.width / 2 ? FIRST_SEGMENT : SECOND_SEGMENT;
+  }
+
+  private Font headerFont() {
+    String fontName =
+        Lizzie.config != null && Lizzie.config.uiFontName != null
+            ? Lizzie.config.uiFontName
+            : getFont().getName();
+    return new Font(fontName, Font.BOLD, 12);
   }
 
   private Color glassAccentColor() {

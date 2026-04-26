@@ -63,7 +63,7 @@ public class Config {
   public boolean showBranch = true;
   public boolean showBestMoves = true;
   public boolean showNextMoves = true;
-  public boolean showSubBoard = true;
+  public boolean showSubBoard = false;
   public boolean hideSubBoardFromLargeWinrate = false;
   public boolean largeSubBoard = false;
   public boolean startMaximized = true;
@@ -139,6 +139,8 @@ public class Config {
   private static final String USER_WORK_DIR_NAME = ".lizzieyzy-next";
   private static final String LEGACY_USER_WORK_DIR_NAME = ".lizzieyzy-next-foxuid";
   private static final String WINDOWS_SHARED_WORK_DIR_NAME = "LizzieYzyNext";
+  private static final String HIDE_SUBBOARD_DEFAULT_MIGRATION_KEY =
+      "migrated-hide-subboard-default-v1";
   private static final String WORK_DIR = resolveWorkDir();
   private static final String RUNTIME_WORK_DIR = "runtime";
   private static final String BUNDLED_ENGINE_NAME = "KataGo Bundled";
@@ -1396,6 +1398,8 @@ public class Config {
     uiConfig = config.getJSONObject("ui");
     persistedUi = persisted.getJSONObject("ui-persist");
 
+    hideSubBoardByDefaultOnce();
+
     fastCommandsWidth = persistedUi.optInt("fast-commands-width", 500);
     fastCommandsHeight = persistedUi.optInt("fast-commands-height", 500);
 
@@ -1954,6 +1958,19 @@ public class Config {
     analyzeUpdateIntervalCentisecSSH =
         leelazConfig.optInt("analyze-update-interval-centisecssh", 10);
     readThemeVaule(true);
+  }
+
+  private void hideSubBoardByDefaultOnce() {
+    if (uiConfig.optBoolean(HIDE_SUBBOARD_DEFAULT_MIGRATION_KEY, false)) {
+      return;
+    }
+    uiConfig.put("show-subboard", false);
+    uiConfig.put(HIDE_SUBBOARD_DEFAULT_MIGRATION_KEY, true);
+    try {
+      save();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
   }
 
   private ArrayList<String> getRecentFilePaths() {
@@ -2560,7 +2577,7 @@ public class Config {
     ui.put("show-best-moves", true);
     ui.put("show-coordinates", true);
     ui.put("show-next-moves", true);
-    ui.put("show-subboard", true);
+    ui.put("show-subboard", false);
     ui.put("large-subboard", false);
     ui.put("problem-list-metric", "winrate");
     ui.put("problem-list-side-filter", "black");
