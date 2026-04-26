@@ -137,6 +137,25 @@ def write_manifest(source):
         handle.write(f"asset-name={asset_name}\n")
         handle.write(f"sha256={expected_sha256}\n")
         handle.write(f"source={source}\n")
+        handle.write("requested-execution-level=asInvoker\n")
+
+def patch_readboard_manifest_to_as_invoker(path):
+    require_admin = b'level="requireAdministrator"'
+    as_invoker = b'level="asInvoker"' + (b" " * (len(require_admin) - len(b'level="asInvoker"')))
+    with open(path, "rb") as handle:
+        data = handle.read()
+    patch_count = data.count(require_admin)
+    if patch_count:
+        data = data.replace(require_admin, as_invoker)
+        with open(path, "wb") as handle:
+            handle.write(data)
+    if require_admin in data:
+        raise SystemExit(
+            "Bundled readboard.exe still requests administrator privileges after manifest patch"
+        )
+    if b'level="asInvoker"' not in data:
+        raise SystemExit("Bundled readboard.exe manifest does not request asInvoker")
+    return patch_count
 
 if source_dir:
     if not os.path.isdir(source_dir):
@@ -202,7 +221,12 @@ else:
 readboard_exe = os.path.join(stage_dir, "readboard.exe")
 if not os.path.isfile(readboard_exe):
     raise SystemExit("Windows release must include native readboard.exe")
+manifest_patch_count = patch_readboard_manifest_to_as_invoker(readboard_exe)
 print(f"Prepared native readboard assets {release_tag}/{asset_name} in {stage_dir}")
+print(
+    "Patched native readboard requestedExecutionLevel to asInvoker "
+    f"({manifest_patch_count} replacement(s))"
+)
 PY
 }
 
@@ -380,8 +404,13 @@ build_app_image() {
     --vendor "wimi321" \
     --description "$app_description" \
     --icon "$ICON_PATH" \
+    --jlink-options "--strip-debug --no-man-pages --no-header-files" \
     --java-options "-Xmx4096m" \
     --java-options "-Dlizzie.next.version=$APP_DISPLAY_VERSION" >&2
+  if [[ ! -f "$app_image_dir/$app_name/runtime/bin/java.exe" ]]; then
+    echo "Packaged Windows runtime is missing runtime/bin/java.exe: $app_image_dir/$app_name" >&2
+    return 1
+  fi
   log_step "Finished Windows app image: $app_name [$flavor]"
 
   printf '%s\n' "$app_image_dir/$app_name"
@@ -424,6 +453,7 @@ build_installer() {
     --win-menu \
     --win-shortcut \
     --win-upgrade-uuid "$upgrade_uuid" \
+    --jlink-options "--strip-debug --no-man-pages --no-header-files" \
     --java-options "-Xmx4096m" \
     --java-options "-Dlizzie.next.version=$APP_DISPLAY_VERSION" >&2
   log_step "Finished Windows installer: $app_name [$flavor]"

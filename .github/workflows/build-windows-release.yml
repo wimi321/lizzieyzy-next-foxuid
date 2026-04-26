@@ -112,10 +112,12 @@ jobs:
           test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/PROJECT_INFO.txt"
           grep -q "java-options=-Dlizzie.next.version=${{ inputs.release_tag }}" "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/LizzieYzy Next OpenCL.cfg"
           test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/readboard/readboard.exe"
+          test -f "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/runtime/bin/java.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/LizzieYzy Next NVIDIA.exe"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/PROJECT_INFO.txt"
           grep -q "java-options=-Dlizzie.next.version=${{ inputs.release_tag }}" "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/LizzieYzy Next NVIDIA.cfg"
           test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/readboard/readboard.exe"
+          test -f "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/runtime/bin/java.exe"
           test -f "dist/windows/input-nvidia/engines/katago/windows-x64/katago.exe"
           test -f "dist/windows/input-nvidia/PROJECT_INFO.txt"
           test -f "dist/windows/input-nvidia/readboard/readboard.exe"
@@ -142,6 +144,23 @@ jobs:
           test -f "dist/windows/input-without.engine/readboard/lizzieyzy-next-readboard-manifest.txt"
           test -f "dist/windows/app-image-without.engine/LizzieYzy Next/app/PROJECT_INFO.txt"
           test -f "dist/windows/app-image-without.engine/LizzieYzy Next/app/readboard/readboard.exe"
+          test -f "dist/windows/app-image-without.engine/LizzieYzy Next/runtime/bin/java.exe"
+          test -f "dist/windows/app-image-with-katago/LizzieYzy Next/runtime/bin/java.exe"
+          for readboard_exe in \
+            "dist/windows/input-with-katago/readboard/readboard.exe" \
+            "dist/windows/input-opencl/readboard/readboard.exe" \
+            "dist/windows/input-nvidia/readboard/readboard.exe" \
+            "dist/windows/input-without.engine/readboard/readboard.exe" \
+            "dist/windows/app-image-with-katago/LizzieYzy Next/app/readboard/readboard.exe" \
+            "dist/windows/app-image-opencl/LizzieYzy Next OpenCL/app/readboard/readboard.exe" \
+            "dist/windows/app-image-nvidia/LizzieYzy Next NVIDIA/app/readboard/readboard.exe" \
+            "dist/windows/app-image-without.engine/LizzieYzy Next/app/readboard/readboard.exe"; do
+            grep -a -q 'level="asInvoker"' "$readboard_exe"
+            if grep -a -q 'level="requireAdministrator"' "$readboard_exe"; then
+              echo "readboard.exe must not request administrator privileges: $readboard_exe"
+              exit 1
+            fi
+          done
 
       - name: Smoke test bundled Windows app image
         shell: powershell

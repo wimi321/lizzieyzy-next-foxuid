@@ -128,4 +128,65 @@ class ReadBoardLaunchPathTest {
       System.setProperty("java.home", javaHome);
     }
   }
+
+  @Test
+  void resolveJavaReadBoardJarRecognizesJpackageAppLayout() throws Exception {
+    Path appRoot = Files.createDirectories(tempDir.resolve("LizzieYzy Next"));
+    Path javaReadBoardDir =
+        Files.createDirectories(appRoot.resolve("app").resolve("readboard_java"));
+    Path jar = Files.write(javaReadBoardDir.resolve("readboard-1.6.2-shaded.jar"), new byte[] {0});
+
+    assertEquals(
+        jar.toFile().getAbsolutePath(),
+        ReadBoard.resolveJavaReadBoardJar(
+                ReadBoard.javaReadBoardDirectoryCandidatesForBase(appRoot.toFile()),
+                "readboard-1.6.2-shaded.jar")
+            .getAbsolutePath());
+  }
+
+  @Test
+  void buildJavaReadBoardProcessBuilderUsesAbsoluteJarAndJarDirectory() throws Exception {
+    Path javaReadBoardDir =
+        Files.createDirectories(tempDir.resolve("app").resolve("readboard_java"));
+    Path jar = Files.write(javaReadBoardDir.resolve("readboard-1.6.2-shaded.jar"), new byte[] {0});
+
+    ProcessBuilder processBuilder =
+        ReadBoard.buildJavaReadBoardProcessBuilder(
+            jar.toFile(), Arrays.asList("cn", "false", "14", "19", "19"), Arrays.asList("-Xmx64m"));
+
+    assertEquals("-jar", processBuilder.command().get(2));
+    assertEquals(jar.toFile().getAbsolutePath(), processBuilder.command().get(3));
+    assertEquals(
+        javaReadBoardDir.toFile().getAbsolutePath(), processBuilder.directory().getAbsolutePath());
+    assertTrue(processBuilder.redirectErrorStream());
+  }
+
+  @Test
+  void buildJavaReadBoardProcessBuilderUsesExplicitWorkingDirectory() throws Exception {
+    Path javaReadBoardDir =
+        Files.createDirectories(tempDir.resolve("app").resolve("readboard_java"));
+    Path workingDir = Files.createDirectories(tempDir.resolve("runtime").resolve("readboard_java"));
+    Path jar = Files.write(javaReadBoardDir.resolve("readboard-1.6.2-shaded.jar"), new byte[] {0});
+
+    ProcessBuilder processBuilder =
+        ReadBoard.buildJavaReadBoardProcessBuilder(
+            jar.toFile(),
+            workingDir.toFile(),
+            Arrays.asList("cn", "false", "14", "19", "19"),
+            Arrays.asList("-Xmx64m"));
+
+    assertEquals(jar.toFile().getAbsolutePath(), processBuilder.command().get(3));
+    assertEquals(
+        workingDir.toFile().getAbsolutePath(), processBuilder.directory().getAbsolutePath());
+    assertTrue(processBuilder.redirectErrorStream());
+  }
+
+  @Test
+  void canUseJavaReadBoardWorkingDirectoryRequiresWritableDirectory() throws Exception {
+    Path directory = Files.createDirectories(tempDir.resolve("writable"));
+    Path file = Files.write(tempDir.resolve("not-a-directory"), new byte[] {0});
+
+    assertTrue(ReadBoard.canUseJavaReadBoardWorkingDirectory(directory.toFile()));
+    assertFalse(ReadBoard.canUseJavaReadBoardWorkingDirectory(file.toFile()));
+  }
 }

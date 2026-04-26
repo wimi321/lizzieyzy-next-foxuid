@@ -2293,6 +2293,7 @@ public class LizzieFrame extends JFrame {
       return;
     }
     if (!isNativeReadBoardAvailable()) {
+      reportNativeReadBoardUnavailable();
       return;
     }
     reopenReadBoard(this::createNativeReadBoard);
@@ -2344,6 +2345,24 @@ public class LizzieFrame extends JFrame {
       readBoard = factory.create();
     } catch (Exception e) {
       e.printStackTrace();
+      showReadBoardLoadFailedMessage();
+    }
+  }
+
+  private void reportNativeReadBoardUnavailable() {
+    File readBoardDir = ReadBoard.nativeReadBoardDirectoryForDiagnostics();
+    File readBoardExe = new File(readBoardDir, "readboard.exe");
+    System.err.println(
+        "Native board synchronization tool is missing: " + readBoardExe.getAbsolutePath());
+    showReadBoardLoadFailedMessage();
+  }
+
+  private void showReadBoardLoadFailedMessage() {
+    try {
+      SMessage msg = new SMessage();
+      msg.setMessage(Lizzie.resourceBundle.getString("ReadBoard.loadFailed"), 2);
+    } catch (RuntimeException ex) {
+      System.err.println("Unable to show readboard load failure message: " + ex.getMessage());
     }
   }
 

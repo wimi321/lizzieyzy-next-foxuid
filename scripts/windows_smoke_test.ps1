@@ -296,6 +296,19 @@ function Invoke-NativeReadBoardPipeProbe {
     }
 }
 
+function Assert-PackagedJavaRuntimeLauncher {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppExe
+    )
+
+    $appDir = Split-Path -Parent $AppExe
+    $javaExe = Join-Path $appDir "runtime\bin\java.exe"
+    if (-not (Test-Path -LiteralPath $javaExe)) {
+        throw "Packaged Java runtime launcher was not found: $javaExe"
+    }
+}
+
 function Add-AppJavaOption {
     param(
         [Parameter(Mandatory = $true)]
@@ -381,6 +394,7 @@ Get-ChildItem -Path $consoleLogs -ErrorAction SilentlyContinue | Remove-Item -Fo
 Get-ChildItem -Path $errorLogs -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 if ($ProbeBoardSync) {
+    Assert-PackagedJavaRuntimeLauncher -AppExe $AppExe
     Add-AppJavaOption -AppExe $AppExe -JavaOption "-Dlizzie.smoke.openBoardSync=true"
     Add-AppJavaOption -AppExe $AppExe -JavaOption "-Dlizzie.smoke.openBoardSyncDelayMs=5000"
     Invoke-NativeReadBoardPipeProbe -AppExe $AppExe
