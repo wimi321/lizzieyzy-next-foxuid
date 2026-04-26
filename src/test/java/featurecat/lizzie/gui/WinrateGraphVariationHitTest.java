@@ -257,6 +257,7 @@ class WinrateGraphVariationHitTest {
       WinrateGraph graph = configuredGraph();
       TrackingFrame frame = allocate(TrackingFrame.class);
       frame.isTrying = true;
+      Lizzie.config.showWinrateOverview = true;
       Lizzie.board = fixture.board;
       Lizzie.frame = frame;
       LizzieFrame.winrateGraph = graph;
@@ -283,6 +284,7 @@ class WinrateGraphVariationHitTest {
       WinrateGraph graph = configuredGraph();
       TrackingFrame frame = allocate(TrackingFrame.class);
       frame.isTrying = true;
+      Lizzie.config.showWinrateOverview = true;
       Lizzie.board = fixture.board;
       Lizzie.frame = frame;
       LizzieFrame.winrateGraph = graph;
@@ -307,6 +309,7 @@ class WinrateGraphVariationHitTest {
       TrackingFrame frame = allocate(TrackingFrame.class);
       frame.isTrying = true;
       Lizzie.config.showWinrateLine = true;
+      Lizzie.config.showWinrateOverview = true;
       Lizzie.config.winrateLineColor = new Color(100, 180, 255);
       Lizzie.config.winrateMissLineColor = new Color(120, 120, 120);
       Lizzie.board = fixture.board;
@@ -378,6 +381,7 @@ class WinrateGraphVariationHitTest {
       VariationFixture fixture = boardWithVisibleMainContinuation();
       WinrateGraph graph = new WinrateGraph();
       TrackingFrame frame = allocate(TrackingFrame.class);
+      Lizzie.config.showWinrateOverview = true;
       Lizzie.board = fixture.board;
       Lizzie.frame = frame;
       LizzieFrame.winrateGraph = graph;

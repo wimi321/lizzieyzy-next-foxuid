@@ -28,6 +28,7 @@ public class Config {
   public boolean newMoveNumberInBranch = true;
   public boolean showWinrateGraph = true;
   public boolean largeWinrateGraph = false;
+  public boolean showWinrateOverview = false;
   public boolean showBlunderBar = true;
   public boolean showMoveAllInBranch = false;
   // public boolean weightedBlunderBarHeight = false;
@@ -1420,6 +1421,7 @@ public class Config {
     showBranch = uiConfig.getBoolean("show-leelaz-variation");
     showWinrateGraph = uiConfig.getBoolean("show-winrate-graph");
     largeWinrateGraph = uiConfig.optBoolean("large-winrate-graph", false);
+    showWinrateOverview = uiConfig.optBoolean("show-winrate-overview", false);
     showBlunderBar = uiConfig.optBoolean("show-blunder-bar", true);
     showMoveAllInBranch = uiConfig.optBoolean("show-moveall-inbranch", false);
     // weightedBlunderBarHeight = uiConfig.optBoolean("weighted-blunder-bar-height", false);
@@ -2564,6 +2566,7 @@ public class Config {
     ui.put("show-leelaz-variation", true);
     ui.put("show-winrate-graph", true);
     ui.put("large-winrate-graph", false);
+    ui.put("show-winrate-overview", false);
     ui.put("winrate-stroke-width", 1.7);
     ui.put("show-blunder-bar", true);
     ui.put("auto-quick-analyze-on-load", true);

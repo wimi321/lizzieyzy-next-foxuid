@@ -217,6 +217,28 @@ class WinrateGraphQuickOverviewHitTest {
   }
 
   @Test
+  void quickOverviewIsNotRenderedWhenDisabledByDefault() throws Exception {
+    TestEnvironment env = TestEnvironment.open();
+    try {
+      VariationFixture fixture = boardWithVisibleMainContinuation();
+      WinrateGraph graph = configuredGraph();
+      TrackingFrame frame = allocate(TrackingFrame.class);
+      Lizzie.config.showWinrateOverview = false;
+      Lizzie.board = fixture.board;
+      Lizzie.frame = frame;
+      LizzieFrame.winrateGraph = graph;
+
+      renderGraph(graph);
+
+      assertNull(
+          getField(graph, "renderedQuickOverviewLayout"),
+          "default UI should not render the bottom quick winrate overview.");
+    } finally {
+      env.close();
+    }
+  }
+
+  @Test
   void backgroundOnlyPlayModeFrameClearsStaleRenderedAnchors() throws Exception {
     TestEnvironment env = TestEnvironment.open();
     try {
@@ -1132,6 +1154,7 @@ class WinrateGraphQuickOverviewHitTest {
       Config config = allocate(Config.class);
       config.showWinrateGraph = true;
       config.showWinrateLine = true;
+      config.showWinrateOverview = true;
       Lizzie.config = config;
       Lizzie.leelaz = allocate(Leelaz.class);
       Lizzie.board = null;

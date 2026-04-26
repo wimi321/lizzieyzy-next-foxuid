@@ -1744,7 +1744,15 @@ public class WinrateGraph {
   }
 
   private boolean canShowQuickOverview(int width, int numMoves) {
-    return origParams[2] >= 180 && origParams[3] >= 120 && width >= 140 && numMoves >= 2;
+    return isShowQuickOverviewEnabled()
+        && origParams[2] >= 180
+        && origParams[3] >= 120
+        && width >= 140
+        && numMoves >= 2;
+  }
+
+  private boolean isShowQuickOverviewEnabled() {
+    return Lizzie.config != null && Lizzie.config.showWinrateOverview;
   }
 
   private double quickOverviewWinrateScale(List<QuickOverviewMove> moves) {
