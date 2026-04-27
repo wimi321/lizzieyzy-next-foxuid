@@ -328,7 +328,7 @@ public class BrowserFrame extends JFrame {
 
   private void checkBundleFolder() {
     // TODO Auto-generated method stub
-    String tag = "jcef-56fb723+cef-95.7.14+g9f72f35+chromium-95.0.4638.69";
+    String tag = "jcef-99c2f7a+cef-127.3.1+g6cbb30e+chromium-127.0.6533.100";
     File meta = new File("jcef-bundle" + File.separator + "build_meta.json");
     if (meta.exists()) {
       FileInputStream fp;

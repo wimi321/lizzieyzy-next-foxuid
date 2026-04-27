@@ -1102,13 +1102,20 @@ public class BottomToolbar extends JPanel {
     yikeLive.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
-            Lizzie.frame.bowser(
-                "https://home.yikeweiqi.com/#/live",
-                (Lizzie.resourceBundle.getString("BottomToolbar.yikeLive")),
-                true);
+            Lizzie.frame.openYikeLiveDialog();
           }
         });
     yike.add(yikeLive);
+
+    JFontMenuItem yikeLiveWeb =
+        new JFontMenuItem(Lizzie.resourceBundle.getString("Menu.yikeLiveWeb"));
+    yikeLiveWeb.addActionListener(
+        new ActionListener() {
+          public void actionPerformed(ActionEvent e) {
+            Lizzie.frame.openYikeLiveWeb();
+          }
+        });
+    yike.add(yikeLiveWeb);
 
     JFontMenuItem yikeRoom =
         new JFontMenuItem(Lizzie.resourceBundle.getString("BottomToolbar.yikeRoom")); // ("弈客大厅");

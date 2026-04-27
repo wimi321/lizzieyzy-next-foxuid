@@ -42,6 +42,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.MissingResourceException;
 import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.concurrent.Executors;
@@ -75,6 +76,7 @@ public class OnlineDialog extends JDialog {
   private final ResourceBundle resourceBundle = Lizzie.resourceBundle;
   private ScheduledExecutorService online = Executors.newScheduledThreadPool(1);
   private ScheduledFuture<?> schedule = null;
+  private final YikeApiClient yikeApiClient = new YikeApiClient();
   private static WebSocketClient client;
   private Socket sio;
   private int type = 0;
@@ -83,6 +85,7 @@ public class OnlineDialog extends JDialog {
   private int refreshTime;
   private JTextField txtUrl;
   private String ajaxUrl = "";
+  private String lastYikeMainlineSgf = "";
   private Map queryMap = null;
   private String query = "";
   private String whitePlayer = "";
@@ -339,11 +342,43 @@ public class OnlineDialog extends JDialog {
     }
   }
 
+  private boolean isYikeSyncType() {
+    return type == YikeUrlInfo.TYPE_OLD_LIVE_ROOM
+        || type == YikeUrlInfo.TYPE_OLD_LIVE_BOARD
+        || type == YikeUrlInfo.TYPE_GAME_ROOM
+        || type == YikeUrlInfo.TYPE_NEW_LIVE_ROOM;
+  }
+
+  private String currentYikeSourceUrl() {
+    return txtUrl == null ? "" : txtUrl.getText().trim();
+  }
+
+  private void updateYikeSyncStatus(String url, String status) {
+    if (isYikeSyncType()) {
+      Lizzie.frame.updateYikeLiveSyncStatus(url, status);
+    }
+  }
+
+  private String text(String key, String fallback) {
+    try {
+      return resourceBundle.getString(key);
+    } catch (MissingResourceException e) {
+      return fallback;
+    }
+  }
+
   private int checkUrl() {
     String id = null;
     chineseRule = 1;
     chineseFlag = false;
     String url = txtUrl.getText().trim();
+    Optional<YikeUrlInfo> yikeUrlInfo = YikeUrlParser.parse(url);
+    if (yikeUrlInfo.isPresent()) {
+      YikeUrlInfo info = yikeUrlInfo.get();
+      roomId = info.getRoomId();
+      ajaxUrl = info.getAjaxUrl();
+      return info.getType();
+    }
     if (url.endsWith("/0/0")) {
       url = url.substring(0, url.length() - 4);
     }
@@ -433,13 +468,35 @@ public class OnlineDialog extends JDialog {
     if (schedule != null && !schedule.isCancelled() && !schedule.isDone()) {
       schedule.cancel(false);
     }
+    ensureOnlineExecutor();
     done = false;
     history = null;
+    lastYikeMainlineSgf = "";
     Lizzie.board.clearForOnline();
     switch (type) {
       case 1:
       case 5:
-        req2(true);
+        online.execute(
+            new Runnable() {
+              @Override
+              public void run() {
+                try {
+                  req2(false);
+                } catch (URISyntaxException e) {
+                  e.printStackTrace();
+                  SwingUtilities.invokeLater(
+                      new Runnable() {
+                        @Override
+                        public void run() {
+                          error(true);
+                        }
+                      });
+                }
+              }
+            });
+        break;
+      case 6:
+        reqNewYikeRoom(true);
         break;
       case 2:
         refresh("(?s).*?(\\\"Content\\\":\\\")(.+)(\\\",\\\")(?s).*");
@@ -456,6 +513,23 @@ public class OnlineDialog extends JDialog {
       default:
         break;
     }
+  }
+
+  private void ensureOnlineExecutor() {
+    if (online == null || online.isShutdown() || online.isTerminated()) {
+      online = Executors.newScheduledThreadPool(1);
+    }
+  }
+
+  private boolean shouldSyncYikeMainlineOnly() {
+    return type == YikeUrlInfo.TYPE_OLD_LIVE_ROOM
+        || type == YikeUrlInfo.TYPE_OLD_LIVE_BOARD
+        || type == YikeUrlInfo.TYPE_GAME_ROOM
+        || type == YikeUrlInfo.TYPE_NEW_LIVE_ROOM;
+  }
+
+  private boolean shouldReplaceYikeMainline() {
+    return type == YikeUrlInfo.TYPE_NEW_LIVE_ROOM;
   }
 
   @SuppressWarnings("deprecation")
@@ -477,11 +551,24 @@ public class OnlineDialog extends JDialog {
       if (o != null) {
         live = o.optJSONObject("live");
       }
+      if (live == null) {
+        JSONObject root = new JSONObject(data);
+        live = root.optJSONObject("result");
+      }
     } catch (JSONException e) {
     }
     String sgf = "";
     if (live != null) {
       sgf = live.optString("Content");
+      if (Utils.isBlank(sgf)) {
+        sgf = firstNonBlank(live.optString("sgf"), live.optString("clean_sgf"));
+      }
+      if (Utils.isBlank(sgf)) {
+        updateYikeSyncStatus(
+            currentYikeSourceUrl(), text("YikeLiveDialog.syncNoSgf", "No SGF is available yet."));
+        error(true);
+        return;
+      }
     }
     if (Utils.isBlank(sgf)) {
       if (!Utils.isBlank(format)) {
@@ -500,6 +587,9 @@ public class OnlineDialog extends JDialog {
       }
     }
     try {
+      if (shouldSyncYikeMainlineOnly()) {
+        sgf = YikeSgfMainline.withoutVariations(sgf);
+      }
       BoardHistoryList liveNode = SGFParser.parseSgf(sgf, first);
       if (liveNode != null) {
         blackPlayer = liveNode.getGameInfo().getPlayerBlack();
@@ -509,8 +599,22 @@ public class OnlineDialog extends JDialog {
         if (live != null) {
           komi = live.optDouble("komi", komi);
           handicap = live.optInt("handicap", handicap);
-          blackPlayer = live.optString("BlackPlayer", blackPlayer);
-          whitePlayer = live.optString("WhitePlayer", whitePlayer);
+          blackPlayer =
+              firstNonBlank(
+                  live.optString("BlackPlayer"),
+                  live.optString("black_name"),
+                  live.optString("blackName"),
+                  blackPlayer);
+          whitePlayer =
+              firstNonBlank(
+                  live.optString("WhitePlayer"),
+                  live.optString("white_name"),
+                  live.optString("whiteName"),
+                  whitePlayer);
+        }
+        if (shouldReplaceYikeMainline()) {
+          replaceYikeMainline(liveNode, live, komi, handicap);
+          return;
         }
         int diffMove = Lizzie.board.getHistory().sync(liveNode);
         if (diffMove >= 0) {
@@ -543,11 +647,18 @@ public class OnlineDialog extends JDialog {
           }
           firstTime = false;
         }
-        if (live != null && "3".equals(live.optString("Status"))) {
+        if (live != null
+            && ("3".equals(live.optString("Status"))
+                || "3".equals(live.optString("status"))
+                || live.optInt("status", 0) == 3)) {
           if (schedule != null && !schedule.isCancelled() && !schedule.isDone()) {
             schedule.cancel(false);
           }
-          String result = live.optString("GameResult");
+          String result =
+              firstNonBlank(
+                  live.optString("GameResult"),
+                  live.optString("game_result"),
+                  live.optString("resultDesc"));
           if (!Utils.isBlank(result)) {
             Lizzie.board.getHistory().getData().comment =
                 result + "\n" + Lizzie.board.getHistory().getData().comment;
@@ -559,11 +670,52 @@ public class OnlineDialog extends JDialog {
           Lizzie.frame.refresh();
         }
       } else {
+        updateYikeSyncStatus(
+            currentYikeSourceUrl(), text("YikeLiveDialog.syncFailed", "Yike sync failed."));
         error(true);
       }
-    } catch (NullPointerException e) {
+    } catch (RuntimeException e) {
+      updateYikeSyncStatus(
+          currentYikeSourceUrl(),
+          text("YikeLiveDialog.syncFailed", "Yike sync failed.") + ": " + e.getMessage());
       error(true);
     }
+  }
+
+  private void replaceYikeMainline(
+      BoardHistoryList liveNode, JSONObject live, double komi, int handicap) {
+    while (liveNode.previous().isPresent())
+      ;
+    while (liveNode.next(true).isPresent())
+      ;
+    Lizzie.board.setHistory(liveNode);
+    Lizzie.board.getHistory().getGameInfo().setPlayerBlack(blackPlayer);
+    Lizzie.board.getHistory().getGameInfo().setPlayerWhite(whitePlayer);
+    Lizzie.board.getHistory().getGameInfo().setHandicap(handicap);
+    if (Lizzie.config.readKomi) {
+      Lizzie.board.getHistory().getGameInfo().setKomi(komi);
+      Lizzie.leelaz.komi(komi);
+    }
+    Lizzie.frame.setPlayers(whitePlayer, blackPlayer);
+    if (live != null
+        && ("3".equals(live.optString("Status"))
+            || "3".equals(live.optString("status"))
+            || live.optInt("status", 0) == 3)) {
+      if (schedule != null && !schedule.isCancelled() && !schedule.isDone()) {
+        schedule.cancel(false);
+      }
+      String result =
+          firstNonBlank(
+              live.optString("GameResult"),
+              live.optString("game_result"),
+              live.optString("resultDesc"));
+      if (!Utils.isBlank(result)) {
+        Lizzie.board.getHistory().getData().comment =
+            result + "\n" + Lizzie.board.getHistory().getData().comment;
+      }
+    }
+    firstTime = false;
+    Lizzie.frame.refresh();
   }
 
   public void get() throws IOException {
@@ -598,6 +750,73 @@ public class OnlineDialog extends JDialog {
         }
       }
     }.start();
+  }
+
+  private void reqNewYikeRoom(boolean clear) {
+    if (clear) Lizzie.board.clearForOnline();
+    ensureOnlineExecutor();
+    final String sourceUrl = currentYikeSourceUrl();
+    Runnable fetch =
+        new Runnable() {
+          @Override
+          public void run() {
+            if (isStoped || !LizzieFrame.urlSgf) return;
+            try {
+              String response = yikeApiClient.fetch(ajaxUrl);
+              YikeApiClient.YikeLiveDetail detail = YikeApiClient.parseLiveDetail(response);
+              if (Utils.isBlank(detail.getSgf())) {
+                throw new IOException(text("YikeLiveDialog.syncNoSgf", "No SGF is available yet."));
+              }
+              String mainlineSgf = YikeSgfMainline.withoutVariations(detail.getSgf());
+              boolean hasNewMoves = !mainlineSgf.equals(lastYikeMainlineSgf);
+              lastYikeMainlineSgf = mainlineSgf;
+              if (!hasNewMoves) {
+                updateYikeSyncStatus(
+                    sourceUrl,
+                    detail.getStatus() >= 3
+                        ? text("YikeLiveDialog.syncedFinished", "Synced. This game has finished.")
+                        : text("YikeLiveDialog.syncedWatching", "Synced. Watching for updates."));
+                if (detail.getStatus() >= 3
+                    && schedule != null
+                    && !schedule.isCancelled()
+                    && !schedule.isDone()) {
+                  schedule.cancel(false);
+                }
+                return;
+              }
+              parseSgf(response, "", 0, false, firstTime);
+              updateYikeSyncStatus(
+                  sourceUrl,
+                  detail.getStatus() >= 3
+                      ? text("YikeLiveDialog.syncedFinished", "Synced. This game has finished.")
+                      : text("YikeLiveDialog.syncedWatching", "Synced. Watching for updates."));
+              if (detail.getStatus() >= 3
+                  && schedule != null
+                  && !schedule.isCancelled()
+                  && !schedule.isDone()) {
+                schedule.cancel(false);
+              }
+            } catch (IOException | JSONException e) {
+              e.printStackTrace();
+              SwingUtilities.invokeLater(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      updateYikeSyncStatus(
+                          sourceUrl,
+                          text("YikeLiveDialog.syncFailed", "Yike sync failed.")
+                              + ": "
+                              + e.getMessage());
+                      error(true);
+                    }
+                  });
+            }
+          }
+        };
+    online.execute(fetch);
+    schedule =
+        online.scheduleWithFixedDelay(
+            fetch, Math.max(refreshTime, 5), Math.max(refreshTime, 5), TimeUnit.SECONDS);
   }
 
   public void refresh(String format) throws IOException {
@@ -1997,6 +2216,13 @@ public class OnlineDialog extends JDialog {
     return new SimpleImmutableEntry<>(key, value);
   }
 
+  private static String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (!Utils.isBlank(value)) return value;
+    }
+    return "";
+  }
+
   public void req2(boolean clear) throws URISyntaxException {
     if (clear) Lizzie.board.clearForOnline();
     if (sio != null) {
@@ -2252,7 +2478,11 @@ public class OnlineDialog extends JDialog {
     blackPlayer = info.optString("blackName");
     whitePlayer = info.optString("whiteName");
     boolean isEnd = !Utils.isBlank(info.optString("resultDesc"));
-    history = SGFParser.parseSgf(info.optString("sgf"), true);
+    String sgf = info.optString("sgf");
+    if (shouldSyncYikeMainlineOnly()) {
+      sgf = YikeSgfMainline.withoutVariations(sgf);
+    }
+    history = SGFParser.parseSgf(sgf, true);
     if (history != null) {
       double komi = info.optDouble("komi", history.getGameInfo().getKomi());
       int handicap = info.optInt("handicap", history.getGameInfo().getHandicap());
@@ -2589,6 +2819,9 @@ public class OnlineDialog extends JDialog {
     LizzieFrame.urlSgf = false;
     Lizzie.frame.setCommentPaneOrArea(true);
     isStoped = true;
+    if (schedule != null && !schedule.isCancelled() && !schedule.isDone()) {
+      schedule.cancel(false);
+    }
     //    if (client != null && client.isOpen()) {
     //      client.close();
     //      client = null;

@@ -331,10 +331,7 @@ public class InputIndependentMainBoard implements KeyListener {
         } else if (e.isAltDown()) {
           Lizzie.frame.openBoardSync();
         } else if (e.isShiftDown()) {
-          Lizzie.frame.bowser(
-              "https://home.yikeweiqi.com/#/live",
-              Lizzie.resourceBundle.getString("BottomToolbar.yikeLive"),
-              true);
+          Lizzie.frame.openYikeLiveDialog();
         } else {
           Lizzie.frame.openFile();
         }

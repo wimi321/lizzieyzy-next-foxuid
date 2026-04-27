@@ -4032,15 +4032,24 @@ public class Menu extends JMenuBar {
 
     final JFontMenuItem yikeLive =
         new JFontMenuItem(resourceBundle.getString("Menu.yikeLive")); // ("弈客直播(Shift+O)");
+    yikeLive.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.SHIFT_DOWN_MASK));
     live.add(yikeLive);
 
     yikeLive.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
-            Lizzie.frame.bowser(
-                "https://home.yikeweiqi.com/#/live",
-                resourceBundle.getString("BottomToolbar.yikeLive"),
-                true);
+            Lizzie.frame.openYikeLiveDialog();
+          }
+        });
+
+    final JFontMenuItem yikeLiveWeb =
+        new JFontMenuItem(resourceBundle.getString("Menu.yikeLiveWeb")); // ("打开弈客网页版");
+    live.add(yikeLiveWeb);
+
+    yikeLiveWeb.addActionListener(
+        new ActionListener() {
+          public void actionPerformed(ActionEvent e) {
+            Lizzie.frame.openYikeLiveWeb();
           }
         });
 

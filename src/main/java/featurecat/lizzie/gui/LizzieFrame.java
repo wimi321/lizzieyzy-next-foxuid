@@ -397,6 +397,7 @@ public class LizzieFrame extends JFrame {
   String tryString;
   String titleBeforeTrying;
   public BrowserFrame browserFrame;
+  public YikeLiveDialog yikeLiveDialog;
   public BrowserInitializing browserInitializing;
   //  JFrame frame;
   //  ArrayList<String> urlList;
@@ -9305,6 +9306,39 @@ public class LizzieFrame extends JFrame {
 
     onlineDialog.applyChangeWeb(url);
     syncLiveBoardStat();
+  }
+
+  public void openYikeLiveDialog() {
+    SwingUtilities.invokeLater(
+        new Runnable() {
+          public void run() {
+            if (yikeLiveDialog == null || !yikeLiveDialog.isDisplayable()) {
+              yikeLiveDialog = new YikeLiveDialog(LizzieFrame.this);
+            }
+            yikeLiveDialog.setVisible(true);
+            yikeLiveDialog.toFront();
+            yikeLiveDialog.refreshIfEmpty();
+          }
+        });
+  }
+
+  public void updateYikeLiveSyncStatus(String url, String status) {
+    SwingUtilities.invokeLater(
+        new Runnable() {
+          @Override
+          public void run() {
+            if (yikeLiveDialog != null && yikeLiveDialog.isDisplayable()) {
+              yikeLiveDialog.updateSyncStatus(url, status);
+            }
+          }
+        });
+  }
+
+  public void openYikeLiveWeb() {
+    bowser(
+        YikeApiClient.YIKE_LIVE_URL,
+        Lizzie.resourceBundle.getString("BottomToolbar.yikeLive"),
+        true);
   }
 
   public void openHelp() {
