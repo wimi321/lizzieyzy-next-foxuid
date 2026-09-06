@@ -15858,6 +15858,9 @@ public class LizzieFrame extends JFrame {
   }
 
   public TrackingAnalysisController.AddResult addTrackingPoint(String coordinate) {
+    if (!canStartTrackingAnalysis()) {
+      return TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE;
+    }
     TrackingAnalysisController.Context context = currentTrackingContext();
     if (context == null) {
       return TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE;
@@ -15866,7 +15869,8 @@ public class LizzieFrame extends JFrame {
     if (readBoard == null) {
       return controller.addPoint(coordinate, context);
     }
-    return new ReadBoardTrackingEligibilityAdapter(controller, readBoard)
+    return new ReadBoardTrackingEligibilityAdapter(
+            controller, readBoard, this::currentTrackingContext)
         .addPoint(coordinate, context);
   }
 
@@ -15939,7 +15943,10 @@ public class LizzieFrame extends JFrame {
   }
 
   private TrackingAnalysisController.Context currentTrackingContext() {
-    if (Lizzie.config == null || !canStartTrackingAnalysis()) {
+    if (Lizzie.config == null
+        || Lizzie.board == null
+        || Lizzie.leelaz == null
+        || !Lizzie.leelaz.isEligibleLocalKataGoForReadBoardTracking()) {
       return null;
     }
     BoardHistoryList history = Lizzie.board.getHistory();
@@ -15953,7 +15960,7 @@ public class LizzieFrame extends JFrame {
     TrackingAnalysisController.ReadBoardContext readBoardContext = null;
     if (readBoard != null) {
       ReadBoardTrackingEligibilityAdapter.Snapshot readBoardSnapshot = readBoard.snapshot();
-      if (!readBoardSnapshot.stable() || readBoardSnapshot.nodeIdentity() != node) {
+      if (!readBoardSnapshot.retainsContext() || readBoardSnapshot.nodeIdentity() != node) {
         return null;
       }
       readBoardContext =

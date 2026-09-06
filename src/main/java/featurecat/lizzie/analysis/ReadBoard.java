@@ -241,14 +241,18 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   private boolean hideFromPlace = false;
   public boolean editMode = false;
   private volatile boolean shutdownStarted = false;
-  private Object trackingEligibilityIdentity = new Object();
+  private volatile Object trackingEligibilityIdentity = new Object();
   private long trackingEligibilityRevision = 0L;
+  private long trackingAdmissionEpoch;
+  private volatile Object trackingEligibilityLock = new Object();
   private BoardHistoryNode trackingEligibilityNode;
   private long trackingEligibilityBoardRevision = 0L;
   private ReadBoardTrackingEligibilityAdapter.Reason trackingEligibilityReason =
       ReadBoardTrackingEligibilityAdapter.Reason.NO_ACCEPTED_FRAME;
   private Object trackingEligibilityObserverIdentity;
   private Runnable trackingEligibilityInvalidationListener;
+  private Runnable trackingEligibilitySettledListener;
+  private boolean malformedSyncFrame;
   private final SyncConflictTracker conflictTracker = new SyncConflictTracker();
   private final SyncHistoryJumpTracker historyJumpTracker = new SyncHistoryJumpTracker();
   private final SyncLocalNavigationTracker localNavigationTracker =
@@ -660,9 +664,23 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
         invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING);
       }
       String[] params = line.substring(3).split(",");
-      if (params.length == Board.boardWidth) {
-        for (int i = 0; i < params.length; i++)
-          tempcount.add(Integer.parseInt(params[i].substring(0, 1)));
+      if (params.length != Board.boardWidth) {
+        malformedSyncFrame = true;
+      } else {
+        for (String param : params) {
+          if (param.length() != 1 || param.charAt(0) < '0' || param.charAt(0) > '4') {
+            malformedSyncFrame = true;
+            throw new IllegalArgumentException("Malformed ReadBoard cell code");
+          }
+        }
+      }
+      if (malformedSyncFrame) {
+        ReadBoardObservation.recordTrackingEligibility(
+            "pending", "malformed-frame", snapshot().retainsContext());
+        return;
+      }
+      for (String param : params) {
+        tempcount.add(param.charAt(0) - '0');
       }
     }
     if (line.startsWith("foxMoveNumber")) {
@@ -756,9 +774,11 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       if (!isSyncing && !isYikePlatform) syncBoardStones(false);
       clearPendingRemoteContext();
       tempcount = new ArrayList<Integer>();
+      malformedSyncFrame = false;
       publishCurrentReadBoardDiagnosticsSnapshot();
     }
     if (line.trim().equals("clear")) {
+      invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING);
       resetActiveSyncStateForReadBoardControlLine();
       clearPendingRemoteContext();
       tempcount = new ArrayList<Integer>();
@@ -819,6 +839,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       LizzieFrame.toolbar.isAutoPlay = false;
     }
     if (line.startsWith("endsync")) {
+      invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.RETIRED);
       clearReadBoardGmaAutoPlay("endsync");
       noMsg = true;
       resetActiveSyncStateForReadBoardControlLine();
@@ -835,6 +856,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       publishCurrentReadBoardDiagnosticsSnapshot();
     }
     if (line.startsWith("stopsync")) {
+      invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.RETIRED);
       clearReadBoardGmaAutoPlay("stopsync");
       resetActiveSyncStateForReadBoardControlLine();
       clearPendingRemoteContext();
@@ -1511,6 +1533,9 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void syncBoardStones(boolean isSecondTime) {
+    if (malformedSyncFrame) {
+      return;
+    }
     //    if (!isSecondTime) {
     //      long thisTime = System.currentTimeMillis();
     //      if (thisTime - startSyncTime < Lizzie.config.readBoardArg2 / 2) return;
@@ -1522,7 +1547,13 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       resetActiveSyncState();
       return;
     }
-    isSyncing = true;
+    final long processingEpoch;
+    synchronized (trackingEligibilityLock()) {
+      trackingAdmissionEpoch++;
+      processingEpoch = trackingAdmissionEpoch;
+      isSyncing = true;
+    }
+    boolean frameAccepted = false;
     try {
       boolean needReSync = false;
       boolean played = false;
@@ -1582,6 +1613,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
             currentFoxMoveNumber,
             false);
         finishSyncAfterAcknowledgedLocalMoveSnapshot();
+        frameAccepted = true;
         return;
       }
       updateConfirmedLocalMoveForSnapshot(currentSnapshotCodes);
@@ -1729,6 +1761,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
                   + pendingLocalMoveState());
           rebuildFromSnapshot(node2, currentSnapshotCodes, snapshotDelta, currentFoxMoveNumber);
           publishReadBoardDiagnosticsSnapshot(trace);
+          frameAccepted = true;
           return;
         }
         updateReadBoardTurnTrustFromAcceptedFrame(
@@ -1772,6 +1805,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
             currentSyncEndNode, currentRemoteContext, currentSnapshotCodes, snapshotDelta)) {
           rebuildFromSnapshot(
               currentSyncEndNode, currentSnapshotCodes, snapshotDelta, currentFoxMoveNumber);
+          frameAccepted = true;
           return;
         }
         updateReadBoardTurnTrustFromAcceptedFrame(
@@ -1788,6 +1822,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       if (!needReSync) {
         conflictTracker.clear();
         awaitingFirstSyncFrame = false;
+        frameAccepted = true;
       }
       if (completeSnapshotTrace != null && !needReSync) {
         publishReadBoardDiagnosticsSnapshot(completeSnapshotTrace);
@@ -1810,9 +1845,16 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
         }.start();
       }
       continueGameAfterSyncIfNeeded("sync", Lizzie.board.getHistory().getCurrentHistoryNode());
+    } catch (RuntimeException | Error failure) {
+      frameAccepted = false;
+      throw failure;
     } finally {
       localNavigationTracker.clear();
       isSyncing = false;
+      if (frameAccepted) {
+        publishAcceptedTrackingEligibility(
+            Lizzie.board.getHistory().getCurrentHistoryNode(), processingEpoch);
+      }
     }
     //	    if (played && Lizzie.config.alwaysGotoLastOnLive) {
     //	      int moveNumber = Lizzie.board.getHistory().getMainEnd().getData().moveNumber;
@@ -2534,11 +2576,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
                     foxMoveNumber))
             || isMarkerlessOrdinaryFoxTurnFallback(
                 syncStartNode, snapshotDelta, lastMoveSource, foxMoveNumber);
-    BoardHistoryNode acceptedNode =
-        Lizzie.board == null || Lizzie.board.getHistory() == null
-            ? null
-            : Lizzie.board.getHistory().getCurrentHistoryNode();
-    publishAcceptedTrackingEligibility(acceptedNode);
   }
 
   private boolean isTrustedUnchangedSnapshotTurn(
@@ -2904,6 +2941,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       boolean preserveFailedLocalMoveSuppression,
       boolean preservePendingLocalMoveTracking,
       boolean preserveConfirmedLocalMove) {
+    malformedSyncFrame = false;
     conflictTracker.clear();
     historyJumpTracker.clear();
     if (preservePendingLocalMoveTracking && isPendingLocalMoveAwaitingReadBoard()) {
@@ -5906,15 +5944,17 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   @Override
-  public synchronized ReadBoardTrackingEligibilityAdapter.Snapshot snapshot() {
-    ensureTrackingEligibilityInitialized();
-    ReadBoardTrackingEligibilityAdapter.Reason reason = currentTrackingEligibilityReason();
-    return new ReadBoardTrackingEligibilityAdapter.Snapshot(
-        trackingEligibilityIdentity,
-        trackingEligibilityRevision,
-        trackingEligibilityNode,
-        trackingEligibilityBoardRevision,
-        reason);
+  public ReadBoardTrackingEligibilityAdapter.Snapshot snapshot() {
+    synchronized (trackingEligibilityLock()) {
+      ensureTrackingEligibilityInitialized();
+      return new ReadBoardTrackingEligibilityAdapter.Snapshot(
+          trackingEligibilityIdentity,
+          trackingEligibilityRevision,
+          trackingEligibilityNode,
+          trackingEligibilityBoardRevision,
+          currentTrackingEligibilityReason(),
+          trackingAdmissionEpoch);
+    }
   }
 
   synchronized Object currentReadBoardGmaIdentity() {
@@ -5926,28 +5966,42 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   @Override
-  public void observeInvalidation(Object identity, Runnable listener) {
+  public boolean observeEligibility(
+      ReadBoardTrackingEligibilityAdapter.Snapshot expected,
+      Runnable invalidated,
+      Runnable settled) {
     boolean invalid;
-    synchronized (this) {
-      ensureTrackingEligibilityInitialized();
-      invalid = identity != trackingEligibilityIdentity || shutdownStarted;
+    synchronized (trackingEligibilityLock()) {
+      invalid = !expected.sameFrame(snapshot());
       if (!invalid) {
-        trackingEligibilityObserverIdentity = identity;
-        trackingEligibilityInvalidationListener = listener;
+        trackingEligibilityObserverIdentity = expected.identity();
+        trackingEligibilityInvalidationListener = invalidated;
+        trackingEligibilitySettledListener = settled;
       }
     }
-    if (invalid) {
-      runTrackingEligibilityInvalidationListener(listener);
-    }
+    return !invalid;
   }
 
-  private synchronized void ensureTrackingEligibilityInitialized() {
+  private void ensureTrackingEligibilityInitialized() {
     if (trackingEligibilityIdentity == null) {
       trackingEligibilityIdentity = new Object();
     }
     if (trackingEligibilityReason == null) {
       trackingEligibilityReason = ReadBoardTrackingEligibilityAdapter.Reason.NO_ACCEPTED_FRAME;
     }
+  }
+
+  private Object trackingEligibilityLock() {
+    Object lock = trackingEligibilityLock;
+    if (lock == null) {
+      synchronized (this) {
+        if (trackingEligibilityLock == null) {
+          trackingEligibilityLock = new Object();
+        }
+        lock = trackingEligibilityLock;
+      }
+    }
+    return lock;
   }
 
   private ReadBoardTrackingEligibilityAdapter.Reason currentTrackingEligibilityReason() {
@@ -5959,12 +6013,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     }
     if (trackingEligibilityNode == null) {
       return trackingEligibilityReason;
-    }
-    if (awaitingFirstSyncFrame) {
-      return ReadBoardTrackingEligibilityAdapter.Reason.FIRST_FRAME;
-    }
-    if (isSyncing) {
-      return ReadBoardTrackingEligibilityAdapter.Reason.SYNCING;
     }
     if (isPendingLocalMoveAwaitingReadBoard()) {
       return ReadBoardTrackingEligibilityAdapter.Reason.PENDING_LOCAL_MOVE;
@@ -5984,32 +6032,63 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
         || Lizzie.board.getContextRevision() != trackingEligibilityBoardRevision) {
       return ReadBoardTrackingEligibilityAdapter.Reason.NODE_MISMATCH;
     }
+    if (awaitingFirstSyncFrame) {
+      return ReadBoardTrackingEligibilityAdapter.Reason.FIRST_FRAME;
+    }
+    if (isSyncing) {
+      return ReadBoardTrackingEligibilityAdapter.Reason.SYNCING;
+    }
     return trackingEligibilityReason;
   }
 
-  private void publishAcceptedTrackingEligibility(BoardHistoryNode acceptedNode) {
+  private void publishAcceptedTrackingEligibility(
+      BoardHistoryNode acceptedNode, long processingEpoch) {
     if (acceptedNode == null || Lizzie.board == null) {
       return;
     }
     Runnable listener;
-    synchronized (this) {
+    synchronized (trackingEligibilityLock()) {
       ensureTrackingEligibilityInitialized();
-      trackingEligibilityRevision++;
+      if (trackingAdmissionEpoch != processingEpoch) {
+        return;
+      }
+      long boardRevision = Lizzie.board.getContextRevision();
+      boolean changed =
+          trackingEligibilityNode != acceptedNode
+              || trackingEligibilityBoardRevision != boardRevision;
+      if (changed) {
+        trackingEligibilityRevision++;
+      }
       trackingEligibilityNode = acceptedNode;
-      trackingEligibilityBoardRevision = Lizzie.board.getContextRevision();
+      trackingEligibilityBoardRevision = boardRevision;
       trackingEligibilityReason = ReadBoardTrackingEligibilityAdapter.Reason.STABLE;
-      listener = takeTrackingEligibilityInvalidationListener();
+      listener =
+          changed
+              ? takeTrackingEligibilityInvalidationListener()
+              : trackingEligibilitySettledListener;
+      ReadBoardObservation.recordTrackingEligibility(
+          changed ? "invalidated" : "settled", "accepted-context", !changed);
     }
     runTrackingEligibilityInvalidationListener(listener);
   }
 
   private void invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason reason) {
     Runnable listener;
-    synchronized (this) {
+    synchronized (trackingEligibilityLock()) {
       ensureTrackingEligibilityInitialized();
+      trackingAdmissionEpoch++;
+      if (reason == ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING
+          || reason == ReadBoardTrackingEligibilityAdapter.Reason.FIRST_FRAME) {
+        trackingEligibilityReason = reason;
+        ReadBoardObservation.recordTrackingEligibility(
+            "pending", reason.name(), trackingEligibilityNode != null);
+        return;
+      }
       trackingEligibilityRevision++;
+      trackingEligibilityNode = null;
       trackingEligibilityReason = reason;
       listener = takeTrackingEligibilityInvalidationListener();
+      ReadBoardObservation.recordTrackingEligibility("invalidated", reason.name(), false);
     }
     runTrackingEligibilityInvalidationListener(listener);
   }
@@ -6026,15 +6105,18 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     Object retiredGmaIdentity;
     long retiredGmaGeneration;
     synchronized (this) {
-      ensureTrackingEligibilityInitialized();
-      listener = takeTrackingEligibilityInvalidationListener();
-      retiredGmaIdentity = readBoardGmaPendingIdentity;
-      retiredGmaGeneration = readBoardGmaPendingGeneration;
-      trackingEligibilityRevision++;
-      trackingEligibilityIdentity = new Object();
-      trackingEligibilityNode = null;
-      trackingEligibilityBoardRevision = 0L;
-      trackingEligibilityReason = ReadBoardTrackingEligibilityAdapter.Reason.RETIRED;
+      synchronized (trackingEligibilityLock()) {
+        ensureTrackingEligibilityInitialized();
+        listener = takeTrackingEligibilityInvalidationListener();
+        retiredGmaIdentity = readBoardGmaPendingIdentity;
+        retiredGmaGeneration = readBoardGmaPendingGeneration;
+        trackingEligibilityRevision++;
+        trackingEligibilityIdentity = new Object();
+        trackingEligibilityNode = null;
+        trackingEligibilityBoardRevision = 0L;
+        trackingEligibilityReason = ReadBoardTrackingEligibilityAdapter.Reason.RETIRED;
+        trackingAdmissionEpoch++;
+      }
       retiredReadBoardGmaTerminalPending = readBoardGmaPending;
       retiredReadBoardGmaIdentity = retiredReadBoardGmaTerminalPending ? retiredGmaIdentity : null;
       retiredReadBoardGmaGeneration =
@@ -6073,11 +6155,16 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
             : null;
     trackingEligibilityObserverIdentity = null;
     trackingEligibilityInvalidationListener = null;
+    trackingEligibilitySettledListener = null;
     return listener;
   }
 
-  private static void runTrackingEligibilityInvalidationListener(Runnable listener) {
+  private void runTrackingEligibilityInvalidationListener(Runnable listener) {
     if (listener == null) {
+      return;
+    }
+    if (Thread.holdsLock(this)) {
+      SwingUtilities.invokeLater(() -> runTrackingEligibilityInvalidationListener(listener));
       return;
     }
     try {

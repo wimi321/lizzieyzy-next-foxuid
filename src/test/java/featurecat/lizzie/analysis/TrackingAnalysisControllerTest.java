@@ -69,7 +69,13 @@ class TrackingAnalysisControllerTest {
       MutableEligibilitySource source =
           new MutableEligibilitySource(state.output, 1L, state.output, 7L, true);
       ReadBoardTrackingEligibilityAdapter adapter =
-          new ReadBoardTrackingEligibilityAdapter(controller, source);
+          new ReadBoardTrackingEligibilityAdapter(
+              controller,
+              source,
+              () ->
+                  state.contextWithReadBoard(
+                      new TrackingAnalysisController.ReadBoardContext(
+                          state.output, 1L, state.output, 7L)));
       TrackingAnalysisController.Context context =
           state.contextWithReadBoard(
               new TrackingAnalysisController.ReadBoardContext(state.output, 1L, state.output, 7L));
@@ -92,7 +98,13 @@ class TrackingAnalysisControllerTest {
       MutableEligibilitySource source =
           new MutableEligibilitySource(state.output, 1L, state.output, 7L, false);
       ReadBoardTrackingEligibilityAdapter adapter =
-          new ReadBoardTrackingEligibilityAdapter(controller, source);
+          new ReadBoardTrackingEligibilityAdapter(
+              controller,
+              source,
+              () ->
+                  state.contextWithReadBoard(
+                      new TrackingAnalysisController.ReadBoardContext(
+                          state.output, 1L, state.output, 7L)));
 
       assertEquals(
           TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
@@ -921,7 +933,8 @@ class TrackingAnalysisControllerTest {
               boardRevision,
               stable
                   ? ReadBoardTrackingEligibilityAdapter.Reason.STABLE
-                  : ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING);
+                  : ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING,
+              revision);
       Runnable listener = invalidationListener;
       if (listener != null && !stable) {
         listener.run();
@@ -934,8 +947,12 @@ class TrackingAnalysisControllerTest {
     }
 
     @Override
-    public void observeInvalidation(Object identity, Runnable listener) {
+    public boolean observeEligibility(
+        ReadBoardTrackingEligibilityAdapter.Snapshot expected,
+        Runnable listener,
+        Runnable settled) {
       invalidationListener = listener;
+      return expected.sameFrame(snapshot);
     }
   }
 

@@ -110,6 +110,19 @@ public final class ReadBoardObservation {
     }
   }
 
+  public static void recordTrackingEligibility(String event, String reason, boolean retained) {
+    try {
+      if (diagnosticsEnabled()) {
+        DIAG.debug(
+            "readboard event=tracking-eligibility phase={} reason={} retained={}",
+            event,
+            reason,
+            retained);
+      }
+    } catch (RuntimeException ignored) {
+    }
+  }
+
   public static void recordFailure(String reason, Throwable error) {
     try {
       if (!initialized() || !DIAG.isWarnEnabled()) {

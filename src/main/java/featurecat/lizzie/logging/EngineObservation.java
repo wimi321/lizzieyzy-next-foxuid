@@ -48,6 +48,22 @@ public final class EngineObservation {
         && TRACE.isInfoEnabled();
   }
 
+  public static void recordTracking(
+      String reason, String point, int visits, int targetVisits, long timeoutMillis) {
+    try {
+      if (engineDiagnosticsEnabled()) {
+        ENGINE.debug(
+            "engine event=tracking reason={} point={} visits={} targetVisits={} timeoutMillis={}",
+            reason,
+            point,
+            visits,
+            targetVisits,
+            timeoutMillis);
+      }
+    } catch (RuntimeException ignored) {
+    }
+  }
+
   public static String identityFor(Object owner) {
     if (owner == null) {
       return null;

@@ -102,11 +102,12 @@ TrackingAnalysisController -- immutable DisplaySnapshot --> BoardRenderer
 1. `RightClickMenu` 把棋盘坐标交给 `LizzieFrame.addTrackingPoint(...)`。
 2. `LizzieFrame.currentTrackingContext()` 捕获 history/node、棋盘、行棋方、规则、贴目、引擎、
    reader incarnation、interval、visits，以及可选 ReadBoard context。
-3. 若 ReadBoard 存在，adapter 在 acquisition 前检查 stable snapshot，注册 identity invalidation
-   listener，并在 acquisition 后再次检查同一 frame。
+3. 若 ReadBoard 存在，adapter 检查 stable snapshot 并注册绑定完整 context 的 invalidated / settled
+   通知。每次独立 acquisition 前捕获准入快照，获取后复验完整 context 与 admission epoch。
 4. Controller 校验坐标与 context。已有 current attempt 时，新点进入 deque 头部；否则创建新的
    generation 并请求 lease。
-5. `Leelaz` 完成 initial fence 后调用 ready callback。只有 acquisition validator 仍成立才发送：
+5. 获取后复验成功即接受该 attempt；initial fence 完成后发送以下命令，之后的纯 pending
+   不撤销已接受 attempt，也不释放或重建其 stream：
 
    ```text
    kata-analyze <interval> allow B <coord> 1 allow W <coord> 1
@@ -179,11 +180,28 @@ Tracking context 绑定以下事实：
 Controller generation 同时隔离旧 line、旧 timer、旧 ready/closed callback。任何异步入口都应
 先用 captured generation 和 exact lease identity 复验，再接触 current state。
 
+ReadBoard semantic revision 只表示已接受 context 变化或退休。新帧首行、同尺寸 start/clear
+只推进 owner-local admission epoch、关闭新准入；相同完整帧处理成功并完成最终导航后恢复
+stable，保留语义 revision。`updateReadBoardTurnTrustFromAcceptedFrame` 只更新轮次可信度；
+`syncBoardStones` 持有本次处理的局部接受结果，最终发布还在 eligibility lock 内复验进入
+处理时捕获的 admission epoch，不能覆盖期间发生的 history/lifecycle 失效。异常、未收齐
+或含非法 cell code 的帧不能发布 stable；非法帧只在下一采样/reset/end 边界清除拒绝状态。
+
+当前点在 pending 中完成时，controller 留住已接受等待点与首个 receipt，不获取下一份 lease。
+同 context 的 settled 通知复验 LizzieFrame 捕获的完整 context，再恢复 newest-first 调度。
+等待点在 acquisition 前后遇到帧切换时，先完成该次 lease 的安全关闭，再继续等待；新用户
+请求失去准入时则只删除自身，不保留 retry。不要将这两类意图合并。
+
+ReadBoard 的 invalidation 走 `contextInvalidated(expected)`，不是用户 `clear()`；settled 也
+先核对 expected context。迟到的旧通知不能清空或调度更新的 context。现有 observation 类
+提供 tracking-eligibility 的 pending/settled/invalidated，以及 tracking progress-timeout；
+只在相应 diagnostics 开启时输出。帧接收和 stable 发布都不修改 progress timeout。
+
 ## 7. Stream arbitration 与普通命令
 
 ### 7.1 锁序
 
-唯一允许的锁序是：
+引擎内部锁序保持：
 
 ```text
 engineArbitrationLock -> commandQueue
@@ -191,6 +209,12 @@ engineArbitrationLock -> commandQueue
 
 callback、observer、target activation/failure 和 queue wakeup 应在 ownership locks 外执行。
 不要为了方便在 callback 中反向取得 arbitration lock。
+
+ReadBoard tracking 状态由独立 `trackingEligibilityLock` 保护；controller 持自身 monitor
+查询 eligibility 时不能再取得 ReadBoard owner monitor。读取既有 Board revision 与 engine
+eligibility facts 不触发恢复。状态锁内只更新 accepted facts / listener ownership，不调用
+controller。外层持 ReadBoard monitor 的入口把通知异步交给 EDT；实际 frame/lease 验收使用
+latch 控制这种交错，并验证下一 EDT event 能完成，不给整个 parser 加锁。
 
 ### 7.2 为什么 ordinary command 必须先入原 queue
 

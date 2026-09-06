@@ -63,6 +63,36 @@ to-play、rules、komi、engine/incarnation、参数或 ReadBoard identity/revis
 ReadBoard stable 条件与失效顺序由 `ReadBoardTrackingEligibilityAdapter` 和 `ReadBoard`
 eligibility snapshot 拥有。Tracking 不拦截 helper protocol，不推导或补造 `MOVE/PASS`。
 
+ReadBoard revision 是已接受语义上下文的版本，不是帧计数。`FRAME_PENDING`、纯帧处理
+`SYNCING` 和同尺寸 start/clear 的采样边界只关闭新请求准入；只要已接受 node、Board revision
+及上述完整 context 仍有效，就保留选点、已完成结果、当前进展与原 active stream。
+完整帧在处理成功、最终导航落定后发布；相同上下文恢复 stable 不增加语义 revision。
+HOLD、真实局面变化、停止同步、helper/engine retirement 仍使旧 context 失效；未收齐或处理
+失败的帧不能发布 stable。中间的 turn-trust 更新不是 accepted context 的发布点。
+
+最终发布必须复验该次处理捕获的 admission epoch；处理期间发生的历史替换、导航或退休
+不能被迟到的 frame publication 覆盖。非法行宽或 cell code 使整帧不可接受，但不删除仍
+属于上一个有效 context 的结果。
+
+每份独立 point lease 都进行 stable 准入前后复验，并用 owner-local admission epoch 检测
+获取期间的帧边界，包括恢复为相同 stable 局面的 ABA。epoch 不进入长期结果 context。
+获取后复验成功是准入线性化点；此后 initial fence 在 pending 期间结束也可启动已准入的
+request。未准入的新请求只拒绝自身，不清除有效的其他结果，也不在稳定后自动重试。
+
+此前已接受的 pending points 不属于被拒绝的新请求。当前点在 pending 期间完成时，保留
+这些等待点，直到同一完整 context 恢复 stable 后继续 newest-first 调度。等待点在获取中
+失去准入时，也先安全关闭该次 lease，再等待/恢复调度；语义失效则清除整个旧队列。
+invalidation 和 settled 通知绑定其原 context，迟到通知不能修改替代 context。
+
+ReadBoard eligibility 使用独立窄锁；controller 查询不取得 ReadBoard owner monitor。
+通知在 eligibility lock 外执行；外层仍持 ReadBoard monitor 时交由 EDT 异步通知，不能把
+controller 调用、helper I/O、引擎恢复或阻塞 EDT handoff 放入该状态锁。
+
+语义失效使用 context-invalidated cleanup，不得恢复旧 ponder；用户 remove/clear 仍使用
+clean cancellation handback。帧流量不续期 8 秒无进展 timeout。现有 ReadBoard/engine
+diagnostics 分别记录 pending/settled retention、semantic/context invalidation 和 progress
+timeout；timeout 包含坐标、last visits、target visits 和 8000ms，不逐条记录 info。
+
 ## Display 与 renderer
 
 - `DisplaySnapshot` 是 immutable value；renderer 不读取 controller 内部 mutable state。

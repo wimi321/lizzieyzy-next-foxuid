@@ -2795,30 +2795,6 @@ class ReadBoardSyncDecisionTest {
   }
 
   @Test
-  void acceptedCompleteFramePublishesStableTrackingEligibilityAndNextFrameInvalidatesFirst()
-      throws Exception {
-    try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
-      harness.leelaz.enableReadBoardGmaSupport();
-      harness.sync(snapshot(stones(), Optional.empty(), Stone.EMPTY));
-      ReadBoardTrackingEligibilityAdapter.Snapshot stable = harness.readBoard.snapshot();
-      AtomicInteger invalidations = new AtomicInteger();
-      harness.readBoard.observeInvalidation(stable.identity(), invalidations::incrementAndGet);
-
-      assertEquals(ReadBoardTrackingEligibilityAdapter.Reason.STABLE, stable.reason());
-      assertSame(harness.board.getHistory().getCurrentHistoryNode(), stable.nodeIdentity());
-      assertEquals(harness.board.getContextRevision(), stable.boardRevision());
-
-      setField(harness.readBoard, "tempcount", new ArrayList<Integer>());
-      harness.readBoard.parseLine("re=0,0,0");
-      ReadBoardTrackingEligibilityAdapter.Snapshot pending = harness.readBoard.snapshot();
-
-      assertEquals(ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING, pending.reason());
-      assertTrue(pending.revision() > stable.revision());
-      assertEquals(1, invalidations.get());
-    }
-  }
-
-  @Test
   void trackingEligibilityExplainsFirstFramePendingLocalGmaRestoreAndNodeMismatch()
       throws Exception {
     try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
@@ -2866,7 +2842,7 @@ class ReadBoardSyncDecisionTest {
       harness.sync(snapshot(stones(), Optional.empty(), Stone.EMPTY));
       ReadBoardTrackingEligibilityAdapter.Snapshot first = harness.readBoard.snapshot();
       AtomicInteger invalidations = new AtomicInteger();
-      harness.readBoard.observeInvalidation(first.identity(), invalidations::incrementAndGet);
+      harness.readBoard.observeEligibility(first, invalidations::incrementAndGet, () -> {});
       setField(
           harness.readBoard, "localNavigationTracker", new SyncLocalNavigationTracker(() -> true));
 
@@ -2879,7 +2855,7 @@ class ReadBoardSyncDecisionTest {
 
       harness.sync(snapshot(stones(), Optional.empty(), Stone.EMPTY));
       ReadBoardTrackingEligibilityAdapter.Snapshot second = harness.readBoard.snapshot();
-      harness.readBoard.observeInvalidation(second.identity(), invalidations::incrementAndGet);
+      harness.readBoard.observeEligibility(second, invalidations::incrementAndGet, () -> {});
 
       harness.readBoard.onHistoryOverwritten();
 

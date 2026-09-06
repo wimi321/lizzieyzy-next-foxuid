@@ -1,5 +1,6 @@
 package featurecat.lizzie.analysis;
 
+import featurecat.lizzie.logging.EngineObservation;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Deque;
@@ -201,7 +202,7 @@ public final class TrackingAnalysisController {
       return java.util.Optional.ofNullable(readBoardContext);
     }
 
-    private boolean matches(Context other) {
+    boolean matches(Context other) {
       return other != null
           && historyIdentity == other.historyIdentity
           && displayNodeIdentity == other.displayNodeIdentity
@@ -331,6 +332,7 @@ public final class TrackingAnalysisController {
     private boolean acquisitionValidated;
     private boolean ready;
     private boolean requestSent;
+    private boolean acquisitionRejected;
     private Leelaz.TrackingReleaseDisposition disposition =
         Leelaz.TrackingReleaseDisposition.ACTIVE;
 
@@ -350,6 +352,7 @@ public final class TrackingAnalysisController {
   private PointAttempt current;
   private Leelaz.TrackingStreamLeaseReceipt initialReceipt;
   private volatile DisplaySnapshot snapshot = DisplaySnapshot.EMPTY;
+  private java.util.function.Supplier<java.util.function.BooleanSupplier> admission;
 
   public TrackingAnalysisController() {
     this(new DaemonTimeoutScheduler(), () -> {});
@@ -373,7 +376,9 @@ public final class TrackingAnalysisController {
   }
 
   synchronized AddResult addPoint(
-      String coordinate, Context requestedContext, java.util.function.BooleanSupplier validator) {
+      String coordinate,
+      Context requestedContext,
+      java.util.function.Supplier<java.util.function.BooleanSupplier> admission) {
     Objects.requireNonNull(requestedContext, "requestedContext");
     String normalized = normalizeCoordinate(coordinate, requestedContext);
     if (normalized == null) {
@@ -383,8 +388,7 @@ public final class TrackingAnalysisController {
       return AddResult.CONTEXT_MISMATCH;
     }
     if (current != null
-        && (current.cancelled
-            || current.disposition != Leelaz.TrackingReleaseDisposition.ACTIVE)) {
+        && (current.cancelled || current.disposition != Leelaz.TrackingReleaseDisposition.ACTIVE)) {
       return AddResult.LEASE_UNAVAILABLE;
     }
     if (current == null && snapshot.frozen()) {
@@ -396,6 +400,11 @@ public final class TrackingAnalysisController {
       return AddResult.DUPLICATE;
     }
 
+    java.util.function.BooleanSupplier validator = admission == null ? () -> true : admission.get();
+    if (validator == null || !validator.getAsBoolean()) {
+      return AddResult.LEASE_UNAVAILABLE;
+    }
+    this.admission = admission;
     context = requestedContext;
     selectedPoints.add(normalized);
     if (current != null) {
@@ -403,7 +412,7 @@ public final class TrackingAnalysisController {
       publishSnapshot(true, false);
       return AddResult.ADDED;
     }
-    return startPoint(normalized, validator);
+    return startPoint(normalized, validator, false);
   }
 
   public synchronized boolean removePoint(String coordinate) {
@@ -432,6 +441,7 @@ public final class TrackingAnalysisController {
   }
 
   public synchronized void clear() {
+    recordTracking("user-clear");
     PointAttempt attempt = current;
     clearPointState();
     if (attempt == null) {
@@ -455,7 +465,38 @@ public final class TrackingAnalysisController {
     }
   }
 
+  synchronized void contextInvalidated(Context expected) {
+    if (context != null && context.matches(expected)) {
+      clearState();
+    }
+  }
+
+  synchronized void contextSettled(Context expected, Context accepted) {
+    if (context == null || !context.matches(expected)) {
+      return;
+    }
+    contextChanged(accepted);
+    resumePendingPoints(expected);
+  }
+
+  synchronized void resumePendingPoints(Context expected) {
+    if (context == null
+        || !context.matches(expected)
+        || current != null
+        || pendingPoints.isEmpty()) {
+      return;
+    }
+    java.util.function.BooleanSupplier validator = admission == null ? () -> true : admission.get();
+    if (validator == null) {
+      publishSnapshot(false, false);
+      return;
+    }
+    String next = pendingPoints.pollFirst();
+    startPoint(next, validator, true);
+  }
+
   private void clearState() {
+    recordTracking("context-mismatch");
     PointAttempt attempt = current;
     generation++;
     current = null;
@@ -466,18 +507,17 @@ public final class TrackingAnalysisController {
     clearPointState();
     context = null;
     initialReceipt = null;
+    admission = null;
     publishEmptySnapshot();
     if (attempt != null && attempt.lease != null) {
       attempt.lease.release();
     }
   }
 
-  private AddResult startPoint(String coordinate) {
-    return startPoint(coordinate, null);
-  }
-
   private AddResult startPoint(
-      String coordinate, java.util.function.BooleanSupplier acquisitionValidator) {
+      String coordinate,
+      java.util.function.BooleanSupplier acquisitionValidator,
+      boolean wasWaiting) {
     PointAttempt attempt = new PointAttempt(++generation, coordinate);
     current = attempt;
     publishSnapshot(true, false);
@@ -492,33 +532,14 @@ public final class TrackingAnalysisController {
         || acquisition.receipt() == null
         || acquisition.receipt().engine() != context.engine
         || acquisition.receipt().engineIncarnation() != context.engineIncarnation) {
-      if (acquisition.lease() != null) {
-        acquisition.lease().release();
-      }
-      if (current == attempt) {
-        current = null;
-      }
-      clearPointState();
-      context = null;
-      initialReceipt = null;
-      publishEmptySnapshot();
+      rejectAttempt(attempt, acquisition.lease(), false);
       return AddResult.LEASE_UNAVAILABLE;
     }
     attempt.lease = acquisition.lease();
     boolean validAfterAcquisition =
         acquisitionValidator == null || acquisitionValidator.getAsBoolean();
     if (!validAfterAcquisition || current != attempt) {
-      attempt.cancelled = true;
-      if (attempt.lease != null) {
-        attempt.lease.release();
-      }
-      if (current == attempt) {
-        current = null;
-        clearPointState();
-        context = null;
-        initialReceipt = null;
-        publishEmptySnapshot();
-      }
+      rejectAttempt(attempt, attempt.lease, wasWaiting);
       return AddResult.LEASE_UNAVAILABLE;
     }
     attempt.acquisitionValidated = true;
@@ -529,6 +550,31 @@ public final class TrackingAnalysisController {
       sendTrackingRequest(attempt);
     }
     return AddResult.ADDED;
+  }
+
+  private void rejectAttempt(
+      PointAttempt attempt, Leelaz.TrackingStreamLease lease, boolean keepWaiting) {
+    attempt.cancelled = true;
+    attempt.acquisitionRejected = true;
+    attempt.lease = lease;
+    if (current == attempt) {
+      if (lease == null) current = null;
+      if (keepWaiting) {
+        pendingPoints.addFirst(attempt.coordinate);
+      } else {
+        selectedPoints.remove(attempt.coordinate);
+        results.remove(attempt.coordinate);
+      }
+      if (selectedPoints.isEmpty()) {
+        context = null;
+        initialReceipt = null;
+        admission = null;
+      }
+      publishSnapshot(false, false);
+    }
+    if (lease != null) {
+      lease.release();
+    }
   }
 
   public DisplaySnapshot snapshot() {
@@ -618,13 +664,16 @@ public final class TrackingAnalysisController {
       }
       return;
     }
+    if (attempt.acquisitionRejected) {
+      resumePendingPoints(context);
+      return;
+    }
     boolean completed =
         !attempt.cancelled
             && lease.failureReason().isEmpty()
             && attempt.result != null
             && attempt.result.visits >= context.parameters.targetVisits();
-    boolean cleanUserCancellation =
-        attempt.restorePonderOnClose && lease.failureReason().isEmpty();
+    boolean cleanUserCancellation = attempt.restorePonderOnClose && lease.failureReason().isEmpty();
     if (!completed) {
       selectedPoints.remove(attempt.coordinate);
       results.remove(attempt.coordinate);
@@ -632,9 +681,8 @@ public final class TrackingAnalysisController {
       attempt.result = attempt.result.asCompleted();
       results.put(attempt.coordinate, attempt.result);
     }
-    String next = pendingPoints.pollFirst();
-    if (next != null) {
-      startPoint(next);
+    if (!pendingPoints.isEmpty()) {
+      resumePendingPoints(context);
     } else {
       publishSnapshot(false, false);
       Leelaz.TrackingStreamLeaseReceipt handbackReceipt = initialReceipt;
@@ -668,9 +716,20 @@ public final class TrackingAnalysisController {
         || attempt.disposition != Leelaz.TrackingReleaseDisposition.ACTIVE) {
       return;
     }
+    recordTracking("progress-timeout");
     attempt.timeout = null;
     attempt.timeoutToken++;
     attempt.lease.release();
+  }
+
+  private void recordTracking(String reason) {
+    PointAttempt attempt = current;
+    EngineObservation.recordTracking(
+        reason,
+        attempt == null ? null : attempt.coordinate,
+        attempt == null || attempt.result == null ? 0 : attempt.result.visits,
+        context == null ? 0 : context.parameters.targetVisits(),
+        PROGRESS_TIMEOUT_MILLIS);
   }
 
   private synchronized void handleDisposition(

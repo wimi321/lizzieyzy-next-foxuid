@@ -3,6 +3,7 @@ package featurecat.lizzie.gui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import featurecat.lizzie.Config;
@@ -31,8 +32,526 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TrackingProductionCutoverTest {
+  @ParameterizedTest
+  @ValueSource(strings = {"re=9,0", "re=0", "re=,0"})
+  void malformedFrameCannotPublishStableAdmission(String malformedRow) throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      if (malformedRow.equals("re=0")) {
+        environment.frame.readBoard.parseLine(malformedRow);
+      } else {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> environment.frame.readBoard.parseLine(malformedRow));
+      }
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("B2"));
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("A1").visits());
+      environment.receiveEmptyFrame();
+      assertTrue(environment.frame.canStartTrackingAnalysis());
+    }
+  }
+
+  @Test
+  void historyReplacementDuringAcceptedFrameProcessingCannotReopenAdmission() throws Exception {
+    BoardRenderer previous = LizzieFrame.boardRenderer;
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      LizzieFrame.boardRenderer = new BoardRenderer(false);
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      ((TrackingFrame) environment.frame).nextRefresh =
+          () -> Lizzie.board.setHistory(new BoardHistoryList(BoardData.empty(2, 2)));
+      environment.frame.readBoard.parseLine("re=3,0");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(Stone.EMPTY, Lizzie.board.getHistory().getData().stones[Board.getIndex(0, 0)]);
+      assertFalse(environment.frame.canStartTrackingAnalysis());
+    } finally {
+      LizzieFrame.boardRenderer = previous;
+    }
+  }
+
+  @Test
+  void identicalReadBoardFramesRetainProgressAndRejectUnstableNewRequests() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      String commands = environment.commands();
+
+      environment.frame.readBoard.parseLine("re=0,0");
+      assertEquals(
+          List.of("A1"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("B2"));
+      environment.sendTrackingInfo("info move A1 visits 50 winrate 0.52 scoreLead 3.5 pv A1");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      environment.receiveEmptyFrame();
+
+      TrackingAnalysisController.PointResult result =
+          environment.frame.trackingDisplaySnapshot().results().get("A1");
+      assertEquals(50, result.visits());
+      assertEquals(52.0, result.winrate());
+      assertEquals(3.5, result.scoreLead());
+      assertEquals(
+          List.of("A1"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertEquals(commands, environment.commands());
+      assertTrue(environment.frame.canStartTrackingAnalysis());
+    }
+  }
+
+  @Test
+  void completedAndWaitingPointsSurvivePendingAndResumeNewestFirst() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A2"));
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.completeFinalFence(800000002);
+      String pendingCommands = environment.commands();
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().get("A1").completed());
+      assertEquals(
+          List.of("A1", "A2", "B2"),
+          List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertFalse(pendingCommands.contains("800000003 stop"), pendingCommands);
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      environment.completeInitialFence(800000003);
+      assertTrue(
+          environment.commands().endsWith("kata-analyze 10 allow B B2 1 allow W B2 1\n"),
+          environment.commands());
+      environment.sendTrackingInfo("info move B2 visits 40 winrate 0.52 scoreLead 3.5 pv B2");
+      String activeCommands = environment.commands();
+      environment.receiveEmptyFrame();
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("B2").visits());
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().get("A1").completed());
+      assertEquals(activeCommands, environment.commands());
+      environment.sendTrackingInfo("info move B2 visits 100 winrate 0.52 scoreLead 3.5 pv B2");
+      environment.completeFinalFence(800000005);
+      environment.completeInitialFence(800000006);
+      assertTrue(
+          environment.commands().endsWith("kata-analyze 10 allow B A2 1 allow W A2 1\n"),
+          environment.commands());
+      environment.sendTrackingInfo("info move A2 visits 100 winrate 0.53 scoreLead 4.5 pv A2");
+      environment.completeFinalFence(800000008);
+      String completedCommands = environment.commands();
+      for (int i = 0; i < 3; i++) environment.receiveEmptyFrame();
+      assertTrue(
+          environment.frame.trackingDisplaySnapshot().results().values().stream()
+              .allMatch(TrackingAnalysisController.PointResult::completed));
+      assertEquals(3, environment.frame.trackingDisplaySnapshot().results().size());
+      assertEquals(completedCommands, environment.commands());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"endsync", "stopsync", "helper-replacement"})
+  void stoppingSynchronizationRetiresCompletedAndWaitingPointsWithoutPonderHandback(
+      String lifecycle) throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      environment.engine.ponder();
+      environment.processCommandResponse("=");
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.completeFinalFence(800000002);
+      if (lifecycle.equals("helper-replacement")) {
+        environment.frame.readBoard.shutdown();
+        environment.installParsingReadBoard();
+      } else {
+        environment.frame.readBoard.parseLine(lifecycle);
+      }
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+      String stoppedCommands = environment.commands();
+      environment.receiveEmptyFrame();
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+      assertEquals(stoppedCommands, environment.commands());
+      assertFalse(environment.engine.isPondering());
+    }
+  }
+
+  @Test
+  void admittedInitialFenceCanBecomeReadyDuringPendingReception() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.completeInitialFence(800000000);
+      assertTrue(environment.commands().endsWith("kata-analyze 10 allow B A1 1 allow W A1 1\n"));
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("A1").visits());
+    }
+  }
+
+  @Test
+  void acquisitionLosingAdmissionPreservesCompletedResultAndNeverRetriesRejectedPoint()
+      throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.completeFinalFence(800000002);
+      environment.onNextEngineWrite(() -> environment.frame.readBoard.parseLine("re=0,0"));
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("B2"));
+      assertEquals(
+          List.of("A1"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().get("A1").completed());
+      environment.completeInitialFence(800000003);
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertFalse(environment.commands().contains("allow B B2"));
+      assertEquals(
+          List.of("A1"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+    }
+  }
+
+  @Test
+  void completeIdenticalFrameDuringAcquisitionDoesNotHideAdmissionTransition() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      environment.onNextEngineWrite(environment::receiveEmptyFrame);
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      assertFalse(environment.commands().contains("allow B A1"));
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+    }
+  }
+
+  @Test
+  void waitingPointLosingAdmissionDuringAcquisitionSurvivesUntilItsLeaseCloses() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.onNextEngineWrite(() -> environment.frame.readBoard.parseLine("re=0,0"));
+      environment.completeFinalFence(800000002);
+      assertEquals(
+          List.of("A1", "B2"),
+          List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertFalse(environment.commands().contains("allow B B2"));
+      environment.completeInitialFence(800000003);
+      environment.completeInitialFence(800000004);
+      assertTrue(
+          environment.commands().endsWith("kata-analyze 10 allow B B2 1 allow W B2 1\n"),
+          environment.commands());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"rules", "komi", "turn", "interval", "visits", "history"})
+  void acceptedFrameRevalidatesAllProductionContextFields(String component) throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.frame.readBoard.parseLine("re=0,0");
+      switch (component) {
+        case "rules":
+          Lizzie.config.currentKataGoRules = "japanese";
+          break;
+        case "komi":
+          Lizzie.board.getHistory().getGameInfo().setKomi(6.5);
+          break;
+        case "turn":
+          Lizzie.board.getHistory().getData().blackToPlay = false;
+          break;
+        case "interval":
+          Lizzie.config.analyzeUpdateIntervalCentisec = 20;
+          break;
+        case "visits":
+          Lizzie.config.trackingAnalysisMaxVisits = 200;
+          break;
+        case "history":
+          Lizzie.board.setHistory(new BoardHistoryList(BoardData.empty(2, 2)));
+          break;
+        default:
+          throw new AssertionError(component);
+      }
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty(), component);
+      environment.completeFinalFence(800000002);
+      environment.sendTrackingInfo("info move A1 visits 80 winrate 0.53 scoreLead 4.5 pv A1");
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().isEmpty(), component);
+      assertFalse(environment.engine.isPondering());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"clear", "start 2 2", "incomplete"})
+  void samplingBoundariesKeepAcceptedResultButDoNotOpenAdmission(String boundary) throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      String commands = environment.commands();
+      if (boundary.equals("incomplete")) {
+        environment.frame.readBoard.parseLine("re=0,0");
+        environment.frame.readBoard.parseLine("end");
+      } else {
+        environment.frame.readBoard.parseLine(boundary);
+      }
+      assertFalse(environment.frame.canStartTrackingAnalysis());
+      environment.frame.onMainEnginePonder();
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("A1").visits());
+      environment.receiveEmptyFrame();
+      assertTrue(environment.frame.canStartTrackingAnalysis());
+      assertEquals(commands, environment.commands());
+    }
+  }
+
+  @Test
+  void realRemoteMoveClearsTrackingAndDoesNotAcceptOldProgress() throws Exception {
+    BoardRenderer previous = LizzieFrame.boardRenderer;
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      LizzieFrame.boardRenderer = new BoardRenderer(false);
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      BoardHistoryNode old = Lizzie.board.getHistory().getCurrentHistoryNode();
+      environment.frame.readBoard.parseLine("re=3,0");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertFalse(old == Lizzie.board.getHistory().getCurrentHistoryNode());
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+      environment.sendTrackingInfo("info move A1 visits 80 winrate 0.53 scoreLead 4.5 pv A1");
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().isEmpty());
+      assertTrue(Lizzie.board.getHistory().getData().bestMoves.isEmpty());
+    } finally {
+      LizzieFrame.boardRenderer = previous;
+    }
+  }
+
+  @Test
+  void markerOnlyChangeRetainsAcceptedStonePositionAndStream() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      Lizzie.board.getHistory().place(0, 0, Stone.BLACK, true);
+      environment.installParsingReadBoard();
+      environment.frame.readBoard.parseLine("re=3,0");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      String commands = environment.commands();
+      environment.frame.readBoard.parseLine("re=1,0");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("A1").visits());
+      assertEquals(commands, environment.commands());
+    }
+  }
+
+  @Test
+  void unchangedRecoveryNavigatingToExistingNodeInvalidatesOldDisplayContext() throws Exception {
+    BoardRenderer previous = LizzieFrame.boardRenderer;
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      LizzieFrame.boardRenderer = new BoardRenderer(false);
+      Lizzie.board.getHistory().place(0, 0, Stone.BLACK, true);
+      BoardHistoryNode earlier = Lizzie.board.getHistory().getCurrentHistoryNode();
+      Lizzie.board.getHistory().place(1, 0, Stone.WHITE, true);
+      environment.installParsingReadBoard();
+      environment.frame.readBoard.parseLine("syncPlatform fox");
+      environment.frame.readBoard.parseLine("roomToken tracking-test");
+      environment.frame.readBoard.parseLine("liveTitleMove 2");
+      environment.frame.readBoard.parseLine("foxMoveNumber 2");
+      environment.frame.readBoard.parseLine("re=1,4");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.frame.readBoard.parseLine("syncPlatform fox");
+      environment.frame.readBoard.parseLine("roomToken tracking-test");
+      environment.frame.readBoard.parseLine("liveTitleMove 1");
+      environment.frame.readBoard.parseLine("foxMoveNumber 1");
+      environment.frame.readBoard.parseLine("re=3,0");
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertSame(earlier, Lizzie.board.getHistory().getCurrentHistoryNode());
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+    } finally {
+      LizzieFrame.boardRenderer = previous;
+    }
+  }
+
+  @Test
+  void delayedRetirementNotificationCannotClearReplacementContext() throws Exception {
+    java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.completeFinalFence(800000002);
+      javax.swing.SwingUtilities.invokeLater(
+          () -> {
+            entered.countDown();
+            try {
+              release.await();
+            } catch (InterruptedException failure) {
+              Thread.currentThread().interrupt();
+            }
+          });
+      assertTrue(entered.await(3, java.util.concurrent.TimeUnit.SECONDS));
+      synchronized (environment.frame.readBoard) {
+        environment.frame.readBoard.parseLine("endsync");
+      }
+      environment.receiveEmptyFrame();
+      environment.frame.onMainEnginePonder();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      environment.completeInitialFence(800000003);
+      environment.sendTrackingInfo("info move B2 visits 40 winrate 0.52 scoreLead 3.5 pv B2");
+      release.countDown();
+      javax.swing.SwingUtilities.invokeAndWait(() -> {});
+      assertEquals(
+          List.of("B2"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("B2").visits());
+    } finally {
+      release.countDown();
+      javax.swing.SwingUtilities.invokeAndWait(() -> {});
+    }
+  }
+
+  @Test
+  void acquisitionValidationDoesNotWaitForOuterReadBoardOwnerLock() throws Exception {
+    java.util.concurrent.CountDownLatch writing = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch proceed = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.ExecutorService executor =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      environment.onNextEngineWrite(
+          () -> {
+            writing.countDown();
+            try {
+              proceed.await();
+            } catch (InterruptedException failure) {
+              Thread.currentThread().interrupt();
+            }
+          });
+      java.util.concurrent.Future<TrackingAnalysisController.AddResult> result =
+          executor.submit(() -> environment.frame.addTrackingPoint("A1"));
+      assertTrue(writing.await(3, java.util.concurrent.TimeUnit.SECONDS));
+      synchronized (environment.frame.readBoard) {
+        environment.frame.readBoard.parseLine("endsync");
+        proceed.countDown();
+        assertEquals(
+            TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+            result.get(3, java.util.concurrent.TimeUnit.SECONDS));
+      }
+      javax.swing.SwingUtilities.invokeAndWait(() -> {});
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+    } finally {
+      proceed.countDown();
+      executor.shutdownNow();
+      assertTrue(executor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS));
+    }
+  }
+
+  @Test
+  void incomingFramesDoNotRenewProgressTimeoutOrLetOldTimerReleaseNewWork() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      List<Runnable> timeouts = environment.installManualTimeouts();
+      environment.installParsingReadBoard();
+      environment.receiveEmptyFrame();
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo("info move A1 visits 100 winrate 0.51 scoreLead 2.5 pv A1");
+      environment.completeFinalFence(800000002);
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      environment.completeInitialFence(800000003);
+      Runnable beforeProgress = timeouts.get(timeouts.size() - 1);
+      environment.sendTrackingInfo("info move B2 visits 40 winrate 0.52 scoreLead 3.5 pv B2");
+      Runnable progressTimeout = timeouts.get(timeouts.size() - 1);
+      environment.receiveEmptyFrame();
+      environment.receiveEmptyFrame();
+      environment.frame.readBoard.parseLine("re=0,0");
+      String commands = environment.commands();
+      beforeProgress.run();
+      assertEquals(commands, environment.commands());
+      progressTimeout.run();
+      assertTrue(environment.commands().endsWith("800000005 stop\n"), environment.commands());
+      environment.completeFinalFence(800000005);
+      assertEquals(
+          List.of("A1"), List.copyOf(environment.frame.trackingDisplaySnapshot().selectedPoints()));
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().get("A1").completed());
+      environment.frame.readBoard.parseLine("re=0,0");
+      environment.frame.readBoard.parseLine("end");
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A2"));
+      environment.completeInitialFence(800000006);
+      commands = environment.commands();
+      progressTimeout.run();
+      assertEquals(commands, environment.commands());
+    }
+  }
+
   @Test
   void localAndStableReadBoardEntriesUseTheSameCurrentEngineController() throws Exception {
     try (TestEnvironment environment = TestEnvironment.open()) {
@@ -792,6 +1311,73 @@ class TrackingProductionCutoverTest {
           frame);
     }
 
+    List<Runnable> installManualTimeouts() throws Exception {
+      List<Runnable> callbacks = new java.util.ArrayList<>();
+      Class<?> schedulerType =
+          Class.forName(TrackingAnalysisController.class.getName() + "$TimeoutScheduler");
+      Class<?> cancellableType =
+          Class.forName(TrackingAnalysisController.class.getName() + "$Cancellable");
+      Object scheduler =
+          java.lang.reflect.Proxy.newProxyInstance(
+              schedulerType.getClassLoader(),
+              new Class<?>[] {schedulerType},
+              (proxy, method, arguments) -> {
+                callbacks.add((Runnable) arguments[1]);
+                return java.lang.reflect.Proxy.newProxyInstance(
+                    cancellableType.getClassLoader(),
+                    new Class<?>[] {cancellableType},
+                    (ignored, cancel, unused) -> null);
+              });
+      java.lang.reflect.Constructor<TrackingAnalysisController> constructor =
+          TrackingAnalysisController.class.getDeclaredConstructor(schedulerType);
+      constructor.setAccessible(true);
+      setField(
+          frame,
+          LizzieFrame.class,
+          "trackingAnalysisController",
+          constructor.newInstance(scheduler));
+      return callbacks;
+    }
+
+    void onNextEngineWrite(Runnable action) throws Exception {
+      setField(
+          engine,
+          Leelaz.class,
+          "outputStream",
+          new BufferedOutputStream(
+              new java.io.FilterOutputStream(output) {
+                private Runnable pending = action;
+
+                @Override
+                public void write(byte[] bytes, int offset, int length) throws java.io.IOException {
+                  out.write(bytes, offset, length);
+                  Runnable callback = pending;
+                  pending = null;
+                  if (callback != null) callback.run();
+                }
+              }));
+    }
+
+    void installParsingReadBoard() throws Exception {
+      ReadBoard readBoard = allocate(ReadBoard.class);
+      for (String name :
+          List.of("conflictTracker", "historyJumpTracker", "localNavigationTracker")) {
+        Field field = ReadBoard.class.getDeclaredField(name);
+        field.setAccessible(true);
+        java.lang.reflect.Constructor<?> constructor = field.getType().getDeclaredConstructor();
+        constructor.setAccessible(true);
+        field.set(readBoard, constructor.newInstance());
+      }
+      setField(readBoard, ReadBoard.class, "tempcount", new java.util.ArrayList<Integer>());
+      frame.readBoard = readBoard;
+    }
+
+    void receiveEmptyFrame() {
+      frame.readBoard.parseLine("re=0,0");
+      frame.readBoard.parseLine("re=0,0");
+      frame.readBoard.parseLine("end");
+    }
+
     void installStableReadBoard() throws Exception {
       ReadBoard readBoard = allocate(ReadBoard.class);
       BoardHistoryNode node = Lizzie.board.getHistory().getCurrentHistoryNode();
@@ -900,9 +1486,14 @@ class TrackingProductionCutoverTest {
 
   private static final class TrackingFrame extends LizzieFrame {
     private int analysisRefreshRequests;
+    private Runnable nextRefresh;
 
     @Override
-    public void refresh() {}
+    public void refresh() {
+      Runnable action = nextRefresh;
+      nextRefresh = null;
+      if (action != null) action.run();
+    }
 
     @Override
     public void requestAnalysisRefresh() {
