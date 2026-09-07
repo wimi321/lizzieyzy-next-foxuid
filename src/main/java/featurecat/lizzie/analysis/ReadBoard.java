@@ -663,7 +663,14 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       if (tempcount.isEmpty()) {
         invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING);
       }
-      String[] params = line.substring(3).split(",");
+      int rowEnd = line.length();
+      if (rowEnd > 3 && line.charAt(rowEnd - 1) == '\n') {
+        rowEnd--;
+        if (rowEnd > 3 && line.charAt(rowEnd - 1) == '\r') {
+          rowEnd--;
+        }
+      }
+      String[] params = line.substring(3, rowEnd).split(",", -1);
       if (params.length != Board.boardWidth) {
         malformedSyncFrame = true;
       } else {

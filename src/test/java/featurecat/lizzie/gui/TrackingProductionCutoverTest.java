@@ -83,6 +83,27 @@ class TrackingProductionCutoverTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"\n", "\r\n"})
+  void pipeTerminatedFramesRetainEvaluationAndAcceptStableRequests(String ending) throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installParsingReadBoard();
+      for (int frame = 0; frame < 2; frame++) {
+        environment.frame.readBoard.parseLine("re=0,0" + ending);
+        environment.frame.readBoard.parseLine("re=0,0" + ending);
+        environment.frame.readBoard.parseLine("end" + ending);
+        if (frame == 0) {
+          assertEquals(TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+          environment.completeInitialFence(800000000);
+          environment.sendTrackingInfo("info move A1 visits 40 winrate 0.51 scoreLead 2.5 pv A1");
+        }
+      }
+      assertEquals(40, environment.frame.trackingDisplaySnapshot().results().get("A1").visits());
+      assertEquals(TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+      assertFalse(environment.commands().contains("800000002 stop"));
+    }
+  }
+
   @Test
   void identicalReadBoardFramesRetainProgressAndRejectUnstableNewRequests() throws Exception {
     try (TestEnvironment environment = TestEnvironment.open()) {
