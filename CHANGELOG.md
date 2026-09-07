@@ -4,6 +4,7 @@ All notable maintenance updates to this fork are documented here.
 
 ## Unreleased
 
+- Allow fresh point evaluation after returning to an accepted ReadBoard position without another helper frame; validate position semantics and engine synchronization, and reject malformed or stale frame publication (#444).
 - Preserve local moves after stopping ReadBoard synchronization and retire obsolete placement confirmations and queued output (#432).
 - Preserved diagnostic log record boundaries and stack-trace whitespace during export without weakening privacy redaction (#431).
 - Made diagnostic export estimates describe approximate uncompressed content, pruned proven irrelevant archives before reading using native Windows file identities where needed, and displayed publication success independently of folder opening (#430).
