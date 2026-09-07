@@ -2759,7 +2759,7 @@ class ReadBoardSyncDecisionTest {
   }
 
   @Test
-  void acceptedCompleteFramePublishesStableTrackingEligibilityAndNextFrameInvalidatesFirst()
+  void pendingFrameClosesNewAdmissionWithoutInvalidatingAcceptedSemanticRequests()
       throws Exception {
     try (SyncHarness harness = SyncHarness.create(false, emptyHistory())) {
       harness.leelaz.enableReadBoardGmaSupport();
@@ -2777,8 +2777,8 @@ class ReadBoardSyncDecisionTest {
       ReadBoardTrackingEligibilityAdapter.Snapshot pending = harness.readBoard.snapshot();
 
       assertEquals(ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING, pending.reason());
-      assertTrue(pending.revision() > stable.revision());
-      assertEquals(1, invalidations.get());
+      assertFalse(pending.stable());
+      assertEquals(0, invalidations.get());
     }
   }
 

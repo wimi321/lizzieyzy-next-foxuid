@@ -1250,8 +1250,10 @@ public class Lizzie {
           }
           if (!isEngineGame && currentFrame != null && !currentFrame.isPlayingAgainstLeelaz) {
             if (startPondering && !Lizzie.config.notStartPondering) {
-              engine.ponder();
-              engine.setResponseUpToDate();
+              if (!engine.startMoveFocusProbeAfterInitialization()) {
+                engine.ponder();
+                engine.setResponseUpToDate();
+              }
             } else {
               engine.notPondering();
               engine.setResponseUpToDate();

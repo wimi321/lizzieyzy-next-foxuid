@@ -153,7 +153,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   private Object readBoardGmaPendingIdentity;
   private long readBoardGmaPendingGeneration = 0L;
   private long readBoardGmaFailedGeneration = -1L;
-  private Leelaz.TrackingHandoffClaim readBoardGmaHandoffClaim;
   private boolean readBoardGmaPendingLogicallyInvalid = false;
   private volatile boolean readBoardGmaAwaitingSyncedBoard = false;
   private volatile boolean readBoardGmaEngineRestorePending = false;
@@ -4722,34 +4721,15 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
             + readBoardGmaMaxVisits
             + " ponder="
             + ponder);
-    ReadBoardGmaHandoffTarget handoffTarget =
-        new ReadBoardGmaHandoffTarget(
-            helperIdentity,
-            sessionGeneration,
-            color,
-            readBoardGmaTimeSeconds,
-            readBoardGmaMaxVisits,
-            ponder);
     Lizzie.leelaz.bindReadBoardGmaResponseOwner(this, helperIdentity, sessionGeneration);
-    Leelaz.TrackingHandoffClaim handoff = Lizzie.leelaz.claimTrackingHandoff(handoffTarget);
-    if (handoff.availability() == Leelaz.TrackingHandoffAvailability.ACCEPTED_PENDING) {
-      readBoardGmaHandoffClaim = handoff;
-    }
     Lizzie.leelaz.setReadBoardGmaSessionAdmission(this::admitReadBoardGmaSession);
     boolean accepted =
-        handoff.availability() == Leelaz.TrackingHandoffAvailability.ACCEPTED_PENDING
-            || (handoff.availability() == Leelaz.TrackingHandoffAvailability.NOT_TRACKING
-                && Lizzie.leelaz.genmoveAnalyzeForReadBoard(
-                    color, readBoardGmaTimeSeconds, readBoardGmaMaxVisits, ponder));
-    if (handoff.availability() == Leelaz.TrackingHandoffAvailability.ACCEPTED_PENDING) {
-      // The handoff activation delivers the session admission through the tracking callback.
-      Lizzie.leelaz.setReadBoardGmaSessionAdmission(null);
-    }
+        Lizzie.leelaz.genmoveAnalyzeForReadBoard(
+            color, readBoardGmaTimeSeconds, readBoardGmaMaxVisits, ponder);
     if (!accepted) {
       readBoardGmaPending = false;
       readBoardGmaPendingLogicallyInvalid = false;
       readBoardGmaPendingIdentity = null;
-      readBoardGmaHandoffClaim = null;
       readBoardGmaFailedGeneration = sessionGeneration;
       Lizzie.leelaz.clearReadBoardGmaResponseOwner(this);
       localMoveSyncDebug("ReadBoard GMA rejected by foreground lease reason=" + reason);
@@ -4757,70 +4737,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     return true;
   }
 
-  private final class ReadBoardGmaHandoffTarget implements Leelaz.TrackingHandoffTarget {
-    private final Object helperIdentity;
-    private final long sessionGeneration;
-    private final String color;
-    private final int maxTimeSeconds;
-    private final int maxVisits;
-    private final boolean ponder;
-
-    private ReadBoardGmaHandoffTarget(
-        Object helperIdentity,
-        long sessionGeneration,
-        String color,
-        int maxTimeSeconds,
-        int maxVisits,
-        boolean ponder) {
-      this.helperIdentity = helperIdentity;
-      this.sessionGeneration = sessionGeneration;
-      this.color = color;
-      this.maxTimeSeconds = maxTimeSeconds;
-      this.maxVisits = maxVisits;
-      this.ponder = ponder;
-    }
-
-    @Override
-    public Leelaz.TrackingHandoffKind kind() {
-      return Leelaz.TrackingHandoffKind.RETAINED_ENGINE_MODE;
-    }
-
-    @Override
-    public boolean isCurrent() {
-      return isCurrentReadBoardGmaTarget(helperIdentity, sessionGeneration);
-    }
-
-    @Override
-    public void activate(Leelaz.TrackingHandoffActivation activation) {
-      synchronized (ReadBoard.this) {
-        Leelaz engine = Lizzie.leelaz;
-        if (!isCurrentReadBoardGmaTarget(helperIdentity, sessionGeneration)) {
-          if (engine != null) {
-            engine.clearReadBoardGmaResponseOwner(
-                ReadBoard.this, helperIdentity, sessionGeneration);
-          }
-          return;
-        }
-        if (engine == null) {
-          return;
-        }
-        engine.activateReadBoardGmaAfterTracking(
-            this,
-            color,
-            maxTimeSeconds,
-            maxVisits,
-            ponder,
-            activation,
-            ReadBoard.this::admitReadBoardGmaSession);
-        readBoardGmaHandoffClaim = null;
-      }
-    }
-
-    @Override
-    public void fail(Leelaz.TrackingHandoffFailure failure) {
-      failReadBoardGmaHandoff(helperIdentity, sessionGeneration, failure);
-    }
-  }
 
   private synchronized boolean isCurrentReadBoardGmaTarget(
       Object helperIdentity, long sessionGeneration) {
@@ -4836,22 +4752,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
         && !readBoardGmaEngineRestoreInProgress;
   }
 
-  private synchronized void failReadBoardGmaHandoff(
-      Object helperIdentity, long sessionGeneration, Leelaz.TrackingHandoffFailure failure) {
-    if (readBoardGmaPendingIdentity != helperIdentity
-        || readBoardGmaPendingGeneration != sessionGeneration) {
-      return;
-    }
-    readBoardGmaPending = false;
-    readBoardGmaPendingLogicallyInvalid = false;
-    readBoardGmaPendingIdentity = null;
-    readBoardGmaHandoffClaim = null;
-    readBoardGmaFailedGeneration = sessionGeneration;
-    if (Lizzie.leelaz != null) {
-      Lizzie.leelaz.clearReadBoardGmaResponseOwner(this, helperIdentity, sessionGeneration);
-    }
-    localMoveSyncDebug("ReadBoard GMA handoff failed reason=" + failure);
-  }
 
   private void showReadBoardGmaUnsupportedOnce() {
     if (Lizzie.leelaz != null && Lizzie.leelaz.shouldShowReadBoardGmaUnsupportedPrompt()) {
@@ -5745,7 +5645,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
               + isReadBoardAnalysisEngineAvailable());
       return false;
     }
-    if (Lizzie.leelaz.isPondering() && !Lizzie.leelaz.hasTrackingStreamSession()) {
+    if (Lizzie.leelaz.isPondering()) {
       if ("rebuild".equals(reason)) {
         localMoveSyncDebug(
             "resume auto-play analysis already pondering reason="
@@ -6116,6 +6016,13 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
           || Lizzie.board != evidence.board
           || Lizzie.board.getHistory() != evidence.history) return;
       ensureTrackingEligibilityInitialized();
+      if (acceptedTrackingEvidence != null
+          && acceptedTrackingEvidence.matches(Lizzie.board)
+          && trackingEligibilityNode == evidence.node) {
+        acceptedTrackingEvidence = evidence;
+        trackingEligibilityReason = ReadBoardTrackingEligibilityAdapter.Reason.STABLE;
+        return;
+      }
       trackingEligibilityRevision++;
       trackingEligibilityNode = evidence.node;
       acceptedTrackingEvidence = evidence;
@@ -6128,6 +6035,13 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
 
   private void invalidateAcceptedTrackingEvidence(
       ReadBoardTrackingEligibilityAdapter.Reason reason) {
+    if (reason == ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING) {
+      synchronized (this) {
+        trackingFrameEpoch++;
+        trackingEligibilityReason = reason;
+      }
+      return;
+    }
     synchronized (this) {
       trackingFrameEpoch++;
       acceptedTrackingEvidence = null;
@@ -6140,7 +6054,10 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     synchronized (this) {
       ensureTrackingEligibilityInitialized();
       trackingEligibilityRevision++;
-      trackingEligibilityReason = reason;
+      if (reason != ReadBoardTrackingEligibilityAdapter.Reason.NODE_MISMATCH
+          || trackingEligibilityReason != ReadBoardTrackingEligibilityAdapter.Reason.FRAME_PENDING) {
+        trackingEligibilityReason = reason;
+      }
       listener = takeTrackingEligibilityInvalidationListener();
     }
     runTrackingEligibilityInvalidationListener(listener);
@@ -6148,7 +6065,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
 
   private void retireTrackingEligibility() {
     Runnable listener;
-    Leelaz.TrackingHandoffClaim handoff;
     if (retireReadBoardGmaSession()) {
       readBoardGmaAutoPlayActive = false;
       readBoardGmaPendingLogicallyInvalid = true;
@@ -6181,19 +6097,8 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       readBoardGmaEngineRestoreInProgress = false;
       readBoardGmaDeferredRestoreNode = null;
       readBoardGmaSessionBinding = null;
-      handoff = readBoardGmaHandoffClaim;
-      readBoardGmaHandoffClaim = null;
     }
     runTrackingEligibilityInvalidationListener(listener);
-    if (handoff != null) {
-      if (handoff.cancel() && Lizzie.leelaz != null) {
-        retiredReadBoardGmaTerminalPending = false;
-        retiredReadBoardGmaIdentity = null;
-        retiredReadBoardGmaGeneration = -1L;
-        Lizzie.leelaz.clearReadBoardGmaResponseOwner(
-            this, retiredGmaIdentity, retiredGmaGeneration);
-      }
-    }
     if (Lizzie.leelaz != null) {
       Lizzie.leelaz.retireReadBoardGmaSession();
     }

@@ -68,14 +68,14 @@ class BoardDataAnalysisCacheTraceTest {
         "info move D4 visits 900 winrate 0.6 pv D4 rootInfo visits 1500");
     assertEquals(BoardData.AnalysisAdoption.REJECTED,
         node.adoptOrdinaryAnalysis(payload.moves, "KataGo", Lizzie.leelaz,
-            payload.totalVisits(), payload.rootVisits, null, source, false));
+            payload.totalVisits(), payload.rootVisits, null, source, false, false));
     assertEquals(1000, node.getPlayouts());
     assertEquals(-1, node.rootVisits);
     payload = featurecat.lizzie.analysis.KataGoAnalysisPayload.parse(
         "info move D4 visits 1100 winrate 0.6 pv D4 rootInfo visits 100");
     assertEquals(BoardData.AnalysisAdoption.FULL,
         node.adoptOrdinaryAnalysis(payload.moves, "KataGo", Lizzie.leelaz,
-            payload.totalVisits(), payload.rootVisits, null, source, false));
+            payload.totalVisits(), payload.rootVisits, null, source, false, false));
     assertEquals(100, node.getPlayouts());
     assertEquals(100, node.rootVisits);
     assertEquals(2000, node.rootVisits2);
@@ -84,21 +84,21 @@ class BoardDataAnalysisCacheTraceTest {
     Object replacement = new Object();
     assertEquals(BoardData.AnalysisAdoption.OWNERSHIP_ONLY,
         node.adoptOrdinaryAnalysis(lower.moves, "KataGo", Lizzie.leelaz,
-            lower.totalVisits(), lower.rootVisits, lower.ownership, replacement, false));
+            lower.totalVisits(), lower.rootVisits, lower.ownership, replacement, false, false));
     assertEquals("D4", node.bestMoves.get(0).coordinate);
     assertEquals(100, node.rootVisits);
     assertEquals(List.of(0.5, -0.5), node.estimateArray);
     node.isChanged2 = true;
     assertEquals(BoardData.AnalysisAdoption.FULL,
         node.adoptOrdinaryAnalysis(lower.moves, "KataGo", Lizzie.leelaz,
-            lower.totalVisits(), lower.rootVisits, null, replacement, true));
+            lower.totalVisits(), lower.rootVisits, null, replacement, true, false));
     assertEquals(50, node.rootVisits2);
     assertEquals(100, node.rootVisits);
     var unknown = featurecat.lizzie.analysis.KataGoAnalysisPayload.parse(
         "info move C3 visits 90000 winrate 0.9 pv C3");
     assertEquals(BoardData.AnalysisAdoption.REJECTED,
         node.adoptOrdinaryAnalysis(unknown.moves, "KataGo", Lizzie.leelaz,
-            unknown.totalVisits(), -1, null, replacement, false));
+            unknown.totalVisits(), -1, null, replacement, false, false));
     assertEquals(100, node.rootVisits);
   }
 

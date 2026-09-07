@@ -46,7 +46,8 @@ public class BoardData {
   /** Called only after the engine has revalidated the exact ordinary output owner. */
   public AnalysisAdoption adoptOrdinaryAnalysis(
       List<MoveData> moves, String engineName, Leelaz engine, int totalVisits,
-      int exactRootVisits, List<Double> ownership, Object source, boolean secondary) {
+      int exactRootVisits, List<Double> ownership, Object source, boolean secondary,
+      boolean forceFull) {
     if (moves == null || moves.isEmpty()) return AnalysisAdoption.REJECTED;
     int cached = secondary ? playouts2 : playouts;
     int cachedRoot = secondary ? rootVisits2 : rootVisits;
@@ -59,7 +60,7 @@ public class BoardData {
         ? MoveData.getPlayouts(moves) : totalVisits;
     boolean protectedCache = Lizzie.config.enableLizzieCache && !Lizzie.config.isAutoAna
         && (secondary || !Lizzie.engineGame.current().playing());
-    boolean full = !protectedCache || invalidated || cachedPda != engine.pda
+    boolean full = forceFull || !protectedCache || invalidated || cachedPda != engine.pda
         || (comparable && comparisonVisits > cached)
         || (sameSource && cachedRoot >= 0 && exactRootVisits >= 0 && totalVisits == cached);
     if (!full) {
@@ -553,15 +554,34 @@ public class BoardData {
     return true;
   }
 
+  /** Reapplies only candidate visibility after attention changes; analysis values stay intact. */
+  public void refreshFocusCandidateVisibility() {
+    if (bestMovesOutOfRange != null && !bestMovesOutOfRange.isEmpty()) {
+      List<MoveData> complete = new ArrayList<>(bestMoves.size() + bestMovesOutOfRange.size());
+      complete.addAll(bestMoves);
+      complete.addAll(bestMovesOutOfRange);
+      complete.sort(Comparator.comparingInt(move -> move.order));
+      bestMoves = complete;
+    } else {
+      bestMoves = new ArrayList<>(bestMoves);
+    }
+    bestMovesOutOfRange = new ArrayList<>();
+    tryToLimitMoves(bestMoves, List.of(), true);
+  }
+
   private void tryToLimitMoves(List<MoveData> moves, List<MoveData> lastMoves, boolean isMain) {
     // TODO Auto-generated method stub
     List<MoveData> outOfRangeMoves = new ArrayList<>();
+    featurecat.lizzie.analysis.TrackingAnalysisController.DisplaySnapshot focus =
+        isMain && Lizzie.frame != null ? Lizzie.frame.trackingDisplaySnapshot() : null;
+    Set<String> attended = focus != null && Lizzie.frame.isTrackingDisplayCurrent(focus)
+        && Lizzie.frame.getDisplayNode().getData() == this ? focus.selectedPoints() : Set.of();
     if (Lizzie.config.limitMaxSuggestion > 0
         && !Lizzie.config.showNoSuggCircle
         && (moves.size() > Lizzie.config.limitMaxSuggestion)) {
       for (int n = Lizzie.config.limitMaxSuggestion; n < moves.size(); n++) {
         MoveData move = moves.get(n);
-        boolean needSkip = false;
+        boolean needSkip = attended.contains(move.coordinate);
         int absoluteMaxSuggestionOrder = Lizzie.config.limitMaxSuggestion + 1;
         if (move.order < absoluteMaxSuggestionOrder) {
           for (int s = 0; s < absoluteMaxSuggestionOrder && s < lastMoves.size(); s++) {

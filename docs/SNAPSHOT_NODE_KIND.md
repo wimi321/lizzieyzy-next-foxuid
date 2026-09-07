@@ -170,6 +170,7 @@ ReadBoard 协议里的 `pass` 行在自动落子/交换顺序链路中表示用�
 - KataGo 普通分析区分精确 root visits、候选 move visits、可选 edgeVisits 和推荐 order。总量与全局预算使用存在的 root；缺少 root 时保留 legacy 非对称候选求和。候选文字使用 move visits，分配比例使用存在的 edge（包括 0），排名沿用 order；节点评价仍来自首选候选。
 - 旧 legacy 缓存准入只用 incoming 的同一 legacy 算法比较；通过保护门后可以整份保存 incoming 的真实 root。已存 root 与缺失 root 的新流不可比较，未显式失效时保留缓存。同一已采纳输出 owner 的同 root 新帧可更新评价/PV；新请求、binding 或真实搜索重建不继承该例外。ownership-only 回填不改变候选、计算量口径或已采纳来源。
 - SGF 的 LZ/LZOP 及副槽在六个传统 header slots 后保存 `rootVisits=<精确整数>`，候选 PV 前保存 order 和存在的 edgeVisits。无标识数据保持 legacy/unknown；clone/restore 保留分析值但不复制活跃流刷新权限。扩展放在同一分析 payload 内，旧 writer 重建 payload 时一并降级。
+- 用户显式通过准入的同树 focus 可为当前节点对应引擎槽位授予整份普通分析采纳权限，允许首份合法精确 root payload 替换更高旧缓存。首份前取消/暂停/失败/context 变化退休未消费权限；已采纳值在完成、取消和同局面暂停后保留。仅 focus 参数重发延续同树刷新关系；真正清树、binding/位置替换仍退休旧权限。具体关注、进度与渲染行为见 `docs/TRACKING_ANALYSIS_CONTRACT.md`。
 - 跨 SNAPSHOT 的复合恢复及 ReadBoard 单次最终 resume 遵守下列对应 owner 契约。
 
 ## 复合局面恢复确认（Issue #429 / Ticket 02）
