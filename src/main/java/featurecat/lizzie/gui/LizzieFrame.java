@@ -13789,10 +13789,7 @@ public class LizzieFrame extends JFrame {
 
       public Object getValueAt(int row, int col) {
 
-        int totalPlayouts = 0;
-        for (MoveData move : data2) {
-          totalPlayouts = totalPlayouts + move.playouts;
-        }
+        int totalPlayouts = MoveData.getAllocationVisits(data2);
         if (row > data2.size() - 1) return "";
         MoveData data = data2.get(row);
         switch (col) {
@@ -13835,7 +13832,7 @@ public class LizzieFrame extends JFrame {
             return Utils.getPlayoutsString(data.playouts);
           case 4:
             return String.format(
-                Locale.ENGLISH, "%.1f", (double) data.playouts * 100 / totalPlayouts);
+                Locale.ENGLISH, "%.1f", data.allocationRatio(totalPlayouts) * 100);
           case 5:
             double score = data.scoreMean;
             if (EngineGamePresentation.current().playingGenmove()) {

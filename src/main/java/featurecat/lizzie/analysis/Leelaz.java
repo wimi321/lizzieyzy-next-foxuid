@@ -666,7 +666,9 @@ public class Leelaz {
   private volatile ReadBoardGmaResponseBinding readBoardGmaResponseBinding;
   private volatile boolean engineStateUnrestored;
   private volatile int currentTotalPlayouts;
+  private int currentRootVisits = -1;
   public boolean supportMovesOwnership = false;
+  private boolean supportRootInfo;
 
   // private int refreshNumber=0;
   // private boolean isEstimating=true;
@@ -861,6 +863,7 @@ public class Leelaz {
         deferredEngineGameRecovery ? -1L : Lizzie.capturePrimaryEngineGeneration(this);
     canRestoreDymPda = false;
     supportMovesOwnership = false;
+    supportRootInfo = false;
     CommandLaunchHelper.LaunchSpec launchSpec =
         CommandLaunchHelper.prepare(Utils.splitCommand(engineCommand));
     commands = launchSpec.getCommandParts();
@@ -4756,23 +4759,7 @@ public class Leelaz {
   }
 
   public List<MoveData> parseInfoKatago(String line) {
-    int ownershipIndex = line.indexOf("ownership");
-    if (ownershipIndex >= 0) {
-      line = line.substring(0, ownershipIndex);
-    }
-    List<MoveData> bestMoves = new ArrayList<>();
-    String[] variations = line.split(" info ");
-    // int k = (Lizzie.config.limitMaxSuggestion > 0&&!Lizzie.config.showNoSuggCircle ?
-    // Lizzie.config.limitMaxSuggestion : 361);
-    for (String var : variations) {
-      if (!var.trim().isEmpty()) {
-        bestMoves.add(MoveData.fromInfoKatago(var));
-        //		k = k - 1;
-        //		if (k < 1)
-        //			break;
-      }
-    }
-    return bestMoves;
+    return KataGoAnalysisPayload.parse(line).moves;
   }
 
   private static final class ParsedAnalysisInfo {
@@ -4780,16 +4767,18 @@ public class Leelaz {
     private final int totalPlayouts;
     private final List<Double> estimateArray;
     private final boolean kata;
+    private final int rootVisits;
 
     private ParsedAnalysisInfo(
         List<MoveData> moves,
         int totalPlayouts,
         List<Double> estimateArray,
-        boolean kata) {
+        boolean kata, int rootVisits) {
       this.moves = List.copyOf(moves);
       this.totalPlayouts = totalPlayouts;
       this.estimateArray = estimateArray == null ? null : List.copyOf(estimateArray);
       this.kata = kata;
+      this.rootVisits = rootVisits;
     }
   }
 
@@ -4865,37 +4854,19 @@ public class Leelaz {
     List<MoveData> parsedMoves;
     List<Double> estimateArray = null;
     if (kata) {
-      parsedMoves = parseInfoKatago(payload);
-      estimateArray = parseKataOwnershipEstimate(payload);
+      KataGoAnalysisPayload parsed = KataGoAnalysisPayload.parse(payload);
+      return new ParsedAnalysisInfo(
+          parsed.moves, parsed.totalVisits(),
+          Lizzie.config.showKataGoEstimate ? parsed.ownership : null, true, parsed.rootVisits);
     } else if (isSai) {
       parsedMoves = parseInfoSai(payload);
     } else {
       parsedMoves = parseInfo(payload);
     }
     return new ParsedAnalysisInfo(
-        parsedMoves, MoveData.getPlayouts(parsedMoves), estimateArray, kata);
+        parsedMoves, MoveData.getPlayouts(parsedMoves), estimateArray, kata, -1);
   }
 
-  private List<Double> parseKataOwnershipEstimate(String payload) {
-    if (!Lizzie.config.showKataGoEstimate) {
-      return null;
-    }
-    List<Double> estimateArray = new ArrayList<>();
-    int ownershipIndex = payload.indexOf("ownership");
-    if (ownershipIndex < 0) {
-      return estimateArray;
-    }
-    String ownership = payload.substring(ownershipIndex + "ownership".length()).trim();
-    if (ownership.isEmpty()) {
-      return estimateArray;
-    }
-    for (String value : ownership.split(" ")) {
-      if (!value.isEmpty()) {
-        estimateArray.add(Double.parseDouble(value));
-      }
-    }
-    return estimateArray;
-  }
 
   /**
    * Publishes an immutable accepted payload through a mutable BoardData copy. BoardData sorts and
@@ -4903,8 +4874,8 @@ public class Leelaz {
    * Caller holds {@link #analysisInfoMutationLock} and the exact analysis-output admission.
    */
   private void publishAnalysisInfoToDisplay(
-      ParsedAnalysisInfo parsed, AnalysisInfoTarget target) {
-    publishAnalysisDisplayNonFatal(() -> publishAnalysisInfoToDisplayUnsafe(parsed, target));
+      ParsedAnalysisInfo parsed, AnalysisInfoTarget target, Object source) {
+    publishAnalysisDisplayNonFatal(() -> publishAnalysisInfoToDisplayUnsafe(parsed, target, source));
   }
 
   private void publishAnalysisDisplayNonFatal(Runnable publication) {
@@ -4920,7 +4891,7 @@ public class Leelaz {
   }
 
   private void publishAnalysisInfoToDisplayUnsafe(
-      ParsedAnalysisInfo parsed, AnalysisInfoTarget target) {
+      ParsedAnalysisInfo parsed, AnalysisInfoTarget target, Object source) {
     if (parsed == null
         || parsed.moves.isEmpty()
         || target == null
@@ -4947,26 +4918,13 @@ public class Leelaz {
       return;
     }
     List<MoveData> boardMoves = new ArrayList<>(parsed.moves);
-    if (secondaryDisplay) {
-      if (parsed.kata) {
-        displayData.tryToSetBestMoves2FromEngine(
-            boardMoves,
-            bestMovesEnginename,
-            this,
-            parsed.totalPlayouts,
-            parsed.estimateArray);
-      } else {
-        displayData.tryToSetBestMoves2FromEngine(
-            boardMoves, bestMovesEnginename, this, parsed.totalPlayouts, null);
-      }
-    } else if (parsed.kata) {
-      displayData.tryToSetBestMovesFromEngine(
-          boardMoves,
-          bestMovesEnginename,
-          this,
-          parsed.totalPlayouts,
-          parsed.estimateArray,
-          false);
+    if (parsed.kata) {
+      displayData.adoptOrdinaryAnalysis(
+          boardMoves, bestMovesEnginename, this, parsed.totalPlayouts, parsed.rootVisits,
+          parsed.estimateArray, source, secondaryDisplay);
+    } else if (secondaryDisplay) {
+      displayData.tryToSetBestMoves2FromEngine(
+          boardMoves, bestMovesEnginename, this, parsed.totalPlayouts, null);
     } else {
       displayData.tryToSetBestMovesFromEngine(
           boardMoves, bestMovesEnginename, this, parsed.totalPlayouts, null, false);
@@ -4975,14 +4933,15 @@ public class Leelaz {
 
   /** Caller holds {@link #analysisInfoMutationLock}; {@link #bestMoves} is the release fence. */
   private void publishParsedAnalysisInfoLocked(
-      ParsedAnalysisInfo parsed, AnalysisInfoTarget target) {
+      ParsedAnalysisInfo parsed, AnalysisInfoTarget target, Object source) {
     if (parsed.kata && !parsed.moves.isEmpty()) {
       scoreMean = parsed.moves.get(0).scoreMean;
       scoreStdev = parsed.moves.get(0).scoreStdev;
     }
-    publishAnalysisInfoToDisplay(parsed, target);
+    publishAnalysisInfoToDisplay(parsed, target, source);
     analysisInfoPayloadTarget = target;
     currentTotalPlayouts = parsed.totalPlayouts;
+    currentRootVisits = parsed.rootVisits;
     bestMoves = parsed.moves;
   }
 
@@ -5131,7 +5090,7 @@ public class Leelaz {
                   || !isCurrentAnalysisInfoTarget(analysisInfoTarget)) {
                 return;
               }
-              publishParsedAnalysisInfoLocked(parsedInfo, analysisInfoTarget);
+              publishParsedAnalysisInfoLocked(parsedInfo, analysisInfoTarget, ingressRoute.ownerToken);
               infoCommitted.set(true);
             }
           });
@@ -5494,6 +5453,7 @@ public class Leelaz {
                             false));
             analysisOutputGeneration.incrementAndGet();
             currentTotalPlayouts = 0;
+            currentRootVisits = -1;
             analysisInfoPayloadTarget = null;
             bestMoves = List.of();
             analysisInfoEpoch++;
@@ -5697,9 +5657,14 @@ public class Leelaz {
             if (Integer.parseInt(ver[0]) > 1 || Integer.parseInt(ver[1]) > 10) {
               supportMovesOwnership = true;
             }
+            int major = Integer.parseInt(ver[0]);
+            int minor = Integer.parseInt(ver[1]);
+            int patch = ver.length > 2 ? Integer.parseInt(ver[2].split("[^0-9]", 2)[0]) : 0;
+            supportRootInfo = major > 1 || (major == 1 && (minor > 16 || (minor == 16 && patch >= 4)));
           } catch (Exception ex) {
             ex.printStackTrace();
             supportMovesOwnership = false;
+            supportRootInfo = false;
           }
         }
         isCheckingVersion = false;
@@ -6729,6 +6694,7 @@ public class Leelaz {
         scoreStdev = 0;
       }
       currentTotalPlayouts = 0;
+      currentRootVisits = -1;
       analysisInfoPayloadTarget = null;
       bestMoves = List.of();
       analysisInfoEpoch++;
@@ -6807,7 +6773,7 @@ public class Leelaz {
                     || !isCurrentAnalysisInfoTarget(analysisInfoTarget)) {
                   return;
                 }
-                publishParsedAnalysisInfoLocked(parsedInfo, analysisInfoTarget);
+                publishParsedAnalysisInfoLocked(parsedInfo, analysisInfoTarget, route.ownerToken);
                 outcome.parsedInfo = parsedInfo;
                 outcome.acceptedSnapshot =
                     new AnalysisInfoSnapshot(
@@ -6903,6 +6869,7 @@ public class Leelaz {
           synchronized (analysisInfoMutationLock()) {
             if (Lizzie.config.isAutoAna) {
               currentTotalPlayouts = 0;
+              currentRootVisits = -1;
               analysisInfoPayloadTarget = null;
               bestMoves = List.of();
               analysisInfoEpoch++;
@@ -7021,6 +6988,7 @@ public class Leelaz {
                       });
                 }
                 currentTotalPlayouts = completedPlayouts;
+                currentRootVisits = -1;
                 analysisInfoPayloadTarget = analysisInfoTarget;
                 bestMoves = completedMoves;
                 acceptedSnapshot.set(
@@ -8080,20 +8048,21 @@ public class Leelaz {
     synchronized (analysisInfoMutationLock()) {
       List<MoveData> acceptedMoves = bestMoves;
       if (!acceptedMoves.isEmpty()) {
-        int acceptedPlayouts = MoveData.getPlayouts(acceptedMoves);
-        currentTotalPlayouts = acceptedPlayouts;
+        int acceptedPlayouts = currentTotalPlayouts;
+        int acceptedRootVisits = currentRootVisits;
         publishAnalysisDisplayNonFatal(
-            () ->
-                Lizzie.board
-                    .getHistory()
-                    .getData()
-                    .tryToSetBestMovesFromEngine(
-                        new ArrayList<>(acceptedMoves),
-                        bestMovesEnginename,
-                        this,
-                        acceptedPlayouts,
-                        null,
-                        false));
+            () -> {
+              BoardData data = Lizzie.board.getHistory().getData();
+              if (isKatago) {
+                data.adoptOrdinaryAnalysis(
+                    new ArrayList<>(acceptedMoves), bestMovesEnginename, this,
+                    acceptedPlayouts, acceptedRootVisits, null, null, false);
+              } else {
+                data.tryToSetBestMovesFromEngine(
+                    new ArrayList<>(acceptedMoves), bestMovesEnginename, this,
+                    acceptedPlayouts, null, false);
+              }
+            });
       }
     }
     this.resigned = true;
@@ -8759,6 +8728,7 @@ public class Leelaz {
                       updatedMoves.add(mv);
                       List<MoveData> publishedMoves = List.copyOf(updatedMoves);
                       currentTotalPlayouts = MoveData.getPlayouts(publishedMoves);
+                      currentRootVisits = -1;
                       analysisInfoPayloadTarget = analysisInfoTargetAtParse;
                       bestMoves = publishedMoves;
                     }
@@ -8810,6 +8780,7 @@ public class Leelaz {
                                       false));
                       List<MoveData> publishedMoves = List.copyOf(updatedMoves);
                       currentTotalPlayouts = updatedPlayouts;
+                      currentRootVisits = -1;
                       analysisInfoPayloadTarget = analysisInfoTargetAtParse;
                       bestMoves = publishedMoves;
                     }
@@ -10651,6 +10622,7 @@ public class Leelaz {
     synchronized (analysisInfoMutationLock()) {
       List<MoveData> publishedMoves = moves == null ? List.of() : List.copyOf(moves);
       currentTotalPlayouts = MoveData.getPlayouts(publishedMoves);
+      currentRootVisits = -1;
       analysisInfoPayloadTarget = captureAnalysisInfoTarget();
       bestMoves = publishedMoves;
       analysisInfoEpoch++;
@@ -19700,7 +19672,8 @@ public class Leelaz {
   }
 
   public String addKataTag() {
-    return (Lizzie.config.showKataGoEstimate ? " ownership true" : "")
+    return (supportRootInfo ? " rootInfo true" : "")
+        + (Lizzie.config.showKataGoEstimate ? " ownership true" : "")
         + (Lizzie.config.showPvVisits ? " pvVisits true" : "")
         + (Lizzie.config.showKataGoEstimate
                 && supportMovesOwnership

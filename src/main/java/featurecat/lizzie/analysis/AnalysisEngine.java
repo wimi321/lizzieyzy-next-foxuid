@@ -555,10 +555,14 @@ public class AnalysisEngine {
     }
     int reportedPlayouts = MoveData.getPlayouts(moves);
     JSONObject rootInfo = result.optJSONObject("rootInfo");
-    if (rootInfo != null) {
-      reportedPlayouts = Math.max(reportedPlayouts, rootInfo.optInt("visits", 0));
+    if (rootInfo != null && rootInfo.has("visits")) {
+      reportedPlayouts = rootInfo.getInt("visits");
     }
     boolean payloadApplied = applyAnalysisPayload(node, moves, ownershipArray, reportedPlayouts);
+    if (payloadApplied && node.getData().bestMoves == moves
+        && rootInfo != null && rootInfo.has("visits")) {
+      node.getData().rootVisits = reportedPlayouts;
+    }
     responseCount++;
     if (payloadApplied) {
       resultCount++;
@@ -636,9 +640,10 @@ public class AnalysisEngine {
     if (job == null || !trimmed.startsWith("info ")) {
       return false;
     }
-    List<MoveData> moves = parseRemoteGtpInfo(trimmed);
-    RemoteGtpRootInfo rootInfo = parseRemoteGtpRootInfo(trimmed);
-    int playouts = rootInfo != null ? rootInfo.visits : MoveData.getPlayouts(moves);
+    KataGoAnalysisPayload payload = KataGoAnalysisPayload.parse(trimmed);
+    List<MoveData> moves = remoteGtpMoves(payload);
+    RemoteGtpRootInfo rootInfo = remoteGtpRootInfo(payload);
+    int playouts = payload.totalVisits();
     if (moves.isEmpty() || playouts <= 0) {
       return true;
     }
@@ -649,66 +654,21 @@ public class AnalysisEngine {
     return true;
   }
 
-  private List<MoveData> parseRemoteGtpInfo(String line) {
-    String payload = line.startsWith("info ") ? line.substring("info ".length()) : line;
-    int rootInfoIndex = payload.indexOf(" rootInfo ");
-    if (rootInfoIndex >= 0) {
-      payload = payload.substring(0, rootInfoIndex);
-    }
-    List<MoveData> moves = new ArrayList<MoveData>();
-    String[] variations = payload.split(" info ");
-    for (String variation : variations) {
-      if (variation == null || variation.trim().isEmpty()) {
-        continue;
-      }
-      try {
-        MoveData move = MoveData.fromInfoKatago(variation);
-        if ((move.variation == null || move.variation.isEmpty())
-            && move.coordinate != null
-            && !move.coordinate.trim().isEmpty()) {
-          move.variation = new ArrayList<String>();
-          move.variation.add(move.coordinate);
-        }
-        moves.add(move);
-      } catch (RuntimeException ignored) {
+  private List<MoveData> remoteGtpMoves(KataGoAnalysisPayload payload) {
+    for (MoveData move : payload.moves) {
+      if ((move.variation == null || move.variation.isEmpty())
+          && move.coordinate != null && !move.coordinate.isEmpty()) {
+        move.variation = new ArrayList<>();
+        move.variation.add(move.coordinate);
       }
     }
-    return moves;
+    return payload.moves;
   }
 
-  private RemoteGtpRootInfo parseRemoteGtpRootInfo(String line) {
-    if (line == null) {
-      return null;
-    }
-    int rootInfoIndex = line.indexOf(" rootInfo ");
-    if (rootInfoIndex < 0) {
-      return null;
-    }
-    String[] tokens = line.substring(rootInfoIndex + " rootInfo ".length()).trim().split("\\s+");
-    int visits = -1;
-    double winrate = Double.NaN;
-    double scoreLead = Double.NaN;
-    for (int i = 0; i < tokens.length - 1; i++) {
-      String key = tokens[i];
-      String value = tokens[i + 1];
-      try {
-        if ("visits".equals(key)) {
-          visits = Integer.parseInt(value);
-          i++;
-        } else if ("winrate".equals(key)) {
-          winrate = Double.parseDouble(value) * 100.0;
-          i++;
-        } else if ("scoreLead".equals(key) || "scoreMean".equals(key)) {
-          scoreLead = Double.parseDouble(value);
-          i++;
-        }
-      } catch (NumberFormatException ignored) {
-      }
-    }
-    if (visits <= 0 || !Double.isFinite(winrate) || !Double.isFinite(scoreLead)) {
-      return null;
-    }
-    return new RemoteGtpRootInfo(visits, Math.max(0.0, Math.min(100.0, winrate)), scoreLead);
+  private RemoteGtpRootInfo remoteGtpRootInfo(KataGoAnalysisPayload payload) {
+    if (payload.rootVisits < 0) return null;
+    return new RemoteGtpRootInfo(
+        payload.rootVisits, payload.rootWinrate, payload.rootScoreMean);
   }
 
   private void completeRemoteGtpJob(
@@ -867,13 +827,11 @@ public class AnalysisEngine {
     if (remoteGtpStoppingJob == null) {
       return;
     }
-    List<MoveData> moves = parseRemoteGtpInfo(line);
-    if (!moves.isEmpty() && MoveData.getPlayouts(moves) > 0) {
+    KataGoAnalysisPayload payload = KataGoAnalysisPayload.parse(line);
+    List<MoveData> moves = remoteGtpMoves(payload);
+    if (!moves.isEmpty() && payload.totalVisits() > 0) {
       remoteGtpStoppingMoves = moves;
-    }
-    RemoteGtpRootInfo rootInfo = parseRemoteGtpRootInfo(line);
-    if (rootInfo != null) {
-      remoteGtpStoppingRootInfo = rootInfo;
+      remoteGtpStoppingRootInfo = remoteGtpRootInfo(payload);
     }
   }
 
@@ -914,11 +872,12 @@ public class AnalysisEngine {
     }
     int reportedPlayouts = rootInfo != null ? rootInfo.visits : MoveData.getPlayouts(moves);
     boolean payloadApplied = applyAnalysisPayload(job.node, moves, null, reportedPlayouts);
-    if (payloadApplied && rootInfo != null) {
+    if (payloadApplied && job.node.getData().bestMoves == moves && rootInfo != null) {
       BoardData data = job.node.getData();
-      data.winrate = rootInfo.winrate;
-      data.scoreMean = rootInfo.scoreLead;
+      if (Double.isFinite(rootInfo.winrate)) data.winrate = rootInfo.winrate;
+      if (Double.isFinite(rootInfo.scoreLead)) data.scoreMean = rootInfo.scoreLead;
       data.setPlayouts(rootInfo.visits);
+      data.rootVisits = rootInfo.visits;
       data.comment = SGFParser.formatComment(job.node);
       Lizzie.board.updateMovelist(job.node);
     }

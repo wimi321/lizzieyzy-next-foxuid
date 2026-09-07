@@ -1641,9 +1641,9 @@ public class BoardRenderer {
     mouseOverTempNode = Lizzie.frame.getDisplayNode();
     int maxPlayouts = 0;
     for (MoveData move : bestMoves) {
-      if (move.playouts > maxPlayouts) maxPlayouts = move.playouts;
+      if (move.allocationVisits() > maxPlayouts) maxPlayouts = move.allocationVisits();
     }
-    float percentPlayouts = (float) suggestedMove.get().playouts / maxPlayouts;
+    float percentPlayouts = (float) suggestedMove.get().allocationRatio(maxPlayouts);
 
     //        (Lizzie.config.leelaversion >= 17 && Lizzie.config.showlcbcolor &&
     // !Lizzie.leelaz.noLcb)
@@ -2579,7 +2579,7 @@ public class BoardRenderer {
         double minWinrate = 100.0;
         double maxScoreMean = -300;
         for (MoveData move : bestMoves) {
-          if (move.playouts > maxPlayouts) maxPlayouts = move.playouts;
+          if (move.allocationVisits() > maxPlayouts) maxPlayouts = move.allocationVisits();
           if (move.winrate > maxWinrate) maxWinrate = move.winrate;
           if (move.winrate < minWinrate) minWinrate = move.winrate;
           if (move.isKataData && Lizzie.config.showScoremeanInSuggestion) {
@@ -2653,7 +2653,7 @@ public class BoardRenderer {
               Lizzie.config.winrateAlwaysBlack
                   && !Lizzie.frame.getDisplayNode().getData().blackToPlay;
           double fraction = 0;
-          float percentPlayouts = (float) move.playouts / maxPlayouts;
+          float percentPlayouts = (float) move.allocationRatio(maxPlayouts);
           int[] coords = coordsOpt.get();
 
           int suggestionX = x + scaledMarginWidth + squareWidth * coords[0];
@@ -2855,7 +2855,9 @@ public class BoardRenderer {
                 showPlayouts,
                 showScoreLead,
                 canShowMaxColor && hasMaxWinrate ? maxColor : normalColor,
-                canShowMaxColor && move.playouts == maxPlayouts ? maxColor : normalColor,
+                canShowMaxColor && move.allocationVisits() == maxPlayouts
+                    ? maxColor
+                    : normalColor,
                 canShowMaxColor && move.scoreMean == maxScoreMean ? maxColor : normalColor);
           }
         }
@@ -3300,7 +3302,7 @@ public class BoardRenderer {
       int maxPlayouts = 0;
       double maxWinrate = 0;
       for (MoveData move : bestMoves) {
-        if (move.playouts > maxPlayouts) maxPlayouts = move.playouts;
+        if (move.allocationVisits() > maxPlayouts) maxPlayouts = move.allocationVisits();
         if (move.winrate > maxWinrate) maxWinrate = move.winrate;
       }
       for (int i = bestMoves.size() - 1; i >= 0; i--) {
@@ -3311,7 +3313,7 @@ public class BoardRenderer {
           continue; // This actually can happen
         }
 
-        float percentPlayouts = (float) move.playouts / maxPlayouts;
+        float percentPlayouts = (float) move.allocationRatio(maxPlayouts);
         if (!branchOpt.isPresent()) {
 
           Optional<int[]> coordsOpt = Board.asCoordinates(move.coordinate);

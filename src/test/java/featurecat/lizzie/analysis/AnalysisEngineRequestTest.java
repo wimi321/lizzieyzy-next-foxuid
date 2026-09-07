@@ -1847,8 +1847,24 @@ class AnalysisEngineRequestTest {
 
       assertEquals(1, requested);
       assertEquals(500, rootData.getPlayouts());
+      assertEquals(500, rootData.rootVisits);
       assertEquals(300, rootData.bestMoves.get(0).playouts);
       assertTrue(rootData.hasCompletePrimaryAnalysis(500, false));
+      waitForMovelistRefreshThreads();
+    }
+  }
+
+  @Test
+  void childResearchCannotSatisfyWholeGameRootBudget() throws Exception {
+    try (TestEnvironment env = TestEnvironment.open()) {
+      BoardData rootData = BoardData.empty(BOARD_SIZE, BOARD_SIZE);
+      BoardHistoryList history = new BoardHistoryList(rootData);
+      boardWithHistory(history);
+      TrackingAnalysisEngine engine = TrackingAnalysisEngine.create();
+      engine.synchronousResponse = analysisResultWithRootVisits(1, 848, 100, 70.0);
+      engine.startWholeGameRequest(List.of(history.getStart()), 500, false);
+      assertEquals(0, rootData.getPlayouts());
+      assertFalse(rootData.hasCompletePrimaryAnalysis(500, false));
       waitForMovelistRefreshThreads();
     }
   }
