@@ -268,6 +268,15 @@ ReadBoard route 要求 current helper 的 stable accepted frame，同时没有 f
 pending local move、GMA、unrestored engine 或 node mismatch。具体 reason 由
 `ReadBoardTrackingEligibilityAdapter.Snapshot` 表达。
 
+导航重准入分两步：`AcceptedTrackingEvidence` 保留已接受远端语义；读取 eligibility 时
+完整重验当前 Board/history/node、stones、turn、尺寸、rules/komi，并使用当前 revision。
+Leelaz 独立检查当前 reader 的 queued position lineage、required responses 与 restore
+owner，再提供已确认的 incarnation。导航返回只开放新请求，不恢复旧用户意图。
+
+`TrackingFrameProcessing` 仅属于当前帧处理：先记录已接受的远端节点，待本地同步及视图
+采用结束后，在原 processing epoch 下发布证据。`start`、`clear`、新采样、坏帧、停止
+和外部换谱使旧 epoch 失效；它不承担逐点调度或重试。
+
 Adapter 必须做 acquisition 前后双检，因为以下竞态真实存在：
 
 ```text

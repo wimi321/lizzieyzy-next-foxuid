@@ -4214,6 +4214,27 @@ public class Leelaz {
     return currentReaderStreamBinding().incarnation;
   }
 
+  long confirmedReadBoardTrackingIncarnation() {
+    synchronized (engineArbitrationLock()) {
+      synchronized (commandQueue()) {
+        ReaderStreamBinding binding = currentReaderStreamBinding();
+        AnalysisStateLineage lineage =
+            binding.queuedAnalysisStateLineage != null
+                ? binding.queuedAnalysisStateLineage
+                : binding.analysisStateLineage;
+        if (!isEligibleLocalKataGoForReadBoardTracking()
+            || binding.terminated
+            || engineStateUnrestored
+            || exclusiveGtpLifecycleTransition
+            || hasLifecycleCompletionLocked()
+            || lineage.isFailed()
+            || lineage.hasPendingResponses()
+            || lineage.pendingRestoreOwners.get() > 0) return -1L;
+        return binding.incarnation;
+      }
+    }
+  }
+
   public boolean restorePonderAfterTracking(TrackingStreamLeaseReceipt receipt) {
     boolean claimed = false;
     boolean restored = false;

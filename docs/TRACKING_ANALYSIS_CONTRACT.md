@@ -63,6 +63,16 @@ to-play、rules、komi、engine/incarnation、参数或 ReadBoard identity/revis
 ReadBoard stable 条件与失效顺序由 `ReadBoardTrackingEligibilityAdapter` 和 `ReadBoard`
 eligibility snapshot 拥有。Tracking 不拦截 helper protocol，不推导或补造 `MOVE/PASS`。
 
+- 已接受远端证据独立于当前请求，绑定 helper/session、Board/history、accepted node、完整
+  stones、行棋方、尺寸、rules 和 komi。导航离开清除旧选择、结果和请求；返回完整匹配的
+  已接受局面后，无需新 helper 帧即可为当前 Board revision 与已确认位置的当前引擎
+  incarnation 建立新准入，不恢复旧选择。
+- 新帧收集与处理期间关闭新请求准入；完整帧完成本地导航及视图采用后才发布 accepted
+  evidence。processing epoch 隔离迟到接受；坏帧、换谱、停止同步和 helper retirement
+  不能重新开放旧证据。native LF/CRLF 行尾保留，非法单元整帧拒绝并记录解析失败。
+- 当前引擎位置的 required responses 和 restore owner 未完成或已失败时不准入；位置
+  确认复用 Leelaz 现有 lineage。远端证据不永久绑定某一引擎 incarnation。
+
 ## Display 与 renderer
 
 - `DisplaySnapshot` 是 immutable value；renderer 不读取 controller 内部 mutable state。

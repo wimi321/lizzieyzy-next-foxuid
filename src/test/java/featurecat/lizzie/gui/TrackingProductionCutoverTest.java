@@ -13,7 +13,6 @@ import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.MoveData;
 import featurecat.lizzie.analysis.MoveRankEvaluationMode;
 import featurecat.lizzie.analysis.ReadBoard;
-import featurecat.lizzie.analysis.ReadBoardTrackingEligibilityAdapter;
 import featurecat.lizzie.analysis.TrackingAnalysisController;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
@@ -53,6 +52,155 @@ class TrackingProductionCutoverTest {
           controller.snapshot().context().readBoardContext().isPresent(),
           "stable ReadBoard entry must bind its accepted frame identity to the same controller");
       assertTrue(environment.commands().contains("800000001 stop\n"));
+    }
+  }
+
+  @Test
+  void returningToAcceptedReadBoardPositionAllowsNewEvaluationWithoutAnotherFrame()
+      throws Exception {
+    BoardRenderer previousRenderer = LizzieFrame.boardRenderer;
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      LizzieFrame.boardRenderer = new BoardRenderer(false);
+      Lizzie.board.place(0, 0, Stone.BLACK);
+      environment.acknowledgePositionCommands();
+      environment.installStableReadBoard("re=3,0", "re=0,0");
+      ReadBoard readBoard = environment.frame.readBoard;
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("A1"));
+      environment.completeInitialFence(800000000);
+      environment.sendTrackingInfo(
+          "info move A1 visits 20 winrate 0.51 scoreLead 2.5 prior 0.2 pv A1");
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().containsKey("A1"));
+      long acceptedRevision = Lizzie.board.getContextRevision();
+      assertTrue(Lizzie.board.previousMove(false));
+      environment.completeFinalFence(800000002);
+      environment.acknowledgePositionCommands();
+      assertFalse(readBoard.snapshot().stable());
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+      assertTrue(Lizzie.board.nextMove(false));
+      assertFalse(environment.frame.canStartTrackingAnalysis());
+      environment.acknowledgePositionCommands();
+      assertTrue(Lizzie.board.getContextRevision() > acceptedRevision);
+      assertTrue(readBoard.snapshot().stable());
+      assertEquals(Lizzie.board.getContextRevision(), readBoard.snapshot().boardRevision());
+      assertTrue(environment.frame.trackingDisplaySnapshot().selectedPoints().isEmpty());
+      assertTrue(environment.frame.trackingDisplaySnapshot().results().isEmpty());
+      assertEquals(
+          TrackingAnalysisController.AddResult.ADDED, environment.frame.addTrackingPoint("B2"));
+    } finally {
+      LizzieFrame.boardRenderer = previousRenderer;
+    }
+  }
+
+  @Test
+  void nativeCrlfIsAcceptedButMalformedCellsCannotPublishAnAcceptedFrame() throws Exception {
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      environment.installStableReadBoard();
+      ReadBoard readBoard = environment.frame.readBoard;
+      readBoard.parseLine("re=0,0\r\n");
+      assertFalse(readBoard.snapshot().stable());
+      readBoard.parseLine("re=0,0\r\n");
+      readBoard.parseLine("end\r\n");
+      assertTrue(readBoard.snapshot().stable());
+      readBoard.parseLine("re=0junk,0");
+      readBoard.parseLine("re=0,0");
+      readBoard.parseLine("end");
+      assertFalse(readBoard.snapshot().stable());
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("A1"));
+    }
+  }
+
+  @Test
+  void stoppingDiscardsMalformedSamplingBeforeTheFirstResumedFrame() throws Exception {
+    for (String boundary : List.of("endsync", "stopsync")) {
+      try (TestEnvironment environment = TestEnvironment.open()) {
+        environment.installStableReadBoard();
+        ReadBoard helper = environment.frame.readBoard;
+        helper.parseLine("re=x,0");
+        helper.parseLine(boundary);
+        assertFalse(environment.frame.canStartTrackingAnalysis());
+        helper.parseLine("re=0,0");
+        helper.parseLine("re=0,0");
+        helper.parseLine("end");
+        environment.completeSyncConfirmation();
+        assertTrue(environment.frame.canStartTrackingAnalysis(), boundary);
+        assertEquals(TrackingAnalysisController.AddResult.ADDED,
+            environment.frame.addTrackingPoint("A1"));
+      }
+    }
+  }
+
+  @Test
+  void acceptedNodeIdentityDoesNotOverridePositionHistoryOrHelperMismatch() throws Exception {
+    List<Runnable> mutations =
+        List.of(
+            () -> Lizzie.board.getHistory().getData().stones[0] = Stone.BLACK,
+            () -> Lizzie.board.getHistory().getData().blackToPlay = false,
+            () -> Board.boardWidth = 3,
+            () -> Board.boardHeight = 3,
+            () -> Lizzie.config.currentKataGoRules = "japanese",
+            () -> Lizzie.board.getHistory().getGameInfo().setKomi(0.5),
+            () ->
+                Lizzie.board.setHistory(new BoardHistoryList(Lizzie.board.getHistory().getData())),
+            () -> Lizzie.frame.readBoard = null);
+    for (Runnable mutation : mutations) {
+      try (TestEnvironment environment = TestEnvironment.open()) {
+        environment.installStableReadBoard();
+        ReadBoard helper = environment.frame.readBoard;
+        mutation.run();
+        assertFalse(helper.snapshot().stable());
+        if (environment.frame.readBoard != null) {
+          assertFalse(environment.frame.canStartTrackingAnalysis());
+        }
+      }
+    }
+  }
+
+  @Test
+  void stoppedOrIncompleteFrameCannotReadmitAnOldAcceptedPosition() throws Exception {
+    for (String boundary : List.of("endsync", "stopsync", "clear", "re=0,0")) {
+      try (TestEnvironment environment = TestEnvironment.open()) {
+        environment.installStableReadBoard();
+        ReadBoard helper = environment.frame.readBoard;
+        helper.parseLine(boundary);
+        assertFalse(environment.frame.canStartTrackingAnalysis());
+        helper.onLocalHistoryNavigation();
+        assertFalse(helper.snapshot().stable());
+        assertEquals(
+            TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+            environment.frame.addTrackingPoint("A1"));
+      }
+    }
+  }
+
+  @Test
+  void lateFrameAcceptanceCannotReopenAStoppedHelper() throws Exception {
+    BoardRenderer previousRenderer = LizzieFrame.boardRenderer;
+    try (TestEnvironment environment = TestEnvironment.open()) {
+      LizzieFrame.boardRenderer = new BoardRenderer(false);
+      environment.installStableReadBoard();
+      ReadBoard helper = environment.frame.readBoard;
+      java.util.concurrent.atomic.AtomicBoolean reached =
+          new java.util.concurrent.atomic.AtomicBoolean();
+      ((TrackingBoard) Lizzie.board).afterSyncMove =
+          () -> {
+            assertFalse(environment.frame.canStartTrackingAnalysis());
+            helper.parseLine("endsync");
+            reached.set(true);
+          };
+      helper.parseLine("re=3,0");
+      helper.parseLine("re=0,0");
+      helper.parseLine("end");
+      environment.acknowledgePositionCommands();
+      assertTrue(reached.get());
+      assertFalse(helper.snapshot().stable());
+      assertEquals(
+          TrackingAnalysisController.AddResult.LEASE_UNAVAILABLE,
+          environment.frame.addTrackingPoint("B2"));
+    } finally {
+      LizzieFrame.boardRenderer = previousRenderer;
     }
   }
 
@@ -435,7 +583,8 @@ class TrackingProductionCutoverTest {
 
       assertTrue(
           opaqueRgbMaskDifferences(manualWhite, automatic, Color.BLACK, 51, 129, 24).size() > 5,
-          "a mostly transparent dark fill over the light board should automatically use black text");
+          "a mostly transparent dark fill over the light board should automatically use black"
+              + " text");
     }
   }
 
@@ -464,8 +613,8 @@ class TrackingProductionCutoverTest {
           opaqueRgbMaskDifferences(ordinaryCandidate, trackingResult, Color.BLACK, 51, 129, 30);
       assertTrue(
           differences.size() <= 2,
-          "tracking text should reuse ordinary row order, positions, and score-difference baseline; "
-              + "only antialiasing edge pixels may differ over the translucent interior: "
+          "tracking text should reuse ordinary row order, positions, and score-difference baseline;"
+              + " only antialiasing edge pixels may differ over the translucent interior: "
               + differences);
     }
   }
@@ -684,6 +833,7 @@ class TrackingProductionCutoverTest {
     private final Leelaz engine;
     private final ByteArrayOutputStream output;
     private final LizzieFrame frame;
+    private final java.util.Set<String> acknowledgedCommands = new java.util.HashSet<>();
 
     private TestEnvironment(
         Leelaz previousEngine,
@@ -799,23 +949,33 @@ class TrackingProductionCutoverTest {
           frame);
     }
 
-    void installStableReadBoard() throws Exception {
+    void installStableReadBoard(String... rows) throws Exception {
       ReadBoard readBoard = allocate(ReadBoard.class);
-      BoardHistoryNode node = Lizzie.board.getHistory().getCurrentHistoryNode();
-      setField(readBoard, ReadBoard.class, "trackingEligibilityIdentity", new Object());
-      setField(readBoard, ReadBoard.class, "trackingEligibilityRevision", 7L);
-      setField(readBoard, ReadBoard.class, "trackingEligibilityNode", node);
-      setField(
-          readBoard,
-          ReadBoard.class,
-          "trackingEligibilityBoardRevision",
-          Lizzie.board.getContextRevision());
-      setField(
-          readBoard,
-          ReadBoard.class,
-          "trackingEligibilityReason",
-          ReadBoardTrackingEligibilityAdapter.Reason.STABLE);
+      for (String name :
+          List.of("conflictTracker", "historyJumpTracker", "localNavigationTracker")) {
+        Field field = ReadBoard.class.getDeclaredField(name);
+        field.setAccessible(true);
+        boolean navigation = name.equals("localNavigationTracker");
+        java.lang.reflect.Constructor<?> constructor =
+            navigation
+                ? field.getType().getDeclaredConstructor(java.util.function.BooleanSupplier.class)
+                : field.getType().getDeclaredConstructor();
+        constructor.setAccessible(true);
+        field.set(
+            readBoard,
+            navigation
+                ? constructor.newInstance((java.util.function.BooleanSupplier) () -> true)
+                : constructor.newInstance());
+      }
+      setField(readBoard, ReadBoard.class, "tempcount", new java.util.ArrayList<Integer>());
       frame.readBoard = readBoard;
+      for (String row : rows.length == 0 ? new String[] {"re=0,0", "re=0,0"} : rows) {
+        readBoard.parseLine(row);
+      }
+      readBoard.parseLine("end");
+      completeSyncConfirmation();
+      assertTrue(
+          readBoard.snapshot().stable(), readBoard.snapshot().reason().name() + " " + commands());
     }
 
     void installOrdinaryBestMove(String coordinate, int visits, double winrate, double scoreLead) {
@@ -886,12 +1046,34 @@ class TrackingProductionCutoverTest {
       method.invoke(engine, line);
     }
 
+    void acknowledgePositionCommands() throws Exception {
+      for (String line : commands().split("\n")) {
+        if (line.matches("[0-9]+ (play .*|undo|name|boardsize .*|clear_board|komi .*|loadsgf .*)")
+            && acknowledgedCommands.add(line)) {
+          processCommandResponse("=" + line.substring(0, line.indexOf(' ')));
+        }
+      }
+    }
+
+    void completeSyncConfirmation() throws Exception {
+      java.util.concurrent.CompletableFuture<Void> confirmation =
+          ((TrackingBoard) Lizzie.board).syncConfirmation;
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+      do {
+        acknowledgePositionCommands();
+        if (confirmation == null || confirmation.isDone()) break;
+        Thread.sleep(1);
+      } while (System.nanoTime() < deadline);
+      if (confirmation != null) confirmation.get(1, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
     String commands() {
       return output.toString(StandardCharsets.UTF_8);
     }
 
     @Override
     public void close() throws Exception {
+      completeSyncConfirmation();
       closeExclusiveSessionForTest(engine);
       Lizzie.leelaz = previousEngine;
       Lizzie.board = previousBoard;
@@ -921,6 +1103,22 @@ class TrackingProductionCutoverTest {
   }
 
   private static final class TrackingBoard extends Board {
+    private Runnable afterSyncMove;
+    private java.util.concurrent.CompletableFuture<Void> syncConfirmation;
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Void> applyReadBoardSync(
+        Runnable localChanges, java.util.function.BooleanSupplier requiresConfirmation) {
+      syncConfirmation = super.applyReadBoardSync(localChanges, requiresConfirmation);
+      return syncConfirmation;
+    }
+
+    @Override
+    public void placeForSync(int x, int y, Stone color, boolean newBranch) {
+      super.placeForSync(x, y, color, newBranch);
+      if (afterSyncMove != null) afterSyncMove.run();
+    }
+
     @Override
     public void clearAfterMove() {}
   }
