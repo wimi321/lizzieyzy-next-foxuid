@@ -195,30 +195,6 @@ class ReadBoardPendingLocalMoveSyncTest {
   }
 
   @Test
-  void readBoardControlResetPreservesPendingLocalMoveAwaitingAck() throws Exception {
-    LizzieFrame previousFrame = Lizzie.frame;
-    try {
-      ReadBoard readBoard = allocate(ReadBoard.class);
-      setField(readBoard, "conflictTracker", new SyncConflictTracker());
-      setField(readBoard, "historyJumpTracker", new SyncHistoryJumpTracker());
-
-      LizzieFrame frame = allocate(LizzieFrame.class);
-      frame.bothSync = true;
-      Lizzie.frame = frame;
-
-      invokeStartTrackingLocalMove(readBoard);
-
-      invokeResetActiveSyncStateForReadBoardControlLine(readBoard);
-
-      assertTrue(
-          invokeShouldIgnoreCurrentLastLocalMove(readBoard),
-          "readboard start/clear control lines must not clear a local move before placeComplete or error place failed.");
-    } finally {
-      Lizzie.frame = previousFrame;
-    }
-  }
-
-  @Test
   void doesNotRetryPlaceCommandAfterPlaceCompleteWhileWaitingForSnapshot() throws Exception {
     int previousBoardWidth = Board.boardWidth;
     int previousBoardHeight = Board.boardHeight;
@@ -791,6 +767,10 @@ class ReadBoardPendingLocalMoveSyncTest {
   }
 
   private static void invokeStartTrackingLocalMove(ReadBoard readBoard) throws Exception {
+    Lizzie.frame.readBoard = readBoard;
+    Lizzie.frame.syncBoard = true;
+    readBoard.process = new ReadBoardEngineResumeTest.AliveProcess();
+    setField(readBoard, "usePipe", true);
     Method method = ReadBoard.class.getDeclaredMethod("startTrackingLocalMoveFromLizzie");
     method.setAccessible(true);
     method.invoke(readBoard);
@@ -798,14 +778,6 @@ class ReadBoardPendingLocalMoveSyncTest {
 
   private static void invokeMarkLocalMoveCommandCompleted(ReadBoard readBoard) throws Exception {
     Method method = ReadBoard.class.getDeclaredMethod("markLocalMoveCommandCompleted");
-    method.setAccessible(true);
-    method.invoke(readBoard);
-  }
-
-  private static void invokeResetActiveSyncStateForReadBoardControlLine(ReadBoard readBoard)
-      throws Exception {
-    Method method =
-        ReadBoard.class.getDeclaredMethod("resetActiveSyncStateForReadBoardControlLine");
     method.setAccessible(true);
     method.invoke(readBoard);
   }

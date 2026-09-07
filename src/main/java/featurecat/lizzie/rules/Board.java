@@ -2663,42 +2663,6 @@ public class Board {
       boolean forManual,
       boolean sendReadBoardPlaceOnHistoryNext) {
     boolean shouldLogLocalMovePlace = shouldLogLocalMovePlace(forSync);
-    if (shouldSuppressLocalPlaceAfterFailedReadBoardSync(x, y, color, forSync)) {
-      if (shouldLogLocalMovePlace) {
-        logLocalMovePlace(
-            "place suppressed after failed readboard sync x="
-                + x
-                + " y="
-                + y
-                + " color="
-                + color
-                + " newBranch="
-                + newBranch
-                + " forManual="
-                + forManual
-                + " "
-                + localMovePlaceState(forSync));
-      }
-      return;
-    }
-    if (shouldSuppressLocalPlaceWhileReadBoardPending(x, y, color, forSync)) {
-      if (shouldLogLocalMovePlace) {
-        logLocalMovePlace(
-            "place suppressed while readboard local move pending x="
-                + x
-                + " y="
-                + y
-                + " color="
-                + color
-                + " newBranch="
-                + newBranch
-                + " forManual="
-                + forManual
-                + " "
-                + localMovePlaceState(forSync));
-      }
-      return;
-    }
     if (shouldLogLocalMovePlace) {
       logLocalMovePlace(
           "place enter x="
@@ -2718,6 +2682,42 @@ public class Board {
     LizzieFrame.boardRenderer.removedrawmovestone();
     Lizzie.frame.suggestionclick = LizzieFrame.outOfBoundCoordinate;
     synchronized (this) {
+      if (shouldSuppressLocalPlaceAfterFailedReadBoardSync(x, y, color, forSync)) {
+        if (shouldLogLocalMovePlace) {
+          logLocalMovePlace(
+              "place suppressed after failed readboard sync x="
+                  + x
+                  + " y="
+                  + y
+                  + " color="
+                  + color
+                  + " newBranch="
+                  + newBranch
+                  + " forManual="
+                  + forManual
+                  + " "
+                  + localMovePlaceState(forSync));
+        }
+        return;
+      }
+      if (shouldSuppressLocalPlaceWhileReadBoardPending(x, y, color, forSync)) {
+        if (shouldLogLocalMovePlace) {
+          logLocalMovePlace(
+              "place suppressed while readboard local move pending x="
+                  + x
+                  + " y="
+                  + y
+                  + " color="
+                  + color
+                  + " newBranch="
+                  + newBranch
+                  + " forManual="
+                  + forManual
+                  + " "
+                  + localMovePlaceState(forSync));
+        }
+        return;
+      }
       boolean valid = isValid(x, y);
       boolean occupied = valid && history.getStones()[getIndex(x, y)] != Stone.EMPTY;
       if (!valid || (occupied && !newBranch)) {
@@ -3018,11 +3018,8 @@ public class Board {
         readBoard != null && readBoard.isPendingLocalMoveAwaitingReadBoard();
     boolean canSendReadBoardPlace =
         !forSync
-            && Lizzie.frame != null
-            && Lizzie.frame.bothSync
             && readBoard != null
-            && readBoard.process != null
-            && readBoard.process.isAlive()
+            && readBoard.hasLocalMoveConfirmationAuthority()
             && !pendingReadBoardLocalMove;
     if (shouldLogLocalMovePlace) {
       logLocalMovePlace(
@@ -3045,12 +3042,34 @@ public class Board {
     }
   }
 
+  /** Commits an authorized connector failure without engine or UI work under the board lock. */
+  public synchronized Optional<BoardHistoryNode> discardFailedReadBoardMove(
+      BoardHistoryNode failedNode) {
+    if (history.getMainEnd() != failedNode || failedNode == null) {
+      return Optional.empty();
+    }
+    BoardHistoryNode rollback = failedNode.previous().orElse(null);
+    if (rollback == null) {
+      return Optional.empty();
+    }
+    int childIndex = rollback.indexOfNode(failedNode);
+    if (childIndex < 0) {
+      return Optional.empty();
+    }
+    history.setHead(rollback);
+    rollback.deleteChild(childIndex);
+    advanceContextRevision();
+    markMoveNavigationForMovelistRefresh();
+    return Optional.of(rollback);
+  }
+
   private boolean shouldSuppressLocalPlaceAfterFailedReadBoardSync(
       int x, int y, Stone color, boolean forSync) {
     return !forSync
         && Lizzie.frame != null
         && Lizzie.frame.bothSync
         && Lizzie.frame.readBoard != null
+        && Lizzie.frame.readBoard.hasLocalMoveConfirmationAuthority()
         && Lizzie.frame.readBoard.shouldSuppressLocalPlaceAfterFailedSync(x, y, color);
   }
 
@@ -3060,6 +3079,7 @@ public class Board {
         && Lizzie.frame != null
         && Lizzie.frame.bothSync
         && Lizzie.frame.readBoard != null
+        && Lizzie.frame.readBoard.hasLocalMoveConfirmationAuthority()
         && Lizzie.frame.readBoard.isPendingLocalMoveAwaitingReadBoard();
   }
 
@@ -5976,7 +5996,9 @@ public class Board {
     setMovelistAll(null);
   }
 
-  /** Rebuilds move-list metadata asynchronously and runs {@code onComplete} after it is coherent. */
+  /**
+   * Rebuilds move-list metadata asynchronously and runs {@code onComplete} after it is coherent.
+   */
   public void setMovelistAll(Runnable onComplete) {
     final int generation = ++movelistRefreshGeneration;
     final BoardHistoryList refreshHistory = history;

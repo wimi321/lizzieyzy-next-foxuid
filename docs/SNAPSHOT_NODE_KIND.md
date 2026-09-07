@@ -208,6 +208,36 @@ ReadBoard 协议里的 `pass` 行在自动落子/交换顺序链路中表示用�
 - 任一初始或 catch-up restore 失败都 fail-closed：目标引擎置为 unavailable、不发送 ponder/analyze、释放 lifecycle reservation、结束 initial synchronization 状态、走既有引擎同步失败提示；不执行猜测性 root fallback。
 - `ExactSnapshotEngineRestore` 继续只负责单份 immutable exact plan；追赶最新棋盘的 lifecycle 收敛逻辑只属于 EngineManager 的 initial startup owner，不进入 exact module。
 
+## 连续同步与本地落子确认权限（Issue #432）
+
+- 本地落子的远端确认权限属于当前连接的 `ReadBoard`，仅在 helper 未退役、仍为窗口当前
+  helper、连续同步 `syncBoard` 开启且双向模式 `bothSync` 有效时成立。管道与 socket
+  保留各自传输可用性条件；帧处理标志 `isSyncing` 不表示连续同步权限。
+- `Board` 出站与本地落子抑制、`ReadBoard` 直接 placement admission、重试和最终失败
+  提交使用同一权限。停止后 helper 可以保持连接，本地 MOVE 按普通棋盘规则保留。
+- `stopsync` / `endsync` 退役 pending ACK identity，清除 confirmed protection 和失败
+  落子观察／抑制，并执行已有 placement UI cleanup。停止既不删除 pending MOVE，也不
+  声称远端已确认它；停止本身不创建 `MOVE/PASS/SNAPSHOT`。
+- pending 创建、ACK 结清、停止退役与最终失败提交由 ReadBoard 的短确认状态临界区串行化；
+  history 提交先取得既有 Board monitor，再进入确认临界区。确认临界区不等待引擎、
+  helper 输出或 EDT，也不取得 ReadBoard/GMA monitor。Board 负责纯 history 删除及 revision。
+  本地落子的 pending／失败抑制检查也在同一 Board monitor 内、history 变更之前执行。
+- 失败提交同时验证 helper、ACK generation、pending node、Board/history identity 和 mainEnd。
+  停止先退役时，旧 callback 不删谱、不建立失败抑制、不启动旧节点引擎恢复；有效失败先
+  提交时，该 history 决定保留，随后在临界区外按当前盘面与既有 primary generation fence
+  恢复引擎。GMA 仍由原 session/engine arbitration owner 决定恢复归属。
+- 出站 placement 捕获 pending identity；管道与 socket 均在实际输出锁取得后、开始写入前
+  复验。已开始的写入或 helper 已接受的物理点击不能撤回。阻塞输出不占用 EDT 或确认状态锁。
+- shutdown、helper replacement、外部换谱使旧 captured work 对当前棋盘失去权限。
+  `clear` 与同尺寸 `start` 是活动帧边界，仍保留 pending 供随后快照确认；尺寸变化沿用
+  既有 history/resume 失效规则。
+  `end` 才提交一帧；`endsync` 直接退役并丢弃未提交采样，不隐式提交缓冲快照。
+- `placeComplete` 只表示点击完成提示，匹配快照才是 ACK 证据。无编号的旧 wire failure
+  不能与新 pending 可靠关联，继续遵守活动同步既有失败策略；host callback identity 不等于
+  wire request ID。
+- 暂停时保留有效 `resumeState` / `lastResolvedSnapshotNode` 和 first-frame re-arming。
+  主动恢复后，远端快照仍按既有匹配／重建规则决定同步盘面；单次读盘不要求先开启连续同步。
+
 ## 同步决策规则
 
 同步主流程只允许四类结果：

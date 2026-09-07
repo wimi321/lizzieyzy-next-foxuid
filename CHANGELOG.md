@@ -4,6 +4,7 @@ All notable maintenance updates to this fork are documented here.
 
 ## Unreleased
 
+- Preserve local moves after stopping ReadBoard synchronization and retire obsolete placement confirmations and queued output (#432).
 - Preserved diagnostic log record boundaries and stack-trace whitespace during export without weakening privacy redaction (#431).
 - Made diagnostic export estimates describe approximate uncompressed content, pruned proven irrelevant archives before reading using native Windows file identities where needed, and displayed publication success independently of folder opening (#430).
 - Wait for confirmed engine positions before starting ordinary analysis after moves and history navigation; resume ReadBoard analysis once at the final synchronized position while preserving valid node caches (#429).

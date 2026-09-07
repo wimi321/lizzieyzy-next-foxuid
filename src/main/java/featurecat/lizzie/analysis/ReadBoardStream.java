@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.Socket;
+import java.util.function.BooleanSupplier;
 import org.json.JSONException;
 
 public class ReadBoardStream extends Thread implements Closeable {
@@ -73,11 +74,18 @@ public class ReadBoardStream extends Thread implements Closeable {
   }
 
   public void sendCommand(String command) {
+    sendCommand(command, null);
+  }
+
+  void sendCommand(String command, BooleanSupplier stillAuthorized) {
     if (out == null) {
       return;
     }
     try {
       synchronized (out) {
+        if (stillAuthorized != null && !stillAuthorized.getAsBoolean()) {
+          return;
+        }
         out.write((command + "\n").getBytes());
         out.flush();
       }

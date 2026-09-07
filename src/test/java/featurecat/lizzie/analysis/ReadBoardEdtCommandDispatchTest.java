@@ -5,10 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.gui.LizzieFrame;
+import featurecat.lizzie.rules.Board;
+import featurecat.lizzie.rules.BoardData;
+import featurecat.lizzie.rules.BoardHistoryList;
+import featurecat.lizzie.rules.Stone;
+import featurecat.lizzie.rules.Zobrist;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,12 +26,39 @@ class ReadBoardEdtCommandDispatchTest {
   @Test
   void blockedReadBoardOutputNeverBlocksTheSwingEventThread() throws Exception {
     LizzieFrame previousFrame = Lizzie.frame;
+    Board previousBoard = Lizzie.board;
     BlockingOutput output = new BlockingOutput();
     try {
       ReadBoard readBoard = allocate(ReadBoard.class);
       LizzieFrame frame = allocate(LizzieFrame.class);
       frame.bothSync = true;
       Lizzie.frame = frame;
+      frame.syncBoard = true;
+      frame.readBoard = readBoard;
+      readBoard.process = new ReadBoardEngineResumeTest.AliveProcess();
+      Board board = allocate(Board.class);
+      Stone[] stones = new Stone[Board.boardWidth * Board.boardHeight];
+      Arrays.fill(stones, Stone.EMPTY);
+      stones[Board.getIndex(1, 1)] = Stone.BLACK;
+      Zobrist.init();
+      Zobrist hash = new Zobrist();
+      hash.toggleStone(1, 1, Stone.BLACK);
+      BoardHistoryList history =
+          new BoardHistoryList(
+              BoardData.move(
+                  stones,
+                  new int[] {1, 1},
+                  Stone.BLACK,
+                  false,
+                  hash,
+                  1,
+                  new int[stones.length],
+                  0,
+                  0,
+                  50,
+                  0));
+      setField(board, "history", history);
+      Lizzie.board = board;
       setField(readBoard, "usePipe", true);
       setField(readBoard, "outputStream", new BufferedOutputStream(output));
 
@@ -51,6 +84,7 @@ class ReadBoardEdtCommandDispatchTest {
       output.releaseWrite.countDown();
       output.writeCompleted.await(2, TimeUnit.SECONDS);
       Lizzie.frame = previousFrame;
+      Lizzie.board = previousBoard;
     }
   }
 
@@ -61,8 +95,8 @@ class ReadBoardEdtCommandDispatchTest {
     return (T) ((Unsafe) field.get(null)).allocateInstance(type);
   }
 
-  private static void setField(ReadBoard target, String name, Object value) throws Exception {
-    Field field = ReadBoard.class.getDeclaredField(name);
+  private static void setField(Object target, String name, Object value) throws Exception {
+    Field field = target.getClass().getDeclaredField(name);
     field.setAccessible(true);
     field.set(target, value);
   }

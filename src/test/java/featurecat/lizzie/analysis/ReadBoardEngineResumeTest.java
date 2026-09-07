@@ -11,6 +11,7 @@ import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.gui.BoardRenderer;
 import featurecat.lizzie.gui.BottomToolbar;
+import featurecat.lizzie.gui.GtpConsolePane;
 import featurecat.lizzie.gui.JFontCheckBox;
 import featurecat.lizzie.gui.JFontTextField;
 import featurecat.lizzie.gui.LizzieFrame;
@@ -35,6 +36,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.swing.JCheckBox;
 import javax.swing.JTextField;
@@ -43,6 +50,8 @@ import org.json.JSONObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ReadBoardEngineResumeTest {
   private static final int BOARD_SIZE = 3;
@@ -65,6 +74,339 @@ class ReadBoardEngineResumeTest {
     Board.boardWidth = previousBoardWidth;
     Board.boardHeight = previousBoardHeight;
     Zobrist.init();
+  }
+
+  @Test
+  void stoppedSynchronizationKeepsCompleteLocalPlacement() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      buildHistory(harness.board, placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
+      harness.readBoard.process = new AliveProcess();
+      setField(
+          harness.readBoard, "pendingLocalMoveTimeoutExecutor", new ScheduledThreadPoolExecutor(1));
+      harness.readBoard.parseLine("bothSync");
+      harness.readBoard.parseLine("sync");
+      harness.readBoard.parseLine("stopsync");
+
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      BoardHistoryNode localMove = harness.board.getHistory().getCurrentHistoryNode();
+      harness.leelaz.sentCommands.clear();
+      Thread.sleep(3400);
+      assertSame(localMove, harness.board.getHistory().getCurrentHistoryNode());
+      assertTrue(harness.leelaz.sentCommands.isEmpty());
+
+      assertEquals(3, localMove.getData().moveNumber);
+      assertEquals(Stone.BLACK, localMove.getData().stones[Board.getIndex(0, 1)]);
+      assertFalse(harness.protocolOutput().contains("place "));
+      assertTrue(harness.readBoard.process.isAlive());
+    }
+  }
+
+  @Test
+  void stoppingRetiresCapturedTimeoutAndAllowsNextLocalMove() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      BoardHistoryNode pending = harness.board.getHistory().getCurrentHistoryNode();
+      assertTrue(harness.readBoard.hasLocalMoveConfirmationAuthority());
+      assertEquals(3, pending.getData().moveNumber);
+      assertTrue(harness.protocolOutput().contains("place 0 1"), harness.protocolOutput());
+      Runnable timeout = scheduler.callbacks.get(0);
+
+      harness.readBoard.parseLine("stopsync");
+      setField(
+          harness.readBoard, "lastPendingLocalMoveRetryTimeMs", System.currentTimeMillis() - 4000);
+      harness.leelaz.sentCommands.clear();
+      timeout.run();
+
+      assertSame(pending, harness.board.getHistory().getCurrentHistoryNode());
+      assertTrue(harness.leelaz.sentCommands.isEmpty());
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      assertEquals(4, harness.board.getHistory().getData().moveNumber);
+      assertEquals(Stone.WHITE, harness.board.getHistory().getStones()[Board.getIndex(2, 2)]);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"endsync", "shutdown"})
+  void endingHelperConfirmationPreservesPendingHistory(String end) throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      BoardHistoryNode pending = harness.board.getHistory().getCurrentHistoryNode();
+      harness.readBoard.parseLine("re=1,2,2");
+      harness.readBoard.parseLine("re=0,0,0");
+      harness.readBoard.parseLine("re=0,0,0");
+      harness.leelaz.sentCommands.clear();
+      if (end.equals("shutdown")) {
+        harness.readBoard.shutdownAfterProcessEnd();
+      } else {
+        harness.readBoard.parseLine(end);
+      }
+      harness.expire(scheduler.callbacks.get(0));
+      assertSame(pending, harness.board.getHistory().getCurrentHistoryNode());
+      assertFalse(
+          harness.leelaz.sentCommands.stream().anyMatch(command -> command.startsWith("loadsgf ")));
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      assertEquals(4, harness.board.getHistory().getData().moveNumber);
+    }
+  }
+
+  @Test
+  void concurrentLocalPlacementsSharePendingAdmission() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      harness.activateLocalPlacement();
+      CountDownLatch bothPlacementsEntered = new CountDownLatch(2);
+      LizzieFrame.boardRenderer =
+          new BoardRenderer(false) {
+            @Override
+            public void removedrawmovestone() {
+              bothPlacementsEntered.countDown();
+              try {
+                assertTrue(bothPlacementsEntered.await(2, TimeUnit.SECONDS));
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+              }
+            }
+          };
+      CompletableFuture<Void> first =
+          CompletableFuture.runAsync(
+              () -> harness.board.place(0, 1, Stone.BLACK, false, false, false));
+      CompletableFuture<Void> second =
+          CompletableFuture.runAsync(
+              () -> harness.board.place(2, 2, Stone.BLACK, false, false, false));
+      CompletableFuture.allOf(first, second).get(3, TimeUnit.SECONDS);
+
+      BoardHistoryNode pending = harness.board.getHistory().getCurrentHistoryNode();
+      assertEquals(3, pending.getData().moveNumber);
+      assertEquals(
+          1, harness.protocolOutput().lines().filter(line -> line.startsWith("place ")).count());
+      harness.acceptSnapshot(pending);
+      harness.board.place(1, 2, Stone.WHITE, false, false, false);
+      assertEquals(4, harness.board.getHistory().getData().moveNumber);
+      assertTrue(harness.protocolOutput().contains("place 1 2"));
+    }
+  }
+
+  @Test
+  void restartedSyncConfirmsNewPendingDespiteOldTimeout() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      Runnable oldTimeout = scheduler.callbacks.get(0);
+      harness.readBoard.parseLine("stopsync");
+      harness.readBoard.parseLine("sync");
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      BoardHistoryNode newPending = harness.board.getHistory().getCurrentHistoryNode();
+      assertTrue(harness.protocolOutput().contains("place 2 2"));
+
+      harness.expire(oldTimeout);
+      assertSame(newPending, harness.board.getHistory().getCurrentHistoryNode());
+      harness.acceptSnapshot(newPending);
+      harness.expire(scheduler.callbacks.get(1));
+      assertSame(newPending, harness.board.getHistory().getCurrentHistoryNode());
+      harness.board.place(1, 2, Stone.BLACK, false, false, false);
+      assertEquals(5, harness.board.getHistory().getData().moveNumber);
+      assertTrue(harness.protocolOutput().contains("place 1 2"));
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"helper", "history"})
+  void replacementRetiresOldCapturedWork(String replacement) throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      if (replacement.equals("helper")) {
+        harness.frame.readBoard = allocate(ReadBoard.class);
+      } else {
+        harness.board.setHistory(rootHistory(stones(placement(2, 1, Stone.WHITE)), true));
+      }
+      BoardHistoryList history = harness.board.getHistory();
+      BoardHistoryNode current = history.getCurrentHistoryNode();
+      harness.leelaz.sentCommands.clear();
+      harness.expire(scheduler.callbacks.get(0));
+      assertSame(history, harness.board.getHistory());
+      assertSame(current, history.getCurrentHistoryNode());
+      assertTrue(harness.leelaz.sentCommands.isEmpty());
+    }
+  }
+
+  @Test
+  void stopWinsWhileTimeoutWaitsForHistoryCommit() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      BoardHistoryNode pending = harness.board.getHistory().getCurrentHistoryNode();
+      setField(
+          harness.readBoard, "lastPendingLocalMoveRetryTimeMs", System.currentTimeMillis() - 4000);
+      CountDownLatch started = new CountDownLatch(1);
+      CompletableFuture<Void> completed = new CompletableFuture<>();
+      Thread timeout =
+          new Thread(
+              () -> {
+                started.countDown();
+                try {
+                  scheduler.callbacks.get(0).run();
+                  completed.complete(null);
+                } catch (Throwable failure) {
+                  completed.completeExceptionally(failure);
+                }
+              });
+      synchronized (harness.board) {
+        timeout.start();
+        assertTrue(started.await(2, TimeUnit.SECONDS));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (timeout.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+          Thread.yield();
+        }
+        assertEquals(Thread.State.BLOCKED, timeout.getState());
+        harness.readBoard.parseLine("stopsync");
+        harness.leelaz.sentCommands.clear();
+      }
+      completed.get(2, TimeUnit.SECONDS);
+      assertSame(pending, harness.board.getHistory().getCurrentHistoryNode());
+      assertTrue(harness.leelaz.sentCommands.isEmpty());
+    }
+  }
+
+  @Test
+  void committedTimeoutThenStopRestoresOrdinaryLocalEditing() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      harness.expire(scheduler.callbacks.get(0));
+      assertEquals(2, harness.board.getHistory().getData().moveNumber);
+      assertEquals(Stone.EMPTY, harness.board.getHistory().getStones()[Board.getIndex(0, 1)]);
+      assertTrue(
+          harness.leelaz.sentCommands.stream().anyMatch(command -> command.startsWith("loadsgf ")));
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      assertEquals(2, harness.board.getHistory().getData().moveNumber);
+
+      harness.readBoard.parseLine("stopsync");
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      assertEquals(4, harness.board.getHistory().getData().moveNumber);
+      assertEquals(Stone.BLACK, harness.board.getHistory().getStones()[Board.getIndex(0, 1)]);
+      assertEquals(Stone.WHITE, harness.board.getHistory().getStones()[Board.getIndex(2, 2)]);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"pipe", "socket"})
+  void stopInvalidatesPlacementBeforeQueuedOutputStarts(String transport) throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      harness.activateLocalPlacement();
+      if (transport.equals("socket")) harness.useSocketPlacement();
+      List<Runnable> output = new ArrayList<>();
+      setField(harness.readBoard, "placeCommandDispatcher", (Executor) output::add);
+      SwingUtilities.invokeAndWait(
+          () -> harness.board.place(0, 1, Stone.BLACK, false, false, false));
+      assertEquals(1, output.size());
+      harness.readBoard.parseLine("stopsync");
+      output.get(0).run();
+      assertFalse(harness.protocolOutput().contains("place "));
+      assertEquals(3, harness.board.getHistory().getData().moveNumber);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"gap", "clear", "start 3 3", "socket"})
+  void activeFrameBoundariesKeepSnapshotAsAcknowledgement(String control) throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      CapturedTimeoutScheduler scheduler = harness.activateLocalPlacement();
+      if (control.equals("socket")) harness.useSocketPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      BoardHistoryNode pending = harness.board.getHistory().getCurrentHistoryNode();
+      assertTrue(harness.protocolOutput().contains("place 0 1"));
+      harness.readBoard.parseLine("placeComplete");
+      if (control.equals("clear") || control.startsWith("start"))
+        harness.readBoard.parseLine(control);
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      assertSame(pending, harness.board.getHistory().getCurrentHistoryNode());
+      harness.acceptSnapshot(pending);
+      harness.expire(scheduler.callbacks.get(0));
+      assertSame(pending, harness.board.getHistory().getCurrentHistoryNode());
+      harness.board.place(2, 2, Stone.WHITE, false, false, false);
+      assertEquals(4, harness.board.getHistory().getData().moveNumber);
+      assertTrue(harness.protocolOutput().contains("place 2 2"));
+    }
+  }
+
+  @Test
+  void oneTimeRecognitionImportsSnapshotWithoutContinuousSync() throws Exception {
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      harness.readBoard.parseLine("start 3 3");
+      harness.readBoard.parseLine("re=1,2,0");
+      harness.readBoard.parseLine("re=0,0,0");
+      harness.readBoard.parseLine("re=0,0,0");
+      harness.readBoard.parseLine("end");
+      assertFalse(harness.frame.syncBoard);
+      assertEquals(Stone.BLACK, harness.board.getHistory().getStones()[Board.getIndex(0, 0)]);
+      assertEquals(Stone.WHITE, harness.board.getHistory().getStones()[Board.getIndex(1, 0)]);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"error place failed", "changed-snapshot"})
+  void activeProtocolFailureRollsBackCompleteLocalMove(String failure) throws Exception {
+    GtpConsolePane previousConsole = Lizzie.gtpConsole;
+    try (EngineResumeHarness harness =
+        EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
+      Lizzie.gtpConsole = allocate(SilentProtocolConsole.class);
+      harness.activateLocalPlacement();
+      harness.board.place(0, 1, Stone.BLACK, false, false, false);
+      if (failure.equals("changed-snapshot")) {
+        harness.readBoard.parseLine("re=1,2,2");
+        harness.readBoard.parseLine("re=0,0,0");
+        harness.readBoard.parseLine("re=0,0,0");
+        harness.readBoard.parseLine("end");
+      } else {
+        harness.readBoard.parseLine(failure);
+      }
+      assertEquals(2, harness.board.getHistory().getData().moveNumber);
+      assertEquals(Stone.EMPTY, harness.board.getHistory().getStones()[Board.getIndex(0, 1)]);
+      assertTrue(
+          harness.leelaz.sentCommands.stream().anyMatch(command -> command.startsWith("loadsgf ")));
+      harness.board.place(2, 2, Stone.BLACK, false, false, false);
+      assertEquals(2, harness.board.getHistory().getData().moveNumber);
+    } finally {
+      Lizzie.gtpConsole = previousConsole;
+    }
+  }
+
+  private static final class SilentProtocolConsole extends GtpConsolePane {
+    private SilentProtocolConsole() {
+      super(null);
+    }
+
+    @Override
+    public void addLineReadBoard(String line) {}
+  }
+
+  private static final class CapturedTimeoutScheduler extends ScheduledThreadPoolExecutor {
+    private final List<Runnable> callbacks = new ArrayList<>();
+
+    private CapturedTimeoutScheduler() {
+      super(1);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      callbacks.add(command);
+      return null;
+    }
   }
 
   @Test
@@ -234,6 +576,7 @@ class ReadBoardEngineResumeTest {
           placement(0, 1, Stone.BLACK));
       markPendingLocalMoveAwaitingReadBoard(harness.readBoard);
       invokePlacementFailed(harness.readBoard);
+      int previousGenmoveRequests = harness.leelaz.genmoveCount;
 
       harness.readBoard.parseLine("forceRebuild");
       harness.sync(
@@ -245,7 +588,7 @@ class ReadBoardEngineResumeTest {
               Optional.of(new int[] {2, 0}),
               Stone.WHITE));
 
-      assertEquals(1, harness.leelaz.genmoveCount);
+      assertEquals(previousGenmoveRequests + 1, harness.leelaz.genmoveCount);
       assertEquals("B", harness.leelaz.lastGenmoveColor);
       assertEquals(0, harness.frame.scheduleResumeAnalysisCount);
       assertFalse(getBooleanField(harness.readBoard, "failedLocalMoveRecoveryActive"));
@@ -381,17 +724,15 @@ class ReadBoardEngineResumeTest {
       setField(
           harness.readBoard, "lastPendingLocalMoveRetryTimeMs", System.currentTimeMillis() - 5000L);
 
-      assertTrue(invokeAckTimeoutWithoutSnapshot(harness.readBoard));
+      CapturedTimeoutScheduler scheduler =
+          (CapturedTimeoutScheduler) getField(harness.readBoard, "pendingLocalMoveTimeoutExecutor");
+      scheduler.callbacks.get(0).run();
 
       assertSame(
           remoteNode,
           harness.board.getHistory().getMainEnd(),
           "a pending place must not wait forever when readboard sends no follow-up board frame.");
-      assertFalse(harness.readBoard.lastMovePlayByLizzie);
-      assertFalse(getBooleanField(harness.readBoard, "waitingForReadBoardLocalMoveAck"));
       assertEquals(1, harness.leelaz.ponderCount);
-      assertTrue(getBooleanField(harness.readBoard, "failedLocalMoveRecoveryActive"));
-      assertTrue(getBooleanField(harness.readBoard, "failedLocalMoveAwaitingRemoteObservation"));
     }
   }
 
@@ -529,7 +870,7 @@ class ReadBoardEngineResumeTest {
   }
 
   @Test
-  void placementFailureObservationSurvivesReadBoardControlReset() throws Exception {
+  void placementFailureObservationSurvivesActiveFrameReset() throws Exception {
     try (EngineResumeHarness harness =
         EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
       harness.frame.isAnaPlayingAgainstLeelaz = true;
@@ -545,7 +886,7 @@ class ReadBoardEngineResumeTest {
       markPendingLocalMoveAwaitingReadBoard(harness.readBoard);
       invokePlacementFailed(harness.readBoard);
 
-      harness.readBoard.parseLine("stopsync");
+      harness.readBoard.parseLine("clear");
 
       assertTrue(
           harness.readBoard.shouldSuppressLocalPlaceAfterFailedSync(0, 1, Stone.BLACK),
@@ -1831,6 +2172,11 @@ class ReadBoardEngineResumeTest {
     try (EngineResumeHarness harness =
         EngineResumeHarness.create(rootHistory(emptyStones(), true))) {
       harness.frame.bothSync = true;
+      harness.frame.syncBoard = true;
+      setField(
+          harness.readBoard,
+          "placeCommandDispatcher",
+          (java.util.concurrent.Executor) Runnable::run);
       HistoryPath path =
           buildHistory(
               harness.board,
@@ -2196,9 +2542,14 @@ class ReadBoardEngineResumeTest {
   }
 
   private static void markPendingLocalMoveAwaitingReadBoard(ReadBoard readBoard) throws Exception {
-    Method method = ReadBoard.class.getDeclaredMethod("startTrackingLocalMoveFromLizzie");
-    method.setAccessible(true);
-    method.invoke(readBoard);
+    readBoard.process = new AliveProcess();
+    Lizzie.frame.readBoard = readBoard;
+    Lizzie.frame.bothSync = true;
+    Lizzie.frame.syncBoard = true;
+    setField(readBoard, "placeCommandDispatcher", (java.util.concurrent.Executor) Runnable::run);
+    setField(readBoard, "pendingLocalMoveTimeoutExecutor", new CapturedTimeoutScheduler());
+    int[] coords = Lizzie.board.getHistory().getMainEnd().getData().lastMove.orElseThrow();
+    readBoard.sendCommand("place " + coords[0] + " " + coords[1]);
   }
 
   private static void invokePlacementFailed(ReadBoard readBoard) throws Exception {
@@ -2213,13 +2564,6 @@ class ReadBoardEngineResumeTest {
         ReadBoard.class.getDeclaredMethod("handleLocalMovePlacementFailed", String.class);
     method.setAccessible(true);
     method.invoke(readBoard, "error place failed");
-  }
-
-  private static boolean invokeAckTimeoutWithoutSnapshot(ReadBoard readBoard) throws Exception {
-    Method method =
-        ReadBoard.class.getDeclaredMethod("failPendingLocalMoveIfAckTimedOutWithoutSnapshot");
-    method.setAccessible(true);
-    return (boolean) method.invoke(readBoard);
   }
 
   private static boolean dispatchTrackingLine(Leelaz engine, String line) throws Exception {
@@ -2422,6 +2766,45 @@ class ReadBoardEngineResumeTest {
           protocolCapture);
     }
 
+    private CapturedTimeoutScheduler activateLocalPlacement() throws Exception {
+      buildHistory(board, placement(0, 0, Stone.BLACK), placement(1, 0, Stone.WHITE));
+      readBoard.process = new AliveProcess();
+      setField(readBoard, "placeCommandDispatcher", (java.util.concurrent.Executor) Runnable::run);
+      readBoard.parseLine("bothSync");
+      readBoard.parseLine("sync");
+      CapturedTimeoutScheduler scheduler = new CapturedTimeoutScheduler();
+      setField(readBoard, "pendingLocalMoveTimeoutExecutor", scheduler);
+      return scheduler;
+    }
+
+    private void useSocketPlacement() throws Exception {
+      ReadBoardStream stream = allocate(ReadBoardStream.class);
+      setField(stream, "out", new BufferedOutputStream(protocolCapture));
+      setField(readBoard, "readBoardStream", stream);
+      setField(readBoard, "usePipe", false);
+      readBoard.process = null;
+    }
+
+    private void expire(Runnable timeout) throws Exception {
+      setField(readBoard, "lastPendingLocalMoveRetryTimeMs", System.currentTimeMillis() - 4000);
+      timeout.run();
+    }
+
+    private void acceptSnapshot(BoardHistoryNode node) {
+      int[] codes =
+          snapshot(node.getData().stones, node.getData().lastMove, node.getData().lastMoveColor);
+      for (int y = 0; y < BOARD_SIZE; y++) {
+        readBoard.parseLine(
+            "re="
+                + codes[y * BOARD_SIZE]
+                + ","
+                + codes[y * BOARD_SIZE + 1]
+                + ","
+                + codes[y * BOARD_SIZE + 2]);
+      }
+      readBoard.parseLine("end");
+    }
+
     private void sync(int[] snapshotCodes) throws Exception {
       ArrayList<Integer> counts = new ArrayList<>(snapshotCodes.length);
       for (int code : snapshotCodes) {
@@ -2436,7 +2819,10 @@ class ReadBoardEngineResumeTest {
     }
 
     @Override
-    public void close() {
+    public void close() throws Exception {
+      ScheduledThreadPoolExecutor scheduler =
+          (ScheduledThreadPoolExecutor) getField(readBoard, "pendingLocalMoveTimeoutExecutor");
+      if (scheduler != null) scheduler.shutdownNow();
       leelaz.releaseBlockedLoadSgf();
       Lizzie.config = previousConfig;
       Lizzie.board = previousBoard;
@@ -2711,7 +3097,7 @@ class ReadBoardEngineResumeTest {
     }
   }
 
-  private static final class AliveProcess extends Process {
+  static final class AliveProcess extends Process {
     @Override
     public OutputStream getOutputStream() {
       return OutputStream.nullOutputStream();

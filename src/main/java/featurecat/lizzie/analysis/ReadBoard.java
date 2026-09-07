@@ -46,6 +46,9 @@ import javax.swing.SwingUtilities;
 public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.EligibilitySource {
   private static final AtomicLongFieldUpdater<ReadBoard> SYNC_ANALYSIS_EPOCH =
       AtomicLongFieldUpdater.newUpdater(ReadBoard.class, "syncAnalysisEpoch");
+  // The application has one live board. Lock order: Board -> confirmation state.
+  // Never acquire Board/ReadBoard monitors, perform I/O, or hand off to the EDT under this lock.
+  private static final Object LOCAL_MOVE_CONFIRMATION_LOCK = new Object();
   private static final AtomicInteger PLACE_COMMAND_DISPATCH_THREAD_SEQUENCE = new AtomicInteger();
   private static final Executor PLACE_COMMAND_DISPATCH_EXECUTOR =
       Executors.newCachedThreadPool(ReadBoard::newPlaceCommandDispatchThread);
@@ -219,6 +222,9 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   private Stone pendingLocalMoveColor = Stone.EMPTY;
   private String pendingLocalMoveBaselineKey = "";
   private long pendingLocalMoveAckGeneration = 0L;
+  private Board pendingLocalMoveBoard;
+  private BoardHistoryList pendingLocalMoveHistory;
+  private Executor placeCommandDispatcher;
   // Readboard placeComplete has no request id, so a late success from the previous command must
   // never be allowed to confirm the next pending move. Explicit failures still release the current
   // pending move; otherwise a missed click can wait forever with no follow-up snapshot.
@@ -756,7 +762,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     if (line.startsWith("error")) {
       Lizzie.gtpConsole.addLineReadBoard(line + (usePipe ? "" : "\n"));
     }
-    if (line.startsWith("end")) {
+    if (line.trim().equals("end")) {
       boolean isYikePlatform =
           pendingRemoteContext != null
               && pendingRemoteContext.platform == SyncRemoteContext.SyncPlatform.YIKE;
@@ -795,7 +801,9 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       publishCurrentReadBoardDiagnosticsSnapshot();
     }
     if (line.trim().equals("sync")) {
-      Lizzie.frame.syncBoard = true;
+      synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+        Lizzie.frame.syncBoard = true;
+      }
       if (isFailedLocalMoveAwaitingRemoteObservation()) {
         localMoveSyncDebug(
             "sync line resumes analysis while failed-place guard only blocks placement "
@@ -809,14 +817,19 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       }
     }
     if (line.startsWith("both")) {
-      Lizzie.frame.bothSync = true;
+      synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+        Lizzie.frame.bothSync = true;
+      }
       if (Lizzie.frame.floatBoard != null && Lizzie.frame.floatBoard.isVisible())
         Lizzie.frame.floatBoard.setEditButton();
     }
     if (line.startsWith("noboth")) {
       clearReadBoardGmaAutoPlay("noboth");
       readBoardTurnTrusted = false;
-      Lizzie.frame.bothSync = false;
+      synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+        Lizzie.frame.bothSync = false;
+        clearPendingLocalMoveTracking();
+      }
       if (Lizzie.frame.floatBoard != null && Lizzie.frame.floatBoard.isVisible())
         Lizzie.frame.floatBoard.setEditButton();
     }
@@ -826,34 +839,34 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       LizzieFrame.toolbar.isAutoPlay = false;
     }
     if (line.startsWith("endsync")) {
+      stopLocalMoveConfirmation();
       clearReadBoardGmaAutoPlay("endsync");
       noMsg = true;
-      resetActiveSyncStateForReadBoardControlLine();
       clearPendingRemoteContext();
       tempcount = new ArrayList<Integer>();
-      Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
         Lizzie.frame.stopAiPlayingAndPolicy();
       }
       showInBoard = false;
       if (Lizzie.frame.floatBoard != null) {
-        Lizzie.frame.floatBoard.setVisible(false);
+        FloatBoard floatBoard = Lizzie.frame.floatBoard;
+        SwingUtilities.invokeLater(() -> floatBoard.setVisible(false));
       }
       publishCurrentReadBoardDiagnosticsSnapshot();
     }
     if (line.startsWith("stopsync")) {
+      stopLocalMoveConfirmation();
       clearReadBoardGmaAutoPlay("stopsync");
-      resetActiveSyncStateForReadBoardControlLine();
       clearPendingRemoteContext();
       tempcount = new ArrayList<Integer>();
-      Lizzie.frame.syncBoard = false;
       if (Lizzie.frame.isAnaPlayingAgainstLeelaz) {
         Lizzie.frame.stopAiPlayingAndPolicy();
       }
       Lizzie.leelaz.nameCmd();
       showInBoard = false;
       if (Lizzie.frame.floatBoard != null) {
-        Lizzie.frame.floatBoard.setVisible(false);
+        FloatBoard floatBoard = Lizzie.frame.floatBoard;
+        SwingUtilities.invokeLater(() -> floatBoard.setVisible(false));
       }
       publishCurrentReadBoardDiagnosticsSnapshot();
     }
@@ -1116,118 +1129,91 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private boolean handlePendingLocalMovePlacementFailure(String reason) {
+    long generation;
+    BoardHistoryNode node;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      generation = pendingLocalMoveAckGeneration;
+      node = pendingLocalMoveNode;
+    }
+    return handlePendingLocalMovePlacementFailure(reason, generation, node);
+  }
+
+  private boolean handlePendingLocalMovePlacementFailure(
+      String reason, long generation, BoardHistoryNode node) {
+    Board board = Lizzie.board;
+    if (board == null) {
+      return false;
+    }
+    Optional<BoardHistoryNode> rollbackNode;
+    Leelaz engine = Lizzie.leelaz;
+    long engineGeneration = Lizzie.capturePrimaryEngineGeneration(engine);
+    synchronized (board) {
+      synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+        if (!isCurrentLocalMoveConfirmation(generation, node)) {
+          return false;
+        }
+        clearConfirmedLocalMove();
+        rememberFailedLocalMoveSuppression();
+        rollbackNode = discardFailedLocalMoveFromMainEnd();
+        clearPendingLocalMoveTracking();
+        if (failedLocalMoveRecoveryActive) {
+          beginFailedLocalMoveObservationGuard();
+        }
+        rollbackNode.ifPresent(this::bindFailedLocalMoveSuppressionBaseline);
+      }
+    }
+    restoreFloatBoardAfterPlaceResult();
     if (ReadBoardObservation.diagnosticsEnabled()) {
       observe(() -> ReadBoardObservation.recordLocalMove("failed", reason));
     }
-    localMoveSyncDebug(
-        "pending local move placement failure reason="
-            + reason
-            + " before "
-            + pendingLocalMoveState());
-    restoreFloatBoardAfterPlaceResult();
-    if (isPendingLocalMoveAwaitingReadBoard()) {
-      clearConfirmedLocalMove();
-      rememberFailedLocalMoveSuppression();
-      Optional<BoardHistoryNode> rollbackNode = discardFailedLocalMoveFromMainEnd();
-      clearPendingLocalMoveTracking();
-      if (failedLocalMoveRecoveryActive) {
-        beginFailedLocalMoveObservationGuard();
+    if (rollbackNode.isPresent()
+        && Lizzie.board == board
+        && Lizzie.frame != null
+        && Lizzie.frame.readBoard == this
+        && Lizzie.capturePrimaryEngineGeneration(engine) == engineGeneration) {
+      BoardHistoryNode current = board.getHistory().getCurrentHistoryNode();
+      if (!deferReadBoardGmaEngineRestoreIfPending("placeFailed", current)) {
+        Optional<Board.FrozenPrimaryPosition> recovery =
+            board.freezeCurrentPositionForPrimaryEngineExactRestore();
+        if (recovery.isPresent()
+            && Lizzie.runIfPrimaryEngine(engine, engineGeneration, engine::notPondering)) {
+          recovery.get().execute();
+          if (recovery.get().matchesCurrentBoardAndPrimary()
+              && hasLocalMoveConfirmationAuthority()) {
+            continueGameAfterSyncIfNeeded("placeFailed", current);
+          }
+        }
       }
-      if (rollbackNode.isPresent()) {
-        bindFailedLocalMoveSuppressionBaseline(rollbackNode.get());
-        syncEngineToRebuiltSnapshot(rollbackNode.get());
-        localMoveSyncDebug(
-            "placement failed rolled back; resume analysis with placement guard baseline="
-                + historyNodeSummary(rollbackNode.get())
-                + " "
-                + pendingLocalMoveState());
-        continueGameAfterSyncIfNeeded("placeFailed", rollbackNode.get());
-      } else if (failedLocalMoveRecoveryActive) {
-        localMoveSyncDebug(
-            "placement failed keeps placement guard without rollback " + pendingLocalMoveState());
+      if (Lizzie.frame != null) {
+        Lizzie.frame.redrawTree = true;
+        Lizzie.frame.renderVarTree(0, 0, false, false);
+        Lizzie.frame.refresh();
       }
-    } else {
-      localMoveSyncDebug(
-          "pending local move placement failure ignored no pending reason="
-              + reason
-              + " "
-              + pendingLocalMoveState());
     }
-    localMoveSyncDebug(
-        "pending local move placement failure after reason="
-            + reason
-            + " "
-            + pendingLocalMoveState());
     return true;
   }
 
+  private boolean isCurrentLocalMoveConfirmation(long generation, BoardHistoryNode node) {
+    return hasLocalMoveConfirmationAuthority()
+        && isPendingLocalMoveAwaitingReadBoard()
+        && generation == pendingLocalMoveAckGeneration
+        && node != null
+        && node == pendingLocalMoveNode
+        && Lizzie.board == pendingLocalMoveBoard
+        && pendingLocalMoveBoard.getHistory() == pendingLocalMoveHistory
+        && pendingLocalMoveHistory.getMainEnd() == node;
+  }
+
   private Optional<BoardHistoryNode> discardFailedLocalMoveFromMainEnd() {
-    if (!failedLocalMoveRecoveryActive
-        || Lizzie.board == null
-        || Lizzie.board.getHistory() == null) {
-      localMoveSyncDebug(
-          "discard failed local move skip missing recovery " + pendingLocalMoveState());
+    if (!failedLocalMoveRecoveryActive || !matchesFailedLocalMove(pendingLocalMoveNode)) {
       return Optional.empty();
     }
-    BoardHistoryList history = Lizzie.board.getHistory();
-    BoardHistoryNode failedNode = history.getMainEnd();
-    if (pendingLocalMoveNode != null && failedNode != pendingLocalMoveNode) {
-      localMoveSyncDebug(
-          "discard failed local move skip main end moved away from pending node mainEnd="
-              + historyNodeSummary(failedNode)
-              + " pendingNode="
-              + historyNodeSummary(pendingLocalMoveNode)
-              + " "
-              + pendingLocalMoveState());
-      return Optional.empty();
+    Optional<BoardHistoryNode> rollback =
+        pendingLocalMoveBoard.discardFailedReadBoardMove(pendingLocalMoveNode);
+    if (rollback.isPresent()) {
+      historyJumpTracker.clear();
     }
-    if (failedNode == null || !matchesFailedLocalMove(failedNode)) {
-      localMoveSyncDebug(
-          "discard failed local move skip no matching main end node="
-              + historyNodeSummary(failedNode)
-              + " "
-              + pendingLocalMoveState());
-      return Optional.empty();
-    }
-    Optional<BoardHistoryNode> previous = failedNode.previous();
-    if (!previous.isPresent()) {
-      localMoveSyncDebug(
-          "discard failed local move skip no previous node="
-              + historyNodeSummary(failedNode)
-              + " "
-              + pendingLocalMoveState());
-      return Optional.empty();
-    }
-    BoardHistoryNode rollbackNode = previous.get();
-    int childIndex = rollbackNode.indexOfNode(failedNode);
-    if (childIndex < 0) {
-      localMoveSyncDebug(
-          "discard failed local move skip child not linked failed="
-              + historyNodeSummary(failedNode)
-              + " rollback="
-              + historyNodeSummary(rollbackNode)
-              + " "
-              + pendingLocalMoveState());
-      return Optional.empty();
-    }
-    moveToAnyPositionWithoutTracking(rollbackNode);
-    rollbackNode.deleteChild(childIndex);
-    historyJumpTracker.clear();
-    localMoveSyncDebug(
-        "discard failed local move rollback="
-            + historyNodeSummary(rollbackNode)
-            + " removed="
-            + historyNodeSummary(failedNode)
-            + " childIndex="
-            + childIndex
-            + " "
-            + pendingLocalMoveState());
-    if (Lizzie.frame != null) {
-      Lizzie.frame.redrawTree = true;
-      Lizzie.frame.renderVarTree(0, 0, false, false);
-      Lizzie.frame.refresh();
-    }
-    return Optional.of(rollbackNode);
+    return rollback;
   }
 
   private boolean matchesFailedLocalMove(BoardHistoryNode node) {
@@ -1245,11 +1231,21 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void restoreFloatBoardAfterPlaceResult() {
-    if (hideFloadBoardBeforePlace && hideFromPlace) {
-      hideFromPlace = false;
-      if (Lizzie.frame != null && Lizzie.frame.floatBoard != null) {
-        Lizzie.frame.floatBoard.setVisible(true);
-      }
+    FloatBoard floatBoard = Lizzie.frame == null ? null : Lizzie.frame.floatBoard;
+    if (floatBoard == null) {
+      return;
+    }
+    Runnable restore =
+        () -> {
+          if (hideFromPlace) {
+            hideFromPlace = false;
+            floatBoard.setVisible(true);
+          }
+        };
+    if (SwingUtilities.isEventDispatchThread()) {
+      restore.run();
+    } else {
+      SwingUtilities.invokeLater(restore);
     }
   }
 
@@ -2894,6 +2890,14 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     }
   }
 
+  private void stopLocalMoveConfirmation() {
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      Lizzie.frame.syncBoard = false;
+      resetActiveSyncState();
+    }
+    restoreFloatBoardAfterPlaceResult();
+  }
+
   private void resetActiveSyncState() {
     resetActiveSyncState(false, false, false);
   }
@@ -2903,14 +2907,16 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void resetActiveSyncStateForReadBoardControlLine() {
-    boolean preserveFailedLocalMoveState = hasFailedLocalMoveStateToPreserve();
-    boolean preservePendingLocalMove = isPendingLocalMoveAwaitingReadBoard();
-    boolean preserveConfirmedLocalMove = confirmedLocalMoveActive;
-    resetActiveSyncState(
-        preserveFailedLocalMoveState,
-        preserveFailedLocalMoveState,
-        preservePendingLocalMove,
-        preserveConfirmedLocalMove);
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      boolean preserveFailedLocalMoveState = hasFailedLocalMoveStateToPreserve();
+      boolean preservePendingLocalMove = isPendingLocalMoveAwaitingReadBoard();
+      boolean preserveConfirmedLocalMove = confirmedLocalMoveActive;
+      resetActiveSyncState(
+          preserveFailedLocalMoveState,
+          preserveFailedLocalMoveState,
+          preservePendingLocalMove,
+          preserveConfirmedLocalMove);
+    }
   }
 
   private void resetActiveSyncState(
@@ -2935,37 +2941,39 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
       boolean preserveFailedLocalMoveSuppression,
       boolean preservePendingLocalMoveTracking,
       boolean preserveConfirmedLocalMove) {
-    conflictTracker.clear();
-    historyJumpTracker.clear();
-    if (preservePendingLocalMoveTracking && isPendingLocalMoveAwaitingReadBoard()) {
-      localMoveSyncDebug(
-          "preserve pending local move across active sync reset " + pendingLocalMoveState());
-    } else {
-      clearPendingLocalMoveTracking();
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      conflictTracker.clear();
+      historyJumpTracker.clear();
+      if (preservePendingLocalMoveTracking && isPendingLocalMoveAwaitingReadBoard()) {
+        localMoveSyncDebug(
+            "preserve pending local move across active sync reset " + pendingLocalMoveState());
+      } else {
+        clearPendingLocalMoveTracking();
+      }
+      if (preserveFailedLocalMoveSuppression && failedLocalMoveSuppressionActive) {
+        localMoveSyncDebug(
+            "preserve suppression across active sync reset " + pendingLocalMoveState());
+      } else {
+        clearFailedLocalMoveSuppression();
+      }
+      if (!preserveFailedLocalMoveRecovery) {
+        clearFailedLocalMoveRecovery();
+      } else if (failedLocalMoveRecoveryActive) {
+        localMoveSyncDebug(
+            "preserve failed local move recovery across active sync reset "
+                + pendingLocalMoveState());
+      }
+      if (preserveConfirmedLocalMove && confirmedLocalMoveActive) {
+        localMoveSyncDebug(
+            "preserve confirmed local move across active sync reset " + pendingLocalMoveState());
+      } else {
+        clearConfirmedLocalMove();
+      }
+      pendingRemoteContext = SyncRemoteContext.generic(false);
+      readBoardTurnTrusted = false;
+      awaitingFirstSyncFrame = true;
+      invalidatePendingSyncAnalysisResume();
     }
-    if (preserveFailedLocalMoveSuppression && failedLocalMoveSuppressionActive) {
-      localMoveSyncDebug(
-          "preserve suppression across active sync reset " + pendingLocalMoveState());
-    } else {
-      clearFailedLocalMoveSuppression();
-    }
-    if (!preserveFailedLocalMoveRecovery) {
-      clearFailedLocalMoveRecovery();
-    } else if (failedLocalMoveRecoveryActive) {
-      localMoveSyncDebug(
-          "preserve failed local move recovery across active sync reset "
-              + pendingLocalMoveState());
-    }
-    if (preserveConfirmedLocalMove && confirmedLocalMoveActive) {
-      localMoveSyncDebug(
-          "preserve confirmed local move across active sync reset " + pendingLocalMoveState());
-    } else {
-      clearConfirmedLocalMove();
-    }
-    pendingRemoteContext = SyncRemoteContext.generic(false);
-    readBoardTurnTrusted = false;
-    awaitingFirstSyncFrame = true;
-    invalidatePendingSyncAnalysisResume();
   }
 
   private void clearResumeState() {
@@ -3056,34 +3064,37 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private boolean acknowledgeLocalMoveIfSnapshotCaughtUp(Stone[] stones, int[] snapshotCodes) {
-    if (!Lizzie.frame.bothSync || !lastMovePlayByLizzie) {
-      return false;
-    }
-    if (!currentPendingLocalMoveCoordinates().isPresent()) {
-      localMoveSyncDebug("ack skip no pending coordinates " + pendingLocalMoveState());
-      return false;
-    }
-    boolean pendingPresent = isCurrentPendingLocalMovePresentInSnapshot(snapshotCodes);
-    boolean noDiff = !snapshotDiffChecker().hasDiff(snapshotCodes, stones, false, Optional.empty());
-    localMoveSyncDebug(
-        "ack check pendingPresent="
-            + pendingPresent
-            + " noDiffWithoutIgnore="
-            + noDiff
-            + " snapshot="
-            + snapshotSummary(snapshotCodes)
-            + " "
-            + pendingLocalMoveState());
-    if (pendingPresent) {
-      localMoveSyncDebug("ack clear pending " + pendingLocalMoveState());
-      clearPendingLocalMoveTracking();
-      return true;
-    } else if (noDiff) {
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!hasLocalMoveConfirmationAuthority() || !lastMovePlayByLizzie) {
+        return false;
+      }
+      if (!currentPendingLocalMoveCoordinates().isPresent()) {
+        localMoveSyncDebug("ack skip no pending coordinates " + pendingLocalMoveState());
+        return false;
+      }
+      boolean pendingPresent = isCurrentPendingLocalMovePresentInSnapshot(snapshotCodes);
+      boolean noDiff =
+          !snapshotDiffChecker().hasDiff(snapshotCodes, stones, false, Optional.empty());
       localMoveSyncDebug(
-          "ack keeps pending despite noDiff because pending move is not visible "
+          "ack check pendingPresent="
+              + pendingPresent
+              + " noDiffWithoutIgnore="
+              + noDiff
+              + " snapshot="
+              + snapshotSummary(snapshotCodes)
+              + " "
               + pendingLocalMoveState());
+      if (pendingPresent) {
+        localMoveSyncDebug("ack clear pending " + pendingLocalMoveState());
+        clearPendingLocalMoveTracking();
+        return true;
+      } else if (noDiff) {
+        localMoveSyncDebug(
+            "ack keeps pending despite noDiff because pending move is not visible "
+                + pendingLocalMoveState());
+      }
+      return false;
     }
-    return false;
   }
 
   private void finishSyncAfterAcknowledgedLocalMoveSnapshot() {
@@ -3124,19 +3135,22 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void startTrackingLocalMoveFromLizzie() {
-    invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.PENDING_LOCAL_MOVE);
-    clearConfirmedLocalMove();
-    capturePendingLocalMoveRecord(currentMainEndNode());
-    lastMovePlayByLizzie = true;
-    waitingForReadBoardLocalMoveAck = true;
-    pendingLocalMoveClickCompleted = false;
-    pendingLocalMoveRetryCount = 0;
-    ignoreReadBoardPlaceResultsForCurrentPending = ignoreReadBoardPlaceResultsForNextPending;
-    ignoreReadBoardPlaceResultsForNextPending = false;
-    lastPendingLocalMoveRetryTimeMs = System.currentTimeMillis();
-    pendingLocalMoveAckGeneration++;
-    localMoveSyncDebug("startTrackingLocalMoveFromLizzie " + pendingLocalMoveState());
-    schedulePendingLocalMoveAckTimeout();
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      clearConfirmedLocalMove();
+      capturePendingLocalMoveRecord(currentMainEndNode());
+      pendingLocalMoveBoard = Lizzie.board;
+      pendingLocalMoveHistory = Lizzie.board == null ? null : Lizzie.board.getHistory();
+      lastMovePlayByLizzie = true;
+      waitingForReadBoardLocalMoveAck = true;
+      pendingLocalMoveClickCompleted = false;
+      pendingLocalMoveRetryCount = 0;
+      ignoreReadBoardPlaceResultsForCurrentPending = ignoreReadBoardPlaceResultsForNextPending;
+      ignoreReadBoardPlaceResultsForNextPending = false;
+      lastPendingLocalMoveRetryTimeMs = System.currentTimeMillis();
+      pendingLocalMoveAckGeneration++;
+      localMoveSyncDebug("startTrackingLocalMoveFromLizzie " + pendingLocalMoveState());
+      schedulePendingLocalMoveAckTimeout();
+    }
   }
 
   private void schedulePendingLocalMoveAckTimeout() {
@@ -3150,13 +3164,17 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     final int y = pendingLocalMoveY;
     final Stone color = pendingLocalMoveColor;
     timeoutExecutor.schedule(
-        () -> failPendingLocalMoveIfAckTimedOutWithoutSnapshot(generation, node, x, y, color),
+        () -> {
+          failPendingLocalMoveIfAckTimedOutWithoutSnapshot(generation, node, x, y, color);
+        },
         PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS,
         TimeUnit.MILLISECONDS);
   }
 
   private ScheduledExecutorService ensurePendingLocalMoveTimeoutExecutor() {
-    if (shutdownStarted || System.getProperty("surefire.test.class.path") != null) {
+    if (shutdownStarted
+        || (pendingLocalMoveTimeoutExecutor == null
+            && System.getProperty("surefire.test.class.path") != null)) {
       return null;
     }
     if (pendingLocalMoveTimeoutExecutor == null || pendingLocalMoveTimeoutExecutor.isShutdown()) {
@@ -3172,23 +3190,25 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void markLocalMoveCommandCompleted() {
-    if (!isPendingLocalMoveAwaitingReadBoard()) {
-      pendingLocalMoveClickCompleted = false;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!isPendingLocalMoveAwaitingReadBoard()) {
+        pendingLocalMoveClickCompleted = false;
+        localMoveSyncDebug(
+            "markLocalMoveCommandCompleted ignored no pending " + pendingLocalMoveState());
+        return;
+      }
+      if (ignoreReadBoardPlaceResultsForCurrentPending) {
+        localMoveSyncDebug(
+            "markLocalMoveCommandCompleted ignored by stale-result quarantine "
+                + pendingLocalMoveState());
+        return;
+      }
+      pendingLocalMoveClickCompleted = true;
+      localMoveSyncDebug("markLocalMoveCommandCompleted " + pendingLocalMoveState());
       localMoveSyncDebug(
-          "markLocalMoveCommandCompleted ignored no pending " + pendingLocalMoveState());
-      return;
-    }
-    if (ignoreReadBoardPlaceResultsForCurrentPending) {
-      localMoveSyncDebug(
-          "markLocalMoveCommandCompleted ignored by stale-result quarantine "
+          "placeComplete noted pending local move; waiting for remote snapshot "
               + pendingLocalMoveState());
-      return;
     }
-    pendingLocalMoveClickCompleted = true;
-    localMoveSyncDebug("markLocalMoveCommandCompleted " + pendingLocalMoveState());
-    localMoveSyncDebug(
-        "placeComplete noted pending local move; waiting for remote snapshot "
-            + pendingLocalMoveState());
   }
 
   private void clearFailedLocalMoveStateIfCurrentMoveConfirmed() {
@@ -3210,28 +3230,45 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void clearPendingLocalMoveTracking() {
-    localMoveSyncDebug("clearPendingLocalMoveTracking before " + pendingLocalMoveState());
-    boolean wasPending = isPendingLocalMoveAwaitingReadBoard();
-    lastMovePlayByLizzie = false;
-    waitingForReadBoardLocalMoveAck = false;
-    pendingLocalMoveClickCompleted = false;
-    pendingLocalMoveRetryCount = 0;
-    lastPendingLocalMoveRetryTimeMs = 0L;
-    pendingLocalMoveNode = null;
-    pendingLocalMoveX = -1;
-    pendingLocalMoveY = -1;
-    pendingLocalMoveColor = Stone.EMPTY;
-    pendingLocalMoveBaselineKey = "";
-    ignoreReadBoardPlaceResultsForCurrentPending = false;
-    if (wasPending) {
-      pendingLocalMoveAckGeneration++;
-      ignoreReadBoardPlaceResultsForNextPending = true;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      localMoveSyncDebug("clearPendingLocalMoveTracking before " + pendingLocalMoveState());
+      boolean wasPending = isPendingLocalMoveAwaitingReadBoard();
+      lastMovePlayByLizzie = false;
+      waitingForReadBoardLocalMoveAck = false;
+      pendingLocalMoveClickCompleted = false;
+      pendingLocalMoveRetryCount = 0;
+      lastPendingLocalMoveRetryTimeMs = 0L;
+      pendingLocalMoveNode = null;
+      pendingLocalMoveBoard = null;
+      pendingLocalMoveHistory = null;
+      pendingLocalMoveX = -1;
+      pendingLocalMoveY = -1;
+      pendingLocalMoveColor = Stone.EMPTY;
+      pendingLocalMoveBaselineKey = "";
+      ignoreReadBoardPlaceResultsForCurrentPending = false;
+      if (wasPending) {
+        pendingLocalMoveAckGeneration++;
+        ignoreReadBoardPlaceResultsForNextPending = true;
+      }
+      localMoveSyncDebug("clearPendingLocalMoveTracking after " + pendingLocalMoveState());
     }
-    localMoveSyncDebug("clearPendingLocalMoveTracking after " + pendingLocalMoveState());
+  }
+
+  public boolean hasLocalMoveConfirmationAuthority() {
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      return !shutdownStarted
+          && Lizzie.frame != null
+          && Lizzie.frame.readBoard == this
+          && Lizzie.frame.syncBoard
+          && Lizzie.frame.bothSync
+          && (usePipe ? process != null && process.isAlive() : readBoardStream != null);
+    }
   }
 
   public boolean isPendingLocalMoveAwaitingReadBoard() {
-    return lastMovePlayByLizzie && waitingForReadBoardLocalMoveAck;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      return lastMovePlayByLizzie && waitingForReadBoardLocalMoveAck;
+    }
   }
 
   private boolean shouldIgnoreCurrentLastLocalMove() {
@@ -3361,15 +3398,17 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void clearConfirmedLocalMove() {
-    if (confirmedLocalMoveActive) {
-      localMoveSyncDebug("clear confirmed local move before " + pendingLocalMoveState());
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (confirmedLocalMoveActive) {
+        localMoveSyncDebug("clear confirmed local move before " + pendingLocalMoveState());
+      }
+      confirmedLocalMoveActive = false;
+      confirmedLocalMoveNode = null;
+      confirmedLocalMoveX = -1;
+      confirmedLocalMoveY = -1;
+      confirmedLocalMoveColor = Stone.EMPTY;
+      confirmedLocalMoveBaselineKey = "";
     }
-    confirmedLocalMoveActive = false;
-    confirmedLocalMoveNode = null;
-    confirmedLocalMoveX = -1;
-    confirmedLocalMoveY = -1;
-    confirmedLocalMoveColor = Stone.EMPTY;
-    confirmedLocalMoveBaselineKey = "";
   }
 
   private void updateConfirmedLocalMoveForSnapshot(int[] snapshotCodes) {
@@ -3415,172 +3454,63 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private boolean retryPendingLocalMoveIfSnapshotStillMissing(int[] snapshotCodes) {
-    if (!Lizzie.frame.bothSync || !lastMovePlayByLizzie) {
-      return false;
+    long generation;
+    BoardHistoryNode node;
+    String failure = null;
+    String retryCommand = null;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      generation = pendingLocalMoveAckGeneration;
+      node = pendingLocalMoveNode;
+      if (!isCurrentLocalMoveConfirmation(generation, node)) {
+        return false;
+      }
+      boolean pendingPresent = isCurrentPendingLocalMovePresentInSnapshot(snapshotCodes);
+      if (pendingPresent) {
+        return false;
+      }
+      String snapshotKey = snapshotPositionKey(snapshotCodes);
+      long now = System.currentTimeMillis();
+      long elapsed = now - lastPendingLocalMoveRetryTimeMs;
+      if (pendingLocalMoveBaselineKey != null
+          && !pendingLocalMoveBaselineKey.isEmpty()
+          && !snapshotKey.isEmpty()
+          && !pendingLocalMoveBaselineKey.equals(snapshotKey)) {
+        failure = "pending local move remote changed without target";
+      } else if (lastPendingLocalMoveRetryTimeMs != 0L
+          && elapsed >= PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS) {
+        failure = "pending local move timed out without place result elapsedMs=" + elapsed;
+      } else if (pendingLocalMoveRetryCount < LOCAL_MOVE_PLACE_RETRY_LIMIT
+          && elapsed >= LOCAL_MOVE_PLACE_RETRY_INTERVAL_MS) {
+        pendingLocalMoveRetryCount++;
+        pendingLocalMoveClickCompleted = false;
+        lastPendingLocalMoveRetryTimeMs = now;
+        retryCommand = "place " + pendingLocalMoveX + " " + pendingLocalMoveY;
+      }
     }
-    if (!waitingForReadBoardLocalMoveAck) {
-      localMoveSyncDebug("retry skip not waiting " + pendingLocalMoveState());
-      return false;
+    if (failure != null) {
+      return handlePendingLocalMovePlacementFailure(failure, generation, node);
     }
-    boolean pendingPresent = isCurrentPendingLocalMovePresentInSnapshot(snapshotCodes);
-    if (failPendingLocalMoveIfRemoteChangedWithoutTarget(snapshotCodes, pendingPresent)) {
-      return true;
+    if (retryCommand != null) {
+      dispatchPlaceCommandOffEventThread(retryCommand, generation, node);
     }
-    if (failPendingLocalMoveIfAckTimedOut(snapshotCodes, pendingPresent)) {
-      return true;
-    }
-    if (pendingLocalMoveRetryCount >= LOCAL_MOVE_PLACE_RETRY_LIMIT || pendingPresent) {
-      localMoveSyncDebug(
-          "retry skip limit-or-present pendingPresent="
-              + pendingPresent
-              + " snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      return false;
-    }
-    Optional<int[]> currentPendingLocalMove = currentPendingLocalMoveCoordinates();
-    if (!currentPendingLocalMove.isPresent()) {
-      localMoveSyncDebug("retry skip no pending coordinates " + pendingLocalMoveState());
-      return false;
-    }
-    long now = System.currentTimeMillis();
-    if (!pendingLocalMoveClickCompleted
-        && now - lastPendingLocalMoveRetryTimeMs < LOCAL_MOVE_PLACE_RETRY_INTERVAL_MS) {
-      localMoveSyncDebug(
-          "retry wait no placeComplete elapsedMs="
-              + (now - lastPendingLocalMoveRetryTimeMs)
-              + " "
-              + pendingLocalMoveState());
-      return false;
-    }
-    if (now - lastPendingLocalMoveRetryTimeMs < LOCAL_MOVE_PLACE_RETRY_INTERVAL_MS) {
-      localMoveSyncDebug(
-          "retry wait interval elapsedMs="
-              + (now - lastPendingLocalMoveRetryTimeMs)
-              + " "
-              + pendingLocalMoveState());
-      return false;
-    }
-    int[] coords = currentPendingLocalMove.get();
-    pendingLocalMoveRetryCount++;
-    pendingLocalMoveClickCompleted = false;
-    lastPendingLocalMoveRetryTimeMs = now;
-    localMoveSyncDebug(
-        "retry sending place coords="
-            + coordsText(coords)
-            + " snapshot="
-            + snapshotSummary(snapshotCodes)
-            + " "
-            + pendingLocalMoveState());
-    sendPlaceCommandWithoutRestartingTracking(coords[0], coords[1]);
     return false;
-  }
-
-  private boolean failPendingLocalMoveIfRemoteChangedWithoutTarget(
-      int[] snapshotCodes, boolean pendingPresent) {
-    if (pendingPresent || !isPendingLocalMoveAwaitingReadBoard()) {
-      return false;
-    }
-    if (pendingLocalMoveBaselineKey == null || pendingLocalMoveBaselineKey.isEmpty()) {
-      return false;
-    }
-    String snapshotKey = snapshotPositionKey(snapshotCodes);
-    if (snapshotKey.isEmpty() || pendingLocalMoveBaselineKey.equals(snapshotKey)) {
-      return false;
-    }
-    localMoveSyncDebug(
-        "pending local move remote changed without target; treating as misplaced/failed move snapshot="
-            + snapshotSummary(snapshotCodes)
-            + " "
-            + pendingLocalMoveState());
-    return handlePendingLocalMovePlacementFailure(
-        "pending local move remote changed without target");
-  }
-
-  private boolean failPendingLocalMoveIfAckTimedOut(int[] snapshotCodes, boolean pendingPresent) {
-    if (pendingPresent || !isPendingLocalMoveAwaitingReadBoard()) {
-      return false;
-    }
-    Optional<int[]> currentPendingLocalMove = currentPendingLocalMoveCoordinates();
-    if (!currentPendingLocalMove.isPresent()) {
-      localMoveSyncDebug(
-          "pending local move ack timeout skip no coordinates " + pendingLocalMoveState());
-      return false;
-    }
-    long now = System.currentTimeMillis();
-    long elapsedMs =
-        lastPendingLocalMoveRetryTimeMs == 0L ? 0L : now - lastPendingLocalMoveRetryTimeMs;
-    if (lastPendingLocalMoveRetryTimeMs == 0L || elapsedMs < PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS) {
-      localMoveSyncDebug(
-          "pending local move waits for place result elapsedMs="
-              + elapsedMs
-              + " timeoutMs="
-              + PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS
-              + " snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      return false;
-    }
-    localMoveSyncDebug(
-        "pending local move timed out without place result elapsedMs="
-            + elapsedMs
-            + " timeoutMs="
-            + PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS
-            + " snapshot="
-            + snapshotSummary(snapshotCodes)
-            + " "
-            + pendingLocalMoveState());
-    return handlePendingLocalMovePlacementFailure(
-        "pending local move timed out without place result elapsedMs=" + elapsedMs);
-  }
-
-  private boolean failPendingLocalMoveIfAckTimedOutWithoutSnapshot() {
-    return failPendingLocalMoveIfAckTimedOutWithoutSnapshot(
-        pendingLocalMoveAckGeneration,
-        pendingLocalMoveNode,
-        pendingLocalMoveX,
-        pendingLocalMoveY,
-        pendingLocalMoveColor);
   }
 
   private boolean failPendingLocalMoveIfAckTimedOutWithoutSnapshot(
       long generation, BoardHistoryNode node, int x, int y, Stone color) {
-    if (!isPendingLocalMoveAwaitingReadBoard()
-        || generation != pendingLocalMoveAckGeneration
-        || !samePendingLocalMove(node, x, y, color)) {
-      localMoveSyncDebug(
-          "pending local move timer skip stale generation="
-              + generation
-              + " currentGeneration="
-              + pendingLocalMoveAckGeneration
-              + " "
-              + pendingLocalMoveState());
-      return false;
+    long elapsedMs;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!isCurrentLocalMoveConfirmation(generation, node)
+          || !samePendingLocalMove(node, x, y, color)) {
+        return false;
+      }
+      elapsedMs = System.currentTimeMillis() - lastPendingLocalMoveRetryTimeMs;
+      if (lastPendingLocalMoveRetryTimeMs == 0L || elapsedMs < PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS) {
+        return false;
+      }
     }
-    long now = System.currentTimeMillis();
-    long elapsedMs =
-        lastPendingLocalMoveRetryTimeMs == 0L ? 0L : now - lastPendingLocalMoveRetryTimeMs;
-    if (lastPendingLocalMoveRetryTimeMs == 0L || elapsedMs < PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS) {
-      localMoveSyncDebug(
-          "pending local move timer skip before timeout elapsedMs="
-              + elapsedMs
-              + " timeoutMs="
-              + PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS
-              + " "
-              + pendingLocalMoveState());
-      return false;
-    }
-    localMoveSyncDebug(
-        "pending local move timer timed out without sync frame elapsedMs="
-            + elapsedMs
-            + " timeoutMs="
-            + PENDING_LOCAL_MOVE_ACK_TIMEOUT_MS
-            + " "
-            + pendingLocalMoveState());
     return handlePendingLocalMovePlacementFailure(
-        "pending local move timed out without sync frame elapsedMs=" + elapsedMs);
+        "pending local move timed out without sync frame elapsedMs=" + elapsedMs, generation, node);
   }
 
   private boolean samePendingLocalMove(BoardHistoryNode node, int x, int y, Stone color) {
@@ -3591,22 +3521,75 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   public boolean shouldSuppressLocalPlaceAfterFailedSync(int x, int y, Stone color) {
-    if (!failedLocalMoveSuppressionActive || color == null) {
-      return false;
-    }
-    if (failedLocalMoveAwaitingRemoteObservation) {
-      if (releaseFailedLocalMoveObservationIfTimedOut("local-place")) {
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!hasLocalMoveConfirmationAuthority()
+          || !failedLocalMoveSuppressionActive
+          || color == null) {
+        return false;
+      }
+      if (failedLocalMoveAwaitingRemoteObservation) {
+        if (releaseFailedLocalMoveObservationIfTimedOut("local-place")) {
+          return false;
+        }
+        YikeSyncDebugLog.log(
+            "ReadBoard suppress local place while awaiting failed-place observation x="
+                + x
+                + " y="
+                + y
+                + " color="
+                + color);
+        localMoveSyncDebug(
+            "suppress local place while awaiting failed-place observation x="
+                + x
+                + " y="
+                + y
+                + " color="
+                + color
+                + " "
+                + pendingLocalMoveState());
+        return true;
+      }
+      if (failedLocalMoveWaitingForOurTurnAfterRemoteChange) {
+        YikeSyncDebugLog.log(
+            "ReadBoard suppress local place while waiting for failed-place side turn x="
+                + x
+                + " y="
+                + y
+                + " color="
+                + color);
+        localMoveSyncDebug(
+            "suppress local place while waiting for failed-place side turn x="
+                + x
+                + " y="
+                + y
+                + " color="
+                + color
+                + " "
+                + pendingLocalMoveState());
+        return true;
+      }
+      boolean sameFailedMove =
+          x == failedLocalMoveSuppressionX
+              && y == failedLocalMoveSuppressionY
+              && color == failedLocalMoveSuppressionColor;
+      if (!sameFailedMove) {
+        localMoveSyncDebug(
+            "clear failed local move state because engine selected a different move x="
+                + x
+                + " y="
+                + y
+                + " color="
+                + color
+                + " "
+                + pendingLocalMoveState());
+        clearFailedLocalMoveSuppression();
+        clearFailedLocalMoveRecovery();
         return false;
       }
       YikeSyncDebugLog.log(
-          "ReadBoard suppress local place while awaiting failed-place observation x="
-              + x
-              + " y="
-              + y
-              + " color="
-              + color);
+          "ReadBoard suppress repeated failed local place x=" + x + " y=" + y + " color=" + color);
       localMoveSyncDebug(
-          "suppress local place while awaiting failed-place observation x="
+          "suppress repeated failed local place x="
               + x
               + " y="
               + y
@@ -3616,55 +3599,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
               + pendingLocalMoveState());
       return true;
     }
-    if (failedLocalMoveWaitingForOurTurnAfterRemoteChange) {
-      YikeSyncDebugLog.log(
-          "ReadBoard suppress local place while waiting for failed-place side turn x="
-              + x
-              + " y="
-              + y
-              + " color="
-              + color);
-      localMoveSyncDebug(
-          "suppress local place while waiting for failed-place side turn x="
-              + x
-              + " y="
-              + y
-              + " color="
-              + color
-              + " "
-              + pendingLocalMoveState());
-      return true;
-    }
-    boolean sameFailedMove =
-        x == failedLocalMoveSuppressionX
-            && y == failedLocalMoveSuppressionY
-            && color == failedLocalMoveSuppressionColor;
-    if (!sameFailedMove) {
-      localMoveSyncDebug(
-          "clear failed local move state because engine selected a different move x="
-              + x
-              + " y="
-              + y
-              + " color="
-              + color
-              + " "
-              + pendingLocalMoveState());
-      clearFailedLocalMoveSuppression();
-      clearFailedLocalMoveRecovery();
-      return false;
-    }
-    YikeSyncDebugLog.log(
-        "ReadBoard suppress repeated failed local place x=" + x + " y=" + y + " color=" + color);
-    localMoveSyncDebug(
-        "suppress repeated failed local place x="
-            + x
-            + " y="
-            + y
-            + " color="
-            + color
-            + " "
-            + pendingLocalMoveState());
-    return true;
   }
 
   private void rememberFailedLocalMoveSuppression() {
@@ -3716,50 +3650,52 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private void updateFailedLocalMoveSuppressionForSnapshot(int[] snapshotCodes) {
-    if (!failedLocalMoveSuppressionActive || snapshotCodes == null || snapshotCodes.length == 0) {
-      return;
-    }
-    int[] coords = new int[] {failedLocalMoveSuppressionX, failedLocalMoveSuppressionY};
-    String snapshotKey = snapshotPositionKey(snapshotCodes);
-    if (failedLocalMoveAwaitingRemoteObservation) {
-      observeFailedLocalMoveSnapshot(snapshotCodes, coords, snapshotKey);
-      return;
-    }
-    if (failedLocalMoveWaitingForOurTurnAfterRemoteChange) {
-      localMoveSyncDebug(
-          "failed-place waiting for our turn keeps suppression snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      return;
-    }
-    if (snapshotContainsMove(snapshotCodes, coords, failedLocalMoveSuppressionColor)) {
-      localMoveSyncDebug(
-          "clear suppression because failed move is now visible snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      clearFailedLocalMoveSuppression();
-      clearFailedLocalMoveRecovery();
-      return;
-    }
-    if (failedLocalMoveSuppressionSnapshotKey.isEmpty()) {
-      failedLocalMoveSuppressionSnapshotKey = snapshotKey;
-      localMoveSyncDebug(
-          "bind suppression snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      return;
-    }
-    if (!failedLocalMoveSuppressionSnapshotKey.equals(snapshotKey)) {
-      localMoveSyncDebug(
-          "clear suppression due snapshot change snapshot="
-              + snapshotSummary(snapshotCodes)
-              + " "
-              + pendingLocalMoveState());
-      clearFailedLocalMoveSuppression();
-      clearFailedLocalMoveRecovery();
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!failedLocalMoveSuppressionActive || snapshotCodes == null || snapshotCodes.length == 0) {
+        return;
+      }
+      int[] coords = new int[] {failedLocalMoveSuppressionX, failedLocalMoveSuppressionY};
+      String snapshotKey = snapshotPositionKey(snapshotCodes);
+      if (failedLocalMoveAwaitingRemoteObservation) {
+        observeFailedLocalMoveSnapshot(snapshotCodes, coords, snapshotKey);
+        return;
+      }
+      if (failedLocalMoveWaitingForOurTurnAfterRemoteChange) {
+        localMoveSyncDebug(
+            "failed-place waiting for our turn keeps suppression snapshot="
+                + snapshotSummary(snapshotCodes)
+                + " "
+                + pendingLocalMoveState());
+        return;
+      }
+      if (snapshotContainsMove(snapshotCodes, coords, failedLocalMoveSuppressionColor)) {
+        localMoveSyncDebug(
+            "clear suppression because failed move is now visible snapshot="
+                + snapshotSummary(snapshotCodes)
+                + " "
+                + pendingLocalMoveState());
+        clearFailedLocalMoveSuppression();
+        clearFailedLocalMoveRecovery();
+        return;
+      }
+      if (failedLocalMoveSuppressionSnapshotKey.isEmpty()) {
+        failedLocalMoveSuppressionSnapshotKey = snapshotKey;
+        localMoveSyncDebug(
+            "bind suppression snapshot="
+                + snapshotSummary(snapshotCodes)
+                + " "
+                + pendingLocalMoveState());
+        return;
+      }
+      if (!failedLocalMoveSuppressionSnapshotKey.equals(snapshotKey)) {
+        localMoveSyncDebug(
+            "clear suppression due snapshot change snapshot="
+                + snapshotSummary(snapshotCodes)
+                + " "
+                + pendingLocalMoveState());
+        clearFailedLocalMoveSuppression();
+        clearFailedLocalMoveRecovery();
+      }
     }
   }
 
@@ -3845,21 +3781,23 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
   }
 
   private boolean releaseFailedLocalMoveObservationIfTimedOut(String reason) {
-    if (!failedLocalMoveAwaitingRemoteObservation) {
-      return false;
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (!failedLocalMoveAwaitingRemoteObservation) {
+        return false;
+      }
+      long deadlineMs = failedLocalMoveObservationDeadlineMs;
+      if (deadlineMs > 0L && System.currentTimeMillis() < deadlineMs) {
+        return false;
+      }
+      localMoveSyncDebug(
+          "failed-place observation guard elapsed; release for fresh analysis reason="
+              + reason
+              + " "
+              + pendingLocalMoveState());
+      clearFailedLocalMoveSuppression();
+      clearFailedLocalMoveRecovery();
+      return true;
     }
-    long deadlineMs = failedLocalMoveObservationDeadlineMs;
-    if (deadlineMs > 0L && System.currentTimeMillis() < deadlineMs) {
-      return false;
-    }
-    localMoveSyncDebug(
-        "failed-place observation guard elapsed; release for fresh analysis reason="
-            + reason
-            + " "
-            + pendingLocalMoveState());
-    clearFailedLocalMoveSuppression();
-    clearFailedLocalMoveRecovery();
-    return true;
   }
 
   private void clearFailedLocalMoveRecovery() {
@@ -5221,33 +5159,6 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     return builder.toString();
   }
 
-  private void sendPlaceCommandWithoutRestartingTracking(int x, int y) {
-    String command = "place " + x + " " + y;
-    localMoveSyncDebug(
-        "sendPlaceCommandWithoutRestartingTracking command="
-            + command
-            + " usePipe="
-            + usePipe
-            + " stream="
-            + (readBoardStream != null)
-            + " "
-            + pendingLocalMoveState());
-    YikeSyncDebugLog.log(
-        "ReadBoard retry pending local move command="
-            + command
-            + " retry="
-            + pendingLocalMoveRetryCount);
-    if (hideFloadBoardBeforePlace && Lizzie.frame.floatBoard != null) {
-      Lizzie.frame.floatBoard.setVisible(false);
-      hideFromPlace = true;
-    }
-    if (usePipe) {
-      sendCommandTo(command);
-    } else if (readBoardStream != null) {
-      readBoardStream.sendCommand(command);
-    }
-  }
-
   private void restoreViewedNodeAfterSync(
       boolean played, BoardHistoryNode currentNode, BoardHistoryNode syncEndNode) {
     if (Lizzie.frame.bothSync
@@ -5954,6 +5865,7 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     retireTrackingEligibility();
     noMsg = true;
     resetActiveSyncState();
+    restoreFloatBoardAfterPlaceResult();
     clearResumeState();
     clearPendingRemoteContext();
     tempcount = new ArrayList<Integer>();
@@ -5968,12 +5880,14 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     publishCurrentReadBoardDiagnosticsSnapshot();
   }
 
-  private synchronized boolean beginShutdown() {
-    if (shutdownStarted) {
-      return false;
+  private boolean beginShutdown() {
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      if (shutdownStarted) {
+        return false;
+      }
+      shutdownStarted = true;
+      return true;
     }
-    shutdownStarted = true;
-    return true;
   }
 
   @Override
@@ -6182,6 +6096,12 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     if (shouldSuppressHistoryOverwriteInvalidation()) {
       return;
     }
+    synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+      clearPendingLocalMoveTracking();
+      clearFailedLocalMoveSuppression();
+      clearFailedLocalMoveRecovery();
+      clearConfirmedLocalMove();
+    }
     invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.NODE_MISMATCH);
     clearResumeState();
     publishCurrentReadBoardDiagnosticsSnapshot();
@@ -6230,30 +6150,26 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
               + isSyncing);
     }
     if (command.startsWith("place")) {
-      localMoveSyncDebug(
-          "sendCommand external place command="
-              + command
-              + " usePipe="
-              + usePipe
-              + " stream="
-              + (readBoardStream != null)
-              + " before "
-              + pendingLocalMoveState());
-      if (isPendingLocalMoveAwaitingReadBoard()) {
-        localMoveSyncDebug("sendCommand external place skipped; pending local move still active");
+      Board board = Lizzie.board;
+      if (board == null) {
         return;
       }
-      clearFailedLocalMoveStateIfOutgoingPlaceDiffers(command);
-      if (hideFloadBoardBeforePlace && Lizzie.frame.floatBoard != null) {
-        Lizzie.frame.floatBoard.setVisible(false);
-        hideFromPlace = true;
+      invalidateTrackingEligibility(ReadBoardTrackingEligibilityAdapter.Reason.PENDING_LOCAL_MOVE);
+      long generation;
+      BoardHistoryNode node;
+      synchronized (board) {
+        synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+          if (!hasLocalMoveConfirmationAuthority() || isPendingLocalMoveAwaitingReadBoard()) {
+            return;
+          }
+          clearFailedLocalMoveStateIfOutgoingPlaceDiffers(command);
+          startTrackingLocalMoveFromLizzie();
+          generation = pendingLocalMoveAckGeneration;
+          node = pendingLocalMoveNode;
+          if (Lizzie.frame.isPlayingAgainstLeelaz) needGenmove = true;
+        }
       }
-      startTrackingLocalMoveFromLizzie();
-      if (Lizzie.frame.isPlayingAgainstLeelaz) needGenmove = true;
-      localMoveSyncDebug("sendCommand external place after tracking " + pendingLocalMoveState());
-    }
-    if (command.startsWith("place ") && SwingUtilities.isEventDispatchThread()) {
-      dispatchPlaceCommandOffEventThread(command);
+      dispatchPlaceCommandOffEventThread(command, generation, node);
       return;
     }
     if (usePipe) {
@@ -6261,18 +6177,48 @@ public class ReadBoard implements ReadBoardTrackingEligibilityAdapter.Eligibilit
     } else if (readBoardStream != null) readBoardStream.sendCommand(command);
   }
 
-  private void dispatchPlaceCommandOffEventThread(String command) {
+  private void dispatchPlaceCommandOffEventThread(
+      String command, long generation, BoardHistoryNode node) {
     BufferedOutputStream pipeTarget = usePipe ? outputStream : null;
     ReadBoardStream socketTarget = usePipe ? null : readBoardStream;
     if (pipeTarget == null && socketTarget == null) {
       return;
     }
-    PLACE_COMMAND_DISPATCH_EXECUTOR.execute(
+    Executor dispatcher =
+        placeCommandDispatcher == null ? PLACE_COMMAND_DISPATCH_EXECUTOR : placeCommandDispatcher;
+    dispatcher.execute(
         () -> {
+          FloatBoard floatBoard = Lizzie.frame == null ? null : Lizzie.frame.floatBoard;
+          if (hideFloadBoardBeforePlace && floatBoard != null) {
+            runOnEdtAndWait(
+                () -> {
+                  synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+                    if (!isCurrentLocalMoveConfirmation(generation, node)) {
+                      return;
+                    }
+                    hideFromPlace = true;
+                  }
+                  floatBoard.setVisible(false);
+                });
+          }
           if (pipeTarget != null) {
-            sendCommandTo(pipeTarget, command);
+            synchronized (pipeTarget) {
+              synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+                if (!isCurrentLocalMoveConfirmation(generation, node)) {
+                  return;
+                }
+                // Dispatch starts here; already-started writes cannot be recalled by stop.
+              }
+              sendCommandTo(pipeTarget, command);
+            }
           } else {
-            socketTarget.sendCommand(command);
+            socketTarget.sendCommand(
+                command,
+                () -> {
+                  synchronized (LOCAL_MOVE_CONFIRMATION_LOCK) {
+                    return isCurrentLocalMoveConfirmation(generation, node);
+                  }
+                });
           }
         });
   }
