@@ -59,6 +59,8 @@ public final class KataGoBenchmarkParser {
     boolean mpsGraphInitialized = false;
     boolean coreMlInitialized = false;
     boolean failureDetected = false;
+    boolean gpuTuningInProgress = false;
+    boolean recoverableGpuTuningError = false;
     boolean additionalTuningStarted = false;
     boolean serverThreadRecommendationBlock = false;
     Map<Integer, KataGoBenchmarkObservation.ThreadMetrics> metricsByThread =
@@ -128,10 +130,30 @@ public final class KataGoBenchmarkParser {
       if (lower.contains("mux ane mode - using coreml")) {
         coreMlInitialized = true;
       }
+
+      if (line.startsWith("Beginning GPU tuning")) {
+        if (gpuTuningInProgress && recoverableGpuTuningError) {
+          failureDetected = true;
+        }
+        gpuTuningInProgress = true;
+        recoverableGpuTuningError = false;
+      }
       if (isFailureLine(lower)) {
-        failureDetected = true;
+        if (gpuTuningInProgress
+            && lower.startsWith("error:")
+            && !isFailureLine(lower.substring("error:".length()).trim())) {
+          recoverableGpuTuningError = true;
+        } else {
+          failureDetected = true;
+        }
+      }
+      if (gpuTuningInProgress && line.equals("Done tuning")) {
+        gpuTuningInProgress = false;
+        recoverableGpuTuningError = false;
       }
     }
+
+    failureDetected |= recoverableGpuTuningError;
 
     if (recommendedThreads <= 0 && explicitThreads > 0) {
       recommendedThreads = explicitThreads;

@@ -285,6 +285,8 @@ public final class KataGoAutoSetupHelper {
     public final List<MissingComponent> missingComponents;
     public final List<String> diagnostics;
     private String savedEntryId = "";
+    private List<String> launchArguments = List.of();
+    private Path executionDirectory;
 
     private LocalKataGoDiscoveryResult(
         Path workingDir,
@@ -357,6 +359,7 @@ public final class KataGoAutoSetupHelper {
     public final LocalKataGoDiscoveryResult discovery;
     public final String savedEntryId;
     public final Path executionDirectory;
+    public final List<String> sourceArguments;
 
     private SetupSnapshot(
         Path workingDir,
@@ -395,10 +398,13 @@ public final class KataGoAutoSetupHelper {
       this.weightCandidates = Collections.unmodifiableList(new ArrayList<>(weightCandidates));
       this.discovery = discovery;
       this.savedEntryId = discovery == null ? "" : discovery.savedEntryId;
+      this.sourceArguments = discovery == null ? List.of() : discovery.launchArguments;
       this.executionDirectory =
-          Lizzie.config == null
-              ? workingDir
-              : Lizzie.config.getRuntimeWorkDirectory().toPath().toAbsolutePath().normalize();
+          discovery != null && discovery.executionDirectory != null
+              ? discovery.executionDirectory
+              : Lizzie.config == null
+                  ? workingDir
+                  : Lizzie.config.getRuntimeWorkDirectory().toPath().toAbsolutePath().normalize();
     }
 
     public boolean hasEngine() {
@@ -690,21 +696,71 @@ public final class KataGoAutoSetupHelper {
 
   /** Inspects this saved entry only; it does not start an engine or select a fallback entry. */
   public static SetupSnapshot inspectSavedEngine(EngineData entry) {
-    Path workingDir = currentWorkingDir();
+    if (entry == null
+        || !EngineThreadPolicy.isLocalKataGoCommand(entry.commands, entry.useJavaSSH)) {
+      return null;
+    }
+    String command =
+        entry.commands.startsWith("encryption||")
+            ? Utils.doDecrypt2(entry.commands.substring(12))
+            : entry.commands;
+    List<String> tokens = Utils.splitCommand(command);
+    if (tokens == null || tokens.isEmpty()) return null;
+    List<String> normalized = new ArrayList<>();
+    for (String token : tokens) {
+      int equals = token.indexOf('=');
+      if (token.startsWith("-") && equals > 0) {
+        normalized.add(token.substring(0, equals));
+        normalized.add(token.substring(equals + 1));
+      } else {
+        normalized.add(token);
+      }
+    }
+    CommandLaunchHelper.LaunchSpec launch = CommandLaunchHelper.prepare(normalized);
+    List<String> arguments = launch.getCommandParts();
+    Path workingDir =
+        launch.getWorkingDirectory() == null
+            ? currentWorkingDir()
+            : launch.getWorkingDirectory().toPath().toAbsolutePath().normalize();
     Path appRoot = findAppRoot().orElse(workingDir);
+    Path enginePath = resolveExecutablePath(arguments.get(0), workingDir, workingDir);
+    Path gtpConfig = null;
+    Path model = null;
+    for (int i = 2; i + 1 < arguments.size(); i++) {
+      String option = arguments.get(i);
+      if ("-config".equals(option) || "--config".equals(option)) {
+        Path path = resolvePath(arguments.get(++i), workingDir, null, null);
+        if (gtpConfig == null) gtpConfig = path;
+        if (path != null) arguments.set(i, path.toString());
+      } else if ("-model".equals(option)
+          || "--model".equals(option)
+          || "-weights".equals(option)
+          || "--weights".equals(option)) {
+        model = resolvePath(arguments.get(++i), workingDir, null, null);
+        if (model != null) arguments.set(i, model.toString());
+      }
+    }
+    if (enginePath != null) arguments.set(0, enginePath.toString());
     LocalKataGoDiscoveryResult result =
-        discoverFromCommand(
-            entry.commands,
-            DiscoverySource.MANUAL_SELECTION,
-            entry.name,
-            entry.useJavaSSH,
+        new LocalKataGoDiscoveryResult(
             workingDir,
             appRoot,
-            List.of(),
+            enginePath,
+            gtpConfig,
+            siblingFile(gtpConfig, "analysis.cfg"),
+            model,
+            model == null ? List.of() : List.of(model),
+            DiscoverySource.MANUAL_SELECTION,
+            entry.name,
+            entry.commands,
             detectPackageFlavor(appRoot),
-            new ArrayList<>());
-    if (result == null) return null;
+            List.of());
     result.savedEntryId = entry.id;
+    result.launchArguments = List.copyOf(arguments);
+    result.executionDirectory =
+        Config.isBundledKataGoExecutable(enginePath) && Lizzie.config != null
+            ? Lizzie.config.getRuntimeWorkDirectory().toPath().toAbsolutePath().normalize()
+            : workingDir;
     return result.toSnapshot();
   }
 
@@ -965,7 +1021,8 @@ public final class KataGoAutoSetupHelper {
       }
     }
     if (!needsRewrite
-        && hasRelativeBundledPath(Lizzie.config.uiConfig.optString("analysis-engine-command", ""))) {
+        && hasRelativeBundledPath(
+            Lizzie.config.uiConfig.optString("analysis-engine-command", ""))) {
       needsRewrite = true;
     }
     if (!needsRewrite) {

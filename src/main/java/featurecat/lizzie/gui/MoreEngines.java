@@ -77,6 +77,7 @@ public class MoreEngines extends JPanel {
   JFontLabel threadPolicyStatus;
   JFontRadioButton threadPolicyCfg;
   JFontRadioButton threadPolicyBenchmark;
+  JFontButton benchmarkSelectedEngine;
   JFontTextField txtInitialCommand;
   JFontTextField txtWidth;
   JFontTextField txtHeight;
@@ -220,6 +221,8 @@ public class MoreEngines extends JPanel {
     this.threadPolicyBenchmark =
         new JFontRadioButton(this.resourceBundle.getString("EngineThreadPolicy.benchmark"));
     this.threadPolicyStatus = new JFontLabel();
+    this.benchmarkSelectedEngine =
+        new JFontButton(this.resourceBundle.getString("AutoSetup.optimizePerformance"));
     this.threadPolicyStatus.setForeground(Color.BLUE);
     ButtonGroup threadPolicyGroup = new ButtonGroup();
     threadPolicyGroup.add(threadPolicyCfg);
@@ -434,7 +437,16 @@ public class MoreEngines extends JPanel {
     placeInRow(txtKomi, boardSettingsX, 270, 0, 48);
     int policyX = 5;
     policyX = placeInRow(threadPolicyCfg, policyX, 296, 8, 0);
-    placeInRow(threadPolicyBenchmark, policyX, 296, 0, 0);
+    policyX = placeInRow(threadPolicyBenchmark, policyX, 296, 12, 0);
+    String benchmarkAgainText = resourceBundle.getString("AutoSetup.optimizePerformanceAgain");
+    int benchmarkButtonWidth =
+        Math.max(
+            benchmarkSelectedEngine.getPreferredSize().width,
+            benchmarkSelectedEngine
+                    .getFontMetrics(benchmarkSelectedEngine.getFont())
+                    .stringWidth(benchmarkAgainText)
+                + 24);
+    benchmarkSelectedEngine.setBounds(policyX, 296, benchmarkButtonWidth, 24);
     this.threadPolicyStatus.setBounds(5, 320, 875, 64);
     this.threadPolicyStatus.setVerticalAlignment(JLabel.TOP);
     this.remoteManagedThreads.setBounds(5, 320, 875, 24);
@@ -544,6 +556,7 @@ public class MoreEngines extends JPanel {
     this.selectpanel.add(this.threadPolicyCfg);
     this.selectpanel.add(this.threadPolicyBenchmark);
     this.selectpanel.add(this.threadPolicyStatus);
+    this.selectpanel.add(this.benchmarkSelectedEngine);
     this.selectpanel.add(this.scan);
     this.selectpanel.add(this.add);
     this.selectpanel.add(this.save);
@@ -568,6 +581,10 @@ public class MoreEngines extends JPanel {
         this.resourceBundle.getString("MoreEngines.gtpConfig"),
         this.resourceBundle.getString("MoreEngines.gtpConfigDescription"));
     AccessibilitySupport.applyToTree(this);
+    AccessibilitySupport.button(
+        this.benchmarkSelectedEngine,
+        this.benchmarkSelectedEngine.getText(),
+        this.benchmarkSelectedEngine.getText());
     this.scan.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
@@ -578,6 +595,7 @@ public class MoreEngines extends JPanel {
           }
         });
     this.gtpConfig.addActionListener(event -> configureSelectedEngine());
+    this.benchmarkSelectedEngine.addActionListener(event -> benchmarkSelectedEngine());
     this.add.addActionListener(
         event -> {
           if (!checkSave()) return;
@@ -832,35 +850,7 @@ public class MoreEngines extends JPanel {
       showThreadPolicySaveFailure(new IOException(EngineThreadPolicy.message("targetDeleted")));
       return false;
     }
-    boolean isChanged = engDt == null || threadPolicySourceChanged;
-    if (engDt != null) {
-      if (!this.command.getText().startsWith("encryption||")
-          && !this.command.getText().equals(engDt.commands)) isChanged = true;
-      if (!this.txtName.getText().equals(engDt.name)) isChanged = true;
-      if (!this.txtInitialCommand
-              .getText()
-              .equals(resourceBundle.getString("MoreEngines.initialCommandHint"))
-          && !this.txtInitialCommand.getText().equals(engDt.initialCommand)) isChanged = true;
-      if (this.preload.isSelected() != engDt.preload) isChanged = true;
-      if (!this.txtWidth.getText().equals(String.valueOf(engDt.width))) isChanged = true;
-      if (!this.txtHeight.getText().equals(String.valueOf(engDt.height))) isChanged = true;
-      if (!this.txtKomi.getText().equals(String.valueOf(engDt.komi))) isChanged = true;
-      if (this.chkDefault.isSelected() != engDt.isDefault) isChanged = true;
-      if (this.chkRemoteEngine.isSelected() != engDt.useJavaSSH) isChanged = true;
-      if (this.chkRemoteEngine.isSelected()) {
-        if (!this.txtIP.getText().equals(engDt.ip)) isChanged = true;
-        if (!this.txtPort.getText().equals(engDt.port)) isChanged = true;
-        if (!this.txtUserName.getText().equals(engDt.userName)) isChanged = true;
-        if (this.rdoKeyGen.isSelected() != engDt.useKeyGen) isChanged = true;
-        if (this.rdoKeyGen.isSelected()) {
-          if (!this.keyGenPath.equals(engDt.keyGenPath)) isChanged = true;
-        } else if (!Utils.doEncrypt(new String(this.txtPassword.getPassword()))
-            .equals(engDt.password)) {
-          isChanged = true;
-        }
-      }
-    }
-    if (!isChanged) return true;
+    if (!isCurrentEngineConfigDirty(engDt)) return true;
     Object[] options = {
       this.resourceBundle.getString("MoreEngines.saveHint"),
       this.resourceBundle.getString("MoreEngines.saveHint2")
@@ -878,10 +868,67 @@ public class MoreEngines extends JPanel {
     return ret != 0 || saveCurrentEngineConfig();
   }
 
+  private boolean isCurrentEngineConfigDirty(EngineData saved) {
+    if (saved == null) return true;
+    if (selectedThreadSource != EngineThreadPolicy.source(saved)) return true;
+    if (!this.command.getText().trim().equals(saved.commands)) return true;
+    if (!this.txtName.getText().equals(saved.name)) return true;
+    if (!currentInitialCommand().equals(saved.initialCommand)) return true;
+    if (this.preload.isSelected() != saved.preload) return true;
+    if (!this.txtWidth.getText().equals(String.valueOf(saved.width))) return true;
+    if (!this.txtHeight.getText().equals(String.valueOf(saved.height))) return true;
+    if (!this.txtKomi.getText().equals(String.valueOf(saved.komi))) return true;
+    if (this.chkDefault.isSelected() != saved.isDefault) return true;
+    if (this.chkRemoteEngine.isSelected() != saved.useJavaSSH) return true;
+    if (!this.chkRemoteEngine.isSelected()) return false;
+    if (!this.txtIP.getText().equals(saved.ip)) return true;
+    if (!this.txtPort.getText().equals(saved.port)) return true;
+    if (!this.txtUserName.getText().equals(saved.userName)) return true;
+    if (this.rdoKeyGen.isSelected() != saved.useKeyGen) return true;
+    if (this.rdoKeyGen.isSelected()) return !this.keyGenPath.equals(saved.keyGenPath);
+    return !Utils.doEncrypt(new String(this.txtPassword.getPassword())).equals(saved.password);
+  }
+
+  private String currentInitialCommand() {
+    return this.txtInitialCommand
+            .getText()
+            .equals(resourceBundle.getString("MoreEngines.initialCommandHint"))
+        ? ""
+        : this.txtInitialCommand.getText();
+  }
+
+  private void benchmarkSelectedEngine() {
+    EngineData saved = EngineThreadPolicy.findSavedEntry(selectedEntryId);
+    if (saved == null) {
+      showThreadPolicySaveFailure(new IOException(EngineThreadPolicy.message("targetDeleted")));
+      return;
+    }
+    if (isCurrentEngineConfigDirty(saved)) {
+      Object[] options = {
+        resourceBundle.getString("EngineThreadPolicy.saveAndBenchmark"),
+        resourceBundle.getString("MoreEngines.cancel")
+      };
+      int selection =
+          JOptionPane.showOptionDialog(
+              this,
+              resourceBundle.getString("EngineThreadPolicy.benchmarkSavePrompt"),
+              EngineThreadPolicy.message("settings"),
+              JOptionPane.DEFAULT_OPTION,
+              JOptionPane.QUESTION_MESSAGE,
+              null,
+              options,
+              options[0]);
+      if (selection != 0 || !saveCurrentEngineConfig()) return;
+    }
+    KataGoAutoSetupDialog.openForSavedEntry(engjf, selectedEntryId);
+    updateThreadPolicyDetails();
+  }
+
   private void selectThreadPolicy(EngineThreadPolicy.Source source) {
     if (loadingThreadPolicy) return;
     selectedThreadSource = source;
-    threadPolicySourceChanged = true;
+    EngineData saved = EngineThreadPolicy.findSavedEntry(selectedEntryId);
+    threadPolicySourceChanged = saved == null || source != EngineThreadPolicy.source(saved);
     updateThreadPolicyDetails();
   }
 
@@ -897,6 +944,7 @@ public class MoreEngines extends JPanel {
     remoteManagedThreads.setVisible(remote);
     threadPolicyCfg.setVisible(local);
     threadPolicyBenchmark.setVisible(local);
+    benchmarkSelectedEngine.setVisible(local && saved != null);
     threadPolicyStatus.setVisible(local || unknown);
     if (remote) return;
     if (!local) {
@@ -905,6 +953,16 @@ public class MoreEngines extends JPanel {
       return;
     }
     int recommendation = EngineThreadPolicy.recommendedThreads(saved);
+    benchmarkSelectedEngine.setText(
+        resourceBundle.getString(
+            recommendation > 0
+                ? "AutoSetup.optimizePerformanceAgain"
+                : "AutoSetup.optimizePerformance"));
+    AccessibilitySupport.button(
+        benchmarkSelectedEngine,
+        benchmarkSelectedEngine.getText(),
+        benchmarkSelectedEngine.getText());
+    benchmarkSelectedEngine.setEnabled(curIndex >= 0 && saved != null);
     loadingThreadPolicy = true;
     try {
       threadPolicyCfg.setSelected(selectedThreadSource == EngineThreadPolicy.Source.CFG);
@@ -1036,10 +1094,12 @@ public class MoreEngines extends JPanel {
       this.rdoKeyGen.setEnabled(false);
       this.scanKeygen.setEnabled(false);
       this.gtpConfig.setEnabled(false);
+      this.benchmarkSelectedEngine.setEnabled(false);
       threadPolicyCfg.setEnabled(false);
       threadPolicyBenchmark.setEnabled(false);
       threadPolicyCfg.setVisible(false);
       threadPolicyBenchmark.setVisible(false);
+      this.benchmarkSelectedEngine.setVisible(false);
       threadPolicyStatus.setVisible(false);
       remoteManagedThreads.setVisible(false);
     }
@@ -1182,11 +1242,7 @@ public class MoreEngines extends JPanel {
     engineDt.index = targetIndex >= 0 ? targetIndex : engineData.size();
     engineDt.commands = editedCommand;
     engineDt.name = this.txtName.getText();
-    if (txtInitialCommand
-        .getText()
-        .equals(resourceBundle.getString("MoreEngines.initialCommandHint")))
-      engineDt.initialCommand = "";
-    else engineDt.initialCommand = this.txtInitialCommand.getText();
+    engineDt.initialCommand = currentInitialCommand();
     engineDt.preload = this.preload.isSelected();
     engineDt.width = Utils.parseTextToInt(this.txtWidth, 19);
     engineDt.height = Utils.parseTextToInt(this.txtHeight, 19);
@@ -1277,9 +1333,15 @@ public class MoreEngines extends JPanel {
 
   private void showThreadPolicySaveFailure(Throwable failure) {
     String detail = failure == null || failure.getMessage() == null ? "" : failure.getMessage();
+    JFontTextArea message = new JFontTextArea(8, 60);
+    message.setText(String.format(EngineThreadPolicy.message("saveFailed"), detail));
+    message.setEditable(false);
+    message.setLineWrap(true);
+    message.setWrapStyleWord(true);
+    message.setCaretPosition(0);
     JOptionPane.showMessageDialog(
         engjf,
-        String.format(EngineThreadPolicy.message("saveFailed"), detail),
+        new JScrollPane(message),
         EngineThreadPolicy.message("settings"),
         JOptionPane.ERROR_MESSAGE);
   }

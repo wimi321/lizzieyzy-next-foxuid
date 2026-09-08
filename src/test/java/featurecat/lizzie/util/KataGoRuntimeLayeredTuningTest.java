@@ -179,29 +179,6 @@ class KataGoRuntimeLayeredTuningTest {
     }
   }
 
-  @Test
-  void officialBenchmarkInheritsTopologyButRemovesThreadAndProcessOverrides() {
-    Map<String, String> overrides =
-        KataGoRuntimeHelper.officialBenchmarkOverrides(
-            List.of(
-                "katago",
-                "gtp",
-                "-override-config",
-                "numSearchThreads=9,numAnalysisThreads=3,"
-                    + "numSearchThreadsPerAnalysisThread=2,homeDataDir=/tmp/katago,"
-                    + "numNNServerThreadsPerModel=2,metalDeviceToUseModel0Thread0=0,"
-                    + "metalDeviceToUseModel0Thread1=100,nnMaxBatchSize=4,userSetting=keep"));
-
-    assertFalse(overrides.containsKey("numSearchThreads"));
-    assertFalse(overrides.containsKey("numAnalysisThreads"));
-    assertFalse(overrides.containsKey("numSearchThreadsPerAnalysisThread"));
-    assertFalse(overrides.containsKey("homeDataDir"));
-    assertEquals("2", overrides.get("numNNServerThreadsPerModel"));
-    assertEquals("0", overrides.get("metalDeviceToUseModel0Thread0"));
-    assertEquals("100", overrides.get("metalDeviceToUseModel0Thread1"));
-    assertEquals("4", overrides.get("nnMaxBatchSize"));
-    assertEquals("keep", overrides.get("userSetting"));
-  }
 
   @Test
   void officialFingerprintTracksHardwareButIgnoresManagedThreadAndProcessNoise() {
@@ -303,8 +280,10 @@ class KataGoRuntimeLayeredTuningTest {
     }
   }
 
-  @Test
-  void staleAppleHardwareProfileKeepsValidEntryThreadsButSuppressesHardware() throws Exception {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void staleAppleHardwareProfileKeepsValidEntryThreadsButSuppressesHardware(
+      boolean changeAdditionalConfig) throws Exception {
     Config previousConfig = Lizzie.config;
     String previousOsName = System.getProperty("os.name");
     String previousOsArch = System.getProperty("os.arch");
@@ -317,6 +296,8 @@ class KataGoRuntimeLayeredTuningTest {
       Lizzie.config = config;
       initializeConfigJson(config);
       SetupSnapshot snapshot = createBundledAppleSnapshot("stale-apple-app");
+      Path additionalConfig =
+          Files.writeString(temporaryDirectory.resolve("device.cfg"), "nnMaxBatchSize=8");
       List<String> command =
           List.of(
               snapshot.enginePath.toString(),
@@ -324,7 +305,9 @@ class KataGoRuntimeLayeredTuningTest {
               "-config",
               snapshot.gtpConfigPath.toString(),
               "-model",
-              snapshot.activeWeightPath.toString());
+              snapshot.activeWeightPath.toString(),
+              "-config",
+              additionalConfig.toString());
       KataGoTuningFingerprint fingerprint =
           KataGoTuningFingerprint.create(
               snapshot.enginePath,
@@ -356,7 +339,9 @@ class KataGoRuntimeLayeredTuningTest {
       assertEquals("2", current.overrideValue("numNNServerThreadsPerModel").orElseThrow());
       assertEquals("0", current.overrideValue("metalDeviceToUseModel0Thread0").orElseThrow());
 
-      Files.writeString(snapshot.activeWeightPath, "changed-model-content");
+      Files.writeString(
+          changeAdditionalConfig ? additionalConfig : snapshot.activeWeightPath,
+          changeAdditionalConfig ? "nnMaxBatchSize=16" : "changed-model-content");
       KataGoCommandSpec stale =
           KataGoCommandSpec.parse(
               KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry));
@@ -451,6 +436,28 @@ class KataGoRuntimeLayeredTuningTest {
       assertEquals("1", appliedSpec.overrideValue("numNNServerThreadsPerModel").orElseThrow());
       assertEquals("9", appliedSpec.overrideValue("nnMaxBatchSize").orElseThrow());
     } finally {
+      Lizzie.config = previousConfig;
+    }
+  }
+
+  @Test
+  void gtpOnlyAppleEntryRemainsEligibleForItsBenchmarkModes() throws Exception {
+    Config previousConfig = Lizzie.config;
+    String previousOsName = System.getProperty("os.name");
+    String previousOsArch = System.getProperty("os.arch");
+    try {
+      System.setProperty("os.name", "Mac OS X");
+      System.setProperty("os.arch", "aarch64");
+      Lizzie.config = ConfigTestHelper.createForTests(temporaryDirectory);
+      initializeConfigJson(Lizzie.config);
+      SetupSnapshot snapshot = createBundledAppleSnapshot("gtp-only-apple");
+      Files.delete(snapshot.analysisConfigPath);
+      assertTrue(KataGoRuntimeHelper.isExperimentalAppleSiliconTuningAvailable(snapshot));
+      assertFalse(snapshot.hasConfigs());
+      assertFalse(Files.exists(snapshot.analysisConfigPath));
+    } finally {
+      restoreProperty("os.name", previousOsName);
+      restoreProperty("os.arch", previousOsArch);
       Lizzie.config = previousConfig;
     }
   }

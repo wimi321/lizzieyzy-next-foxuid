@@ -92,6 +92,17 @@ public final class EngineThreadPolicy {
     environment.put("model", fileState(snapshot.activeWeightPath));
     environment.put("command", snapshot.discovery == null ? "" : snapshot.discovery.sourceCommand);
     environment.put("workingDirectory", snapshot.executionDirectory.toString());
+    org.json.JSONArray additionalConfigs = new org.json.JSONArray();
+    boolean firstConfig = true;
+    for (int i = 2; i + 1 < snapshot.sourceArguments.size(); i++) {
+      String option = snapshot.sourceArguments.get(i);
+      if ("-config".equals(option) || "--config".equals(option)) {
+        Path config = Path.of(snapshot.sourceArguments.get(++i));
+        if (!firstConfig) additionalConfigs.put(fileState(config));
+        firstConfig = false;
+      }
+    }
+    if (!additionalConfigs.isEmpty()) environment.put("additionalConfigs", additionalConfigs);
     return environment;
   }
 
@@ -199,7 +210,7 @@ public final class EngineThreadPolicy {
     if (isRemoteManaged(command, useJavaSsh)) {
       return false;
     }
-    List<String> tokens = Utils.splitCommand(command == null ? "" : command);
+    List<String> tokens = Utils.splitCommand(decodedCommand(command));
     return tokens != null
         && !tokens.isEmpty()
         && !tokens.get(0).contains("://")

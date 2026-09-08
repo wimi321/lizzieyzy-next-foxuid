@@ -349,6 +349,169 @@ class EngineThreadPolicyPersistenceTest {
     }
   }
 
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void missingExplicitRelativeConfigDoesNotUseAnEngineDirectorySubstitute() throws Exception {
+    try (BenchmarkEnvironment env = new BenchmarkEnvironment()) {
+      Path engineDir = Files.createDirectories(root.resolve("other engine"));
+      Path executable = Files.copy(env.engine, engineDir.resolve("katago"));
+      assertTrue(executable.toFile().setExecutable(true));
+      Files.writeString(engineDir.resolve("missing.cfg"), "numSearchThreads=3");
+      EngineData entry = env.entry("Explicit missing cfg");
+      entry.commands =
+          "\""
+              + executable
+              + "\" gtp -config missing.cfg -model \""
+              + root.resolve("model.bin.gz")
+              + "\"";
+      Utils.saveEngineSettings(new ArrayList<>(List.of(entry)));
+      java.io.IOException failure =
+          assertThrows(
+              java.io.IOException.class,
+              () -> {
+                var target = env.capture(entry);
+                KataGoRuntimeHelper.runBenchmarkAndApply(target, null, null);
+              });
+      assertTrue(failure.getMessage().contains("missing.cfg"), failure.getMessage());
+      assertEquals(
+          0, EngineThreadPolicy.recommendedThreads(EngineThreadPolicy.findSavedEntry(entry.id)));
+      assertFalse(Files.exists(engineDir.resolve("argv")));
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void encryptedCustomCommandKeepsConfigLayersOverridesAndWorkingDirectory() throws Exception {
+    try (BenchmarkEnvironment env = new BenchmarkEnvironment()) {
+      Path config = Files.writeString(root.resolve("custom settings.cfg"), "numSearchThreads=2");
+      Path layer = Files.writeString(root.resolve("device settings.cfg"), "nnMaxBatchSize=16");
+      Path model = Files.writeString(root.resolve("custom model.bin.gz"), "fixture model");
+      EngineData entry = env.entry("Custom target");
+      String raw =
+          "\""
+              + env.engine
+              + "\" gtp --config=\""
+              + config
+              + "\" -config \""
+              + layer
+              + "\" --model=\""
+              + model
+              + "\" --override-config=\"numSearchThreads=12,nnMaxBatchSize=24,homeDataDir=custom-home\"";
+      entry.commands = "encryption||" + Utils.doEncrypt2(raw);
+      String savedCommand = entry.commands;
+      Utils.saveEngineSettings(new ArrayList<>(List.of(entry)));
+      KataGoRuntimeHelper.runBenchmarkAndApply(env.capture(entry), null, null);
+      List<String> actual = Files.readAllLines(root.resolve("argv"));
+      assertEquals("benchmark", actual.get(0));
+      assertEquals(
+          List.of(config.toString(), layer.toString()),
+          java.util.stream.IntStream.range(0, actual.size() - 1)
+              .filter(i -> actual.get(i).equals("-config"))
+              .mapToObj(i -> actual.get(i + 1))
+              .toList());
+      assertEquals(model.toString(), actual.get(actual.indexOf("-model") + 1));
+      var overrides =
+          featurecat.lizzie.util.katago.tuning.KataGoCommandSpec.parse(actual).effectiveOverrides();
+      assertFalse(overrides.containsKey("numSearchThreads"));
+      assertEquals("24", overrides.get("nnMaxBatchSize"));
+      assertEquals("custom-home", overrides.get("homeDataDir"));
+      assertEquals(root.toString(), Files.readString(root.resolve("cwd")));
+      EngineData saved = EngineThreadPolicy.findSavedEntry(entry.id);
+      assertEquals(savedCommand, saved.commands);
+      assertEquals(EngineThreadPolicy.Source.CFG, EngineThreadPolicy.source(saved));
+      assertEquals(8, EngineThreadPolicy.recommendedThreads(saved));
+      assertEquals("numSearchThreads=2", Files.readString(config));
+      assertFalse(Files.exists(root.resolve("analysis.cfg")));
+      Files.writeString(layer, "nnMaxBatchSize=32\n# changed environment");
+      assertEquals(
+          EngineThreadPolicy.message("environmentChanged"),
+          EngineThreadPolicy.environmentStatus(saved));
+      assertEquals(8, EngineThreadPolicy.recommendedThreads(saved));
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void unsuccessfulBenchmarkOutputRetainsItsActualFailureReason() throws Exception {
+    try (BenchmarkEnvironment env = new BenchmarkEnvironment()) {
+      EngineData entry = env.entry("Failed output target");
+      Utils.saveEngineSettings(new ArrayList<>(List.of(entry)));
+      KataGoRuntimeHelper.runBenchmarkAndApply(env.capture(entry), null, null);
+      Files.writeString(
+          env.engine,
+          "#!/usr/bin/python3\nprint('ERROR: failed to load model: fixture-device-error')\n");
+      java.io.IOException failure =
+          assertThrows(
+              java.io.IOException.class,
+              () -> KataGoRuntimeHelper.runBenchmarkAndApply(env.capture(entry), null, null));
+      assertTrue(failure.getMessage().contains("fixture-device-error"), failure.getMessage());
+      assertEquals(
+          8, EngineThreadPolicy.recommendedThreads(EngineThreadPolicy.findSavedEntry(entry.id)));
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void completedOpenClTuningMayRejectCandidatesButUnfinishedOrFatalRunsCannotCommit()
+      throws Exception {
+    try (BenchmarkEnvironment env = new BenchmarkEnvironment()) {
+      EngineData entry = env.entry("First OpenCL benchmark");
+      Utils.saveEngineSettings(new ArrayList<>(List.of(entry)));
+      String tuning =
+          "Beginning GPU tuning for NVIDIA GeForce RTX 5070 Ti Laptop GPU modelVersion 15 channels"
+              + " 512\n"
+              + "ERROR: Could not find any configuration that worked\n"
+              + "FP16 tensor core tuning failed for 1x1 convs\n";
+      String recommendation = "numSearchThreads = 12: +82 Elo (recommended)\n";
+      Files.writeString(
+          env.engine,
+          "#!/usr/bin/python3\nprint("
+              + JSONObject.quote(tuning + "Done tuning\n" + recommendation)
+              + ")\n");
+      var result = KataGoRuntimeHelper.runBenchmarkAndApply(env.capture(entry), null, null);
+      assertEquals(12, result.recommendedThreads);
+      for (String failed :
+          List.of(
+              tuning + recommendation,
+              tuning + "ERROR: fatal error\nDone tuning\n" + recommendation,
+              tuning + "Done tuning\nFATAL: uncaught exception\n" + recommendation)) {
+        Files.writeString(
+            env.engine, "#!/usr/bin/python3\nprint(" + JSONObject.quote(failed) + ")\n");
+        assertThrows(
+            java.io.IOException.class,
+            () -> KataGoRuntimeHelper.runBenchmarkAndApply(env.capture(entry), null, null));
+        assertEquals(
+            12, EngineThreadPolicy.recommendedThreads(EngineThreadPolicy.findSavedEntry(entry.id)));
+      }
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void discoveredRelativeCommandRemainsAvailableAndRunsItsSavedInputs() throws Exception {
+    try (BenchmarkEnvironment env = new BenchmarkEnvironment()) {
+      Files.writeString(root.resolve("analysis.cfg"), "numAnalysisThreads=1");
+      EngineData entry = env.entry("Existing relative command");
+      entry.commands =
+          "\""
+              + env.engine
+              + "\" gtp -config gtp.cfg -model \""
+              + root.resolve("model.bin.gz")
+              + "\"";
+      entry.isDefault = true;
+      Utils.saveEngineSettings(new ArrayList<>(List.of(entry)));
+      var discovered = KataGoAutoSetupHelper.inspectLocalSetup();
+      assertEquals("", KataGoRuntimeHelper.benchmarkUnavailableReason(discovered));
+      var target = KataGoRuntimeHelper.captureBenchmarkTarget(discovered, false);
+      KataGoRuntimeHelper.runBenchmarkAndApply(target, null, null);
+      assertEquals(
+          8, EngineThreadPolicy.recommendedThreads(EngineThreadPolicy.findSavedEntry(entry.id)));
+      List<String> arguments = Files.readAllLines(root.resolve("argv"));
+      assertEquals(
+          root.resolve("gtp.cfg").toString(), arguments.get(arguments.indexOf("-config") + 1));
+    }
+  }
+
   private final class BenchmarkEnvironment implements AutoCloseable {
     private final Config previous = Lizzie.config;
     private final featurecat.lizzie.analysis.EngineManager previousManager = Lizzie.engineManager;
@@ -368,6 +531,7 @@ class EngineThreadPolicyPersistenceTest {
               import pathlib,sys
               root=pathlib.Path(__file__).parent
               (root/'argv').write_text('\\n'.join(sys.argv[1:]))
+              (root/'cwd').write_text(str(pathlib.Path.cwd()))
               if (root/'fail').exists():
                   print('controlled failure',flush=True)
                   sys.exit(7)

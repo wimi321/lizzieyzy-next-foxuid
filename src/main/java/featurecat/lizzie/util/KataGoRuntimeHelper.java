@@ -771,6 +771,12 @@ public final class KataGoRuntimeHelper {
       if (target == null) throw new IOException(EngineThreadPolicy.message("selectTarget"));
       SetupSnapshot saved = KataGoAutoSetupHelper.inspectSavedEngine(target);
       validateBenchmarkSnapshot(saved);
+      if (!snapshot.sourceArguments.isEmpty()
+          && (!target.commands.trim().equals(snapshot.discovery.sourceCommand)
+              || !saved.sourceArguments.equals(snapshot.sourceArguments)
+              || !saved.executionDirectory.equals(snapshot.executionDirectory))) {
+        throw new IOException(EngineThreadPolicy.message("environmentChanged"));
+      }
       if (!java.util.Objects.equals(saved.enginePath, snapshot.enginePath)
           || !java.util.Objects.equals(saved.gtpConfigPath, snapshot.gtpConfigPath)
           || !java.util.Objects.equals(saved.activeWeightPath, snapshot.activeWeightPath)) {
@@ -1205,9 +1211,10 @@ public final class KataGoRuntimeHelper {
       if (missingItems.contains(TensorRtInstallStatus.MISSING_COMPANION)) {
         return tensorRtCompanionMissingMessage();
       }
-      return resource(
-          "HumanSlGame.error.tensorRtEngineIncomplete",
-          "AI Coach cannot start because the managed TensorRT engine is incomplete. Open Auto Setup to repair it.");
+    return resource(
+        "HumanSlGame.error.tensorRtEngineIncomplete",
+        "AI Coach cannot start because the managed TensorRT engine is incomplete. Open Auto Setup"
+            + " to repair it.");
     }
 
       private static String resolveOriginalCommand(
@@ -1330,10 +1337,10 @@ public final class KataGoRuntimeHelper {
             public static void requireValidDirectedTensorRtTarget(TensorRtRepairContext context)
                 throws TensorRtTargetInvalidException {
               if (!isValidDirectedTensorRtTarget(context)) {
-                throw new TensorRtTargetInvalidException(
-                    resource(
-                        "AutoSetup.tensorRtTargetStale",
-                        "The failed TensorRT target is no longer valid. Directed repair was cleared."));
+      throw new TensorRtTargetInvalidException(
+          resource(
+              "AutoSetup.tensorRtTargetStale",
+              "The failed TensorRT target is no longer valid. Directed repair was cleared."));
               }
             }
 
@@ -1356,7 +1363,8 @@ public final class KataGoRuntimeHelper {
           String.format(
               resource(
                   "AutoSetup.cudaDriverTooOld",
-                  "NVIDIA driver %s is too old for the CUDA 12.8 package. Update to 528.33 or newer; 570.65 or newer is recommended."),
+                  "NVIDIA driver %s is too old for the CUDA 12.8 package. Update to 528.33 or"
+                      + " newer; 570.65 or newer is recommended."),
               driverVersion == null || driverVersion.trim().isEmpty()
                   ? resource("AutoSetup.cudaDriverUnknown", "unknown")
                   : driverVersion.trim()));
@@ -1401,7 +1409,8 @@ public final class KataGoRuntimeHelper {
       throw new IOException(
           resource(
               "AutoSetup.cudaProbeInputsMissing",
-              "CUDA compatibility could not be verified because the active model or KataGo config is missing."));
+              "CUDA compatibility could not be verified because the active model or KataGo config"
+                  + " is missing."));
     }
     return new CudaCompatibilityProbeInputs(
         modelPath.toAbsolutePath().normalize(), configPath.toAbsolutePath().normalize());
@@ -1496,7 +1505,8 @@ public final class KataGoRuntimeHelper {
           String.format(
                   resource(
                       "AutoSetup.cudaProbeFailed",
-                      "CUDA 12.8 could not complete a real neural-network test with NVIDIA driver %s."),
+                      "CUDA 12.8 could not complete a real neural-network test with NVIDIA driver"
+                          + " %s."),
                   driverVersion == null || driverVersion.trim().isEmpty()
                       ? resource("AutoSetup.cudaDriverUnknown", "unknown")
                       : driverVersion.trim())
@@ -1651,8 +1661,9 @@ public final class KataGoRuntimeHelper {
         throw new IllegalStateException(
             resource(
                 "HumanSlGame.error.tensorRtCompanionMissing",
-                "AI Coach cannot start from TensorRT because its CUDA companion is missing. "
-                    + "Reinstall TensorRT in KataGo Auto Setup, or configure a bundled CUDA engine and try again."));
+                "AI Coach cannot start from TensorRT because its CUDA companion is missing."
+                    + " Reinstall TensorRT in KataGo Auto Setup, or configure a bundled CUDA engine"
+                    + " and try again."));
       }
       if (!launchCommand.isEmpty()) {
         launchCommand.set(0, companion.toString());
@@ -2221,20 +2232,22 @@ public final class KataGoRuntimeHelper {
       detail =
           resource(
               "AutoSetup.tensorRtNeedNvidia",
-              "TensorRT is optional for RTX 30 series and earlier in the unified Windows NVIDIA package. "
-                  + "RTX 40/50 should use CUDA.");
+              "TensorRT is optional for RTX 30 series and earlier in the unified Windows NVIDIA"
+                  + " package. RTX 40/50 should use CUDA.");
     } else if (enginePresent && runtimeReady && engineCurrent && !companionReady) {
       detail =
           resource(
               "HumanSlGame.error.tensorRtCompanionMissing",
-              "The TensorRT engine is current, but its verified CUDA 12.8/cuDNN 9 HumanSL companion is missing. Click Install TensorRT acceleration to repair it.");
+              "The TensorRT engine is current, but its verified CUDA 12.8/cuDNN 9 HumanSL companion"
+                  + " is missing. Click Install TensorRT acceleration to repair it.");
     } else if (enginePresent && runtimeReady && !engineCurrent) {
       detail =
           String.format(
               Locale.ROOT,
               resource(
                   "AutoSetup.tensorRtEngineUpgradeAvailable",
-                  "The TensorRT runtime is ready, but its KataGo engine is outdated. Upgrade the engine only (%s); existing runtime files will be reused."),
+                  "The TensorRT runtime is ready, but its KataGo engine is outdated. Upgrade the"
+                      + " engine only (%s); existing runtime files will be reused."),
               formatBytes(spec.katagoSizeBytes));
     } else if (installed) {
       detail =
@@ -2242,12 +2255,14 @@ public final class KataGoRuntimeHelper {
               ? resource("AutoSetup.tensorRtEnabled", "TensorRT acceleration is enabled.")
               : resource(
                   "AutoSetup.tensorRtInstalledNotSelected",
-                  "TensorRT acceleration is installed. Click Enable TensorRT acceleration to use it.");
+                  "TensorRT acceleration is installed. Click Enable TensorRT acceleration to use"
+                      + " it.");
     } else if (enginePresent) {
       detail =
           resource(
               "AutoSetup.tensorRtDownloadedRuntimeMissing",
-              "TensorRT engine files are present, but runtime files are incomplete. Click Install TensorRT acceleration to finish setup.");
+              "TensorRT engine files are present, but runtime files are incomplete. Click Install"
+                  + " TensorRT acceleration to finish setup.");
     } else {
       detail =
           String.format(
@@ -2367,7 +2382,8 @@ public final class KataGoRuntimeHelper {
       throw new IOException(
           resource(
               "AutoSetup.tensorRtRuntimeMissing",
-              "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT acceleration, or switch back to CUDA/OpenCL."));
+              "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT"
+                  + " acceleration, or switch back to CUDA/OpenCL."));
     }
     Path companionSource =
         resolveTensorRtInstallCompanionSource(snapshot, spec.targetEnginePath);
@@ -2471,13 +2487,15 @@ public final class KataGoRuntimeHelper {
       throw new IOException(
           resource(
               "AutoSetup.tensorRtRuntimeMissing",
-              "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT acceleration, or switch back to CUDA/OpenCL."));
+              "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT"
+                  + " acceleration, or switch back to CUDA/OpenCL."));
     }
     if (!isCurrentTensorRtEngineBinary(spec.targetEnginePath)) {
       throw new IOException(
           resource(
               "AutoSetup.tensorRtEngineUpgradeRequired",
-              "The installed TensorRT engine is outdated. Upgrade it in KataGo Auto Setup before using Transformer weights; existing runtime files will be reused."));
+              "The installed TensorRT engine is outdated. Upgrade it in KataGo Auto Setup before"
+                  + " using Transformer weights; existing runtime files will be reused."));
     }
     Path runtimeDir = getNvidiaRuntimeDir();
     Files.createDirectories(runtimeDir);
@@ -2763,7 +2781,8 @@ public final class KataGoRuntimeHelper {
   private static String tensorRtInstallAlreadyRunningMessage() {
     return resource(
         "AutoSetup.tensorRtInstallAlreadyRunning",
-        "TensorRT installation is already running in another LizzieYzy Next window. Please wait for it to finish.");
+        "TensorRT installation is already running in another LizzieYzy Next window. Please wait for"
+            + " it to finish.");
   }
 
   private static String tensorRtCompanionMissingMessage() {
@@ -2822,7 +2841,7 @@ public final class KataGoRuntimeHelper {
         runBenchmarkProcess(snapshot, buildBenchmarkCommand(snapshot), listener, session, 0, false);
     BenchmarkResult result = parseBenchmarkOutput(output);
     if (result == null) {
-      throw benchmarkFailedException();
+      throw benchmarkFailedException(output);
     }
     return withResolvedBenchmarkBackend(result, snapshot);
   }
@@ -2896,11 +2915,32 @@ public final class KataGoRuntimeHelper {
     List<String> executable = List.of(snapshot.enginePath.toString());
     if (EngineThreadPolicy.isRemoteManaged(executable)
         || EngineThreadPolicy.isRemoteManaged(source, false)) {
-      return resource("EngineThreadPolicy.remoteManaged", "Search threads are managed by the remote server.");
+      return resource(
+          "EngineThreadPolicy.remoteManaged", "Search threads are managed by the remote server.");
     }
     if ((!source.isEmpty() && !EngineThreadPolicy.isLocalKataGoCommand(source, false))
         || !KataGoAutoSetupHelper.looksLikeKataGoExecutable(snapshot.enginePath.toString())) {
-      return resource("EngineThreadPolicy.unknownBenchmarkTarget", "Cannot identify this target as a local KataGo engine.");
+      return resource(
+          "EngineThreadPolicy.unknownBenchmarkTarget",
+          "Cannot identify this target as a local KataGo engine.");
+    }
+    try {
+      List<String> inputArguments = benchmarkInputArguments(snapshot);
+      if (!Files.isRegularFile(snapshot.enginePath)) {
+        return String.format(
+            EngineThreadPolicy.message("benchmarkInputUnavailable"), snapshot.enginePath);
+      }
+      for (int i = 2; i + 1 < inputArguments.size(); i++) {
+        String option = inputArguments.get(i);
+        String value = inputArguments.get(++i);
+        if (("-config".equals(option) || "-model".equals(option))
+            && !Files.isRegularFile(Path.of(value))) {
+          return String.format(EngineThreadPolicy.message("benchmarkInputUnavailable"), value);
+        }
+      }
+    } catch (IllegalArgumentException invalid) {
+      return String.format(
+          EngineThreadPolicy.message("invalidBenchmarkCommand"), invalid.getMessage());
     }
     return "";
   }
@@ -2909,20 +2949,6 @@ public final class KataGoRuntimeHelper {
     String unavailableReason = benchmarkUnavailableReason(snapshot);
     if (!unavailableReason.isEmpty()) {
       throw new IOException(unavailableReason);
-    }
-    if (snapshot == null
-        || snapshot.enginePath == null
-        || !Files.isRegularFile(snapshot.enginePath)) {
-      throw new IOException(
-          resource("AutoSetup.missingEngine", "No local KataGo binary was found."));
-    }
-    if (snapshot.gtpConfigPath == null || !Files.isRegularFile(snapshot.gtpConfigPath)) {
-      throw new IOException(
-          resource("AutoSetup.missingConfig", "No local KataGo config file was found."));
-    }
-    if (snapshot.activeWeightPath == null || !Files.isRegularFile(snapshot.activeWeightPath)) {
-      throw new IOException(
-          resource("AutoSetup.missingWeight", "No local KataGo weight file was found."));
     }
   }
 
@@ -2950,6 +2976,8 @@ public final class KataGoRuntimeHelper {
 
     ProcessBuilder processBuilder = new ProcessBuilder(command);
     processBuilder.redirectErrorStream(true);
+    CommandLaunchHelper.configureProcessBuilder(
+        processBuilder, CommandLaunchHelper.prepare(command));
     configureBundledProcessBuilder(processBuilder, snapshot.enginePath);
     processBuilder.directory(snapshot.executionDirectory.toFile());
 
@@ -3057,6 +3085,13 @@ public final class KataGoRuntimeHelper {
         resource("AutoSetup.benchmarkFailed", "Unable to run KataGo benchmark right now."));
   }
 
+  private static IOException benchmarkFailedException(String output) {
+    return new IOException(
+        resource("AutoSetup.benchmarkFailed", "Unable to run KataGo benchmark right now.")
+            + "\n"
+            + output.substring(Math.max(0, output.length() - 2000)).trim());
+  }
+
   private static IOException benchmarkIsolationLostException() {
     return new IOException(
         "KataGo tuning stopped because another engine resumed compute during the benchmark.");
@@ -3070,13 +3105,7 @@ public final class KataGoRuntimeHelper {
 
   static List<String> buildBenchmarkCommand(SetupSnapshot snapshot) {
     int benchmarkTime = resolveBenchmarkTimeSeconds();
-    List<String> command = new ArrayList<String>();
-    command.add(snapshot.enginePath.toAbsolutePath().normalize().toString());
-    command.add("benchmark");
-    command.add("-config");
-    command.add(snapshot.gtpConfigPath.toAbsolutePath().normalize().toString());
-    command.add("-model");
-    command.add(snapshot.activeWeightPath.toAbsolutePath().normalize().toString());
+    List<String> command = benchmarkInputArguments(snapshot);
     command.add("-s");
     command.add("-n");
     command.add(String.valueOf(BENCHMARK_POSITIONS));
@@ -3110,8 +3139,7 @@ public final class KataGoRuntimeHelper {
       String key = entry.getKey();
       if (!isNumSearchThreadsOverride(key)
           && !"numAnalysisThreads".equalsIgnoreCase(key)
-          && !"numSearchThreadsPerAnalysisThread".equalsIgnoreCase(key)
-          && !"homeDataDir".equalsIgnoreCase(key)) {
+          && !"numSearchThreadsPerAnalysisThread".equalsIgnoreCase(key)) {
         inherited.put(key, entry.getValue());
       }
     }
@@ -3130,13 +3158,7 @@ public final class KataGoRuntimeHelper {
     if (explicitThreads < 0 || positions <= 0 || visits <= 0) {
       throw new IllegalArgumentException("invalid layered benchmark limits");
     }
-    List<String> command = new ArrayList<String>();
-    command.add(snapshot.enginePath.toAbsolutePath().normalize().toString());
-    command.add("benchmark");
-    command.add("-config");
-    command.add(snapshot.gtpConfigPath.toAbsolutePath().normalize().toString());
-    command.add("-model");
-    command.add(snapshot.activeWeightPath.toAbsolutePath().normalize().toString());
+    List<String> command = benchmarkInputArguments(snapshot);
     if (explicitThreads > 0) {
       command.add("-t");
       command.add(String.valueOf(explicitThreads));
@@ -3180,13 +3202,75 @@ public final class KataGoRuntimeHelper {
   }
 
   private static List<String> snapshotSourceCommand(SetupSnapshot snapshot) {
+    if (snapshot != null && !snapshot.sourceArguments.isEmpty()) return snapshot.sourceArguments;
     if (snapshot == null
         || snapshot.discovery == null
         || Utils.isBlank(snapshot.discovery.sourceCommand)) {
       return List.of();
     }
     List<String> source = Utils.splitCommand(snapshot.discovery.sourceCommand);
-    return source == null ? List.of() : source;
+    return source == null ? List.of() : CommandLaunchHelper.prepare(source).getCommandParts();
+  }
+
+  private static List<String> benchmarkInputArguments(SetupSnapshot snapshot) {
+    List<String> result = new ArrayList<>();
+    result.add(snapshot.enginePath.toAbsolutePath().normalize().toString());
+    result.add("benchmark");
+    List<String> source = snapshotSourceCommand(snapshot);
+    if (source.isEmpty()) {
+      if (snapshot.gtpConfigPath == null) throw new IllegalArgumentException("-config");
+      if (snapshot.activeWeightPath == null) throw new IllegalArgumentException("-model");
+      result.addAll(
+          List.of(
+              "-config",
+              snapshot.gtpConfigPath.toString(),
+              "-model",
+              snapshot.activeWeightPath.toString()));
+      return result;
+    }
+    if (source.size() < 2 || !"gtp".equals(source.get(1))) {
+      throw new IllegalArgumentException(source.size() < 2 ? "gtp" : source.get(1));
+    }
+    boolean model = false;
+    boolean config = false;
+    for (int i = 2; i < source.size(); i++) {
+      String option = source.get(i);
+      if ("-quit-without-waiting".equals(option) || "--quit-without-waiting".equals(option))
+        continue;
+      if (i + 1 >= source.size() || source.get(i + 1).isBlank()) {
+        throw new IllegalArgumentException(option);
+      }
+      String value = source.get(++i);
+      switch (option) {
+        case "-model":
+        case "--model":
+        case "-weights":
+        case "--weights":
+          if (model) throw new IllegalArgumentException(option);
+          model = true;
+          result.addAll(List.of("-model", value));
+          break;
+        case "-config":
+        case "--config":
+          config = true;
+          result.addAll(List.of("-config", value));
+          break;
+        case "-override-config":
+        case "--override-config":
+        case "-human-model":
+        case "--human-model":
+          break;
+        case "-override-version":
+        case "--override-version":
+          result.addAll(List.of(option, value));
+          break;
+        default:
+          throw new IllegalArgumentException(option);
+      }
+    }
+    if (!config) throw new IllegalArgumentException("-config");
+    if (!model) throw new IllegalArgumentException("-model");
+    return result;
   }
 
   private static KataGoBenchmarkObservation runLayeredBenchmarkCell(
@@ -3210,7 +3294,7 @@ public final class KataGoRuntimeHelper {
             .recommendedMetric()
             .filter(KataGoBenchmarkObservation.ThreadMetrics::validForThroughputSelection)
             .isEmpty()) {
-      throw benchmarkFailedException();
+      throw benchmarkFailedException(output);
     }
     if (candidate.devices().contains(KataGoTuningCandidate.METAL_GPU)
         && !observation.mpsGraphInitialized()) {
@@ -3512,11 +3596,11 @@ public final class KataGoRuntimeHelper {
             snapshot, buildBenchmarkCommand(snapshot), listener, activeSession, 0, true);
     BenchmarkResult parsed = parseBenchmarkOutput(output);
     if (parsed == null) {
-      throw benchmarkFailedException();
+      throw benchmarkFailedException(output);
     }
     KataGoBenchmarkObservation observation = KataGoBenchmarkParser.parse(output, 0);
     if (observation.failureDetected()) {
-      throw benchmarkFailedException();
+      throw benchmarkFailedException(output);
     }
     KataGoTuningProfile.Metrics metrics =
         observation
@@ -3745,7 +3829,8 @@ public final class KataGoRuntimeHelper {
             .filter(KataGoExperimentalTuningSelector.Aggregate::stable)
             .isEmpty()) {
       throw new IOException(
-          "The single-GPU baseline stability check was inconclusive; keeping the previous profile.");
+          "The single-GPU baseline stability check was inconclusive; keeping the previous"
+              + " profile.");
     }
     requireLayeredBenchmarkComputeIsolation();
     KataGoTuningCandidate candidate = selection.candidate();
@@ -4800,10 +4885,16 @@ public final class KataGoRuntimeHelper {
         engine.engineCommand(), engine.useRemoteCompute, engine.useJavaSSH, engine.isSSH)) {
       return true;
     }
-    String reason = EngineThreadPolicy.isRemoteManaged(engine) || engine.isSSH
-        ? resource("EngineThreadPolicy.remoteManaged", "Search threads are managed by the remote server.")
-        : resource("EngineThreadPolicy.unknownBenchmarkTarget", "Cannot identify this target as a local KataGo engine.");
-    String message = resource("AutoSetup.benchmarkTitle", "KataGo performance optimization") + ": " + reason;
+    String reason =
+        EngineThreadPolicy.isRemoteManaged(engine) || engine.isSSH
+            ? resource(
+                "EngineThreadPolicy.remoteManaged",
+                "Search threads are managed by the remote server.")
+            : resource(
+                "EngineThreadPolicy.unknownBenchmarkTarget",
+                "Cannot identify this target as a local KataGo engine.");
+    String message =
+        resource("AutoSetup.benchmarkTitle", "KataGo performance optimization") + ": " + reason;
     System.out.println(message);
     SwingUtilities.invokeLater(() -> {
       if (Lizzie.gtpConsole != null) {
@@ -5312,6 +5403,7 @@ public final class KataGoRuntimeHelper {
     if (command == null || command.isEmpty()) {
       return "";
     }
+    String configLayers = additionalConfigSemantics(command);
     try {
       Map<String, String> canonical = new TreeMap<String, String>();
       for (Map.Entry<String, String> entry :
@@ -5324,9 +5416,9 @@ public final class KataGoRuntimeHelper {
       for (Map.Entry<String, String> entry : canonical.entrySet()) {
         result.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
       }
-      return result.toString();
+      return result.append(configLayers).toString();
     } catch (RuntimeException e) {
-      return "";
+      return configLayers;
     }
   }
 
@@ -5347,11 +5439,43 @@ public final class KataGoRuntimeHelper {
       } catch (RuntimeException ignored) {
       }
     }
+    result.append(additionalConfigSemantics(command));
     result
         .append("benchmarkMode=officialThreads\n")
         .append("benchmarkTimeSeconds=")
         .append(resolveBenchmarkTimeSeconds())
         .append('\n');
+    return result.toString();
+  }
+
+  private static String additionalConfigSemantics(List<String> command) {
+    if (command == null) return "";
+    StringBuilder result = new StringBuilder();
+    boolean first = true;
+    for (int i = 2; i + 1 < command.size(); i++) {
+      String option = command.get(i);
+      if (!"-config".equals(option) && !"--config".equals(option)) continue;
+      Path path = Path.of(command.get(++i)).toAbsolutePath().normalize();
+      if (first) {
+        first = false;
+        continue;
+      }
+      try {
+        java.nio.file.attribute.BasicFileAttributes attributes =
+            Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes.class);
+        if (!attributes.isRegularFile()) throw new IOException(path.toString());
+        result
+            .append("configLayer=")
+            .append(path)
+            .append('|')
+            .append(attributes.size())
+            .append('|')
+            .append(attributes.lastModifiedTime().toMillis())
+            .append('\n');
+      } catch (IOException unavailable) {
+        throw new java.io.UncheckedIOException(unavailable);
+      }
+    }
     return result.toString();
   }
 
@@ -5658,9 +5782,6 @@ public final class KataGoRuntimeHelper {
 
   private static boolean isAppleSiliconOptimizationEligible(SetupSnapshot snapshot) {
     if (!isAppleSiliconHost() || !benchmarkUnavailableReason(snapshot).isEmpty()) {
-      return false;
-    }
-    if (!snapshot.hasEngine() || !snapshot.hasConfigs() || !snapshot.hasWeight()) {
       return false;
     }
     if (!Config.isBundledKataGoExecutable(snapshot.enginePath)) {
@@ -5999,7 +6120,8 @@ public final class KataGoRuntimeHelper {
             status != null && isTensorRtBackend(resolveNvidiaBackend(status.enginePath))
                 ? resource(
                     "AutoSetup.tensorRtRuntimeMissing",
-                    "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT acceleration.")
+                    "TensorRT runtime is not installed. Open KataGo Auto Setup and install TensorRT"
+                        + " acceleration.")
                 : resource(
                     "AutoSetup.nvidiaRuntimeInstallFailed",
                     "Bundled NVIDIA files are incomplete. Please reinstall the NVIDIA package."));
@@ -6241,7 +6363,8 @@ public final class KataGoRuntimeHelper {
     if (gpuDetection.recommendation == NvidiaGpuDetector.TensorRtRecommendation.UNKNOWN) {
       return resource(
           "AutoSetup.gpuUnknownTensorRt",
-          "Could not confirm Compute Capability. You can try manually, but CUDA/OpenCL is safer if startup fails.");
+          "Could not confirm Compute Capability. You can try manually, but CUDA/OpenCL is safer if"
+              + " startup fails.");
     }
     return resource(
         "AutoSetup.tensorRtGpuHint",
