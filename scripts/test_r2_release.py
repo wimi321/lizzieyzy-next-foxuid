@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import io
 import json
 import sys
 import unittest
@@ -55,6 +57,89 @@ def release():
 
 
 class R2ReleaseTest(unittest.TestCase):
+    def test_humansl_stream_requires_exact_size_and_digest(self):
+        data = b"pinned-model"
+        session = mock.Mock()
+        response = mock.MagicMock()
+        session.get.return_value = response
+        response.__enter__.return_value = response
+        response.status_code = 200
+        with mock.patch.object(r2_release, "HUMAN_SL_SIZE_BYTES", len(data)), \
+             mock.patch.object(r2_release, "HUMAN_SL_SHA256", hashlib.sha256(data).hexdigest()):
+            for received in (data, data[:-1], data + b"x", b"X" * len(data)):
+                response.iter_content.return_value = [received]
+                output = io.BytesIO()
+                if received == data:
+                    r2_release.receive_humansl(session, "https://example/model", output)
+                    self.assertEqual(data, output.getvalue())
+                else:
+                    with self.assertRaises(r2_release.ReleaseError):
+                        r2_release.receive_humansl(session, "https://example/model", output)
+            response.status_code = 503
+            with self.assertRaises(r2_release.ReleaseError):
+                r2_release.receive_humansl(session, "https://example/model", io.BytesIO())
+
+    def test_humansl_reservation_rejects_release_that_would_fill_bucket(self):
+        source = release()
+        source["assets"][0]["size"] = r2_release.R2_SIZE_LIMIT - 12_000
+        with self.assertRaises(r2_release.ReleaseError):
+            r2_release.select_r2_assets(source, r2_release.DEFAULT_PUBLIC_BASE)
+
+    def test_model_publisher_verifies_before_upload_and_reuses_existing_object(self):
+        args = r2_release.parser().parse_args(["mirror-humansl"])
+        client = mock.Mock()
+        client.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Size": 7_800_000_000}]}]
+        credentials = {name: "test-only" for name in (
+            "CLOUDFLARE_R2_ACCOUNT_ID", "CLOUDFLARE_R2_ACCESS_KEY_ID",
+            "CLOUDFLARE_R2_SECRET_ACCESS_KEY")}
+        with mock.patch.dict("os.environ", credentials), \
+             mock.patch.dict(sys.modules, {"requests": mock.MagicMock()}), \
+             mock.patch.object(r2_release, "r2_client", return_value=client), \
+             mock.patch.object(r2_release, "verify_combined_storage_budget") as budget, \
+             mock.patch.object(r2_release, "object_matches", side_effect=[False, True]) as matches, \
+             mock.patch.object(r2_release, "receive_humansl") as receive, \
+             mock.patch.object(r2_release, "_verify_public_object"):
+            r2_release.mirror_humansl(args)
+            self.assertEqual(2, receive.call_count)
+            self.assertEqual(r2_release.HUMAN_SL_KEY, client.put_object.call_args.kwargs["Key"])
+            self.assertEqual(r2_release.HUMAN_SL_SIZE_BYTES,
+                             client.put_object.call_args.kwargs["ContentLength"])
+            budget.assert_called_with(client, args.bucket, 7_800_000_000)
+            client.reset_mock()
+            matches.side_effect = [True, True]
+            r2_release.mirror_humansl(args)
+            client.put_object.assert_not_called()
+            matches.side_effect = [False]
+            receive.side_effect = r2_release.ReleaseError("checksum failure")
+            with self.assertRaises(r2_release.ReleaseError):
+                r2_release.mirror_humansl(args)
+            client.put_object.assert_not_called()
+            client.delete_objects.assert_not_called()
+
+    def test_storage_budget_counts_persistent_objects_across_pages_without_double_counting(self):
+        client = mock.Mock()
+        pages = [
+            {"Contents": [{"Key": "releases/old/large.zip", "Size": 8_000_000_000}],
+             "IsTruncated": True, "NextContinuationToken": "next"},
+            {"Contents": [
+                {"Key": "models/humansl/b18c384nbt-humanv0.bin.gz",
+                 "Size": r2_release.HUMAN_SL_SIZE_BYTES},
+                {"Key": "channels/stable/catalog.json", "Size": 1000}]}]
+        client.list_objects_v2.side_effect = pages
+        available = r2_release.R2_SIZE_LIMIT - r2_release.HUMAN_SL_SIZE_BYTES - 1000
+        r2_release.verify_combined_storage_budget(client, "bucket", available)
+        client.list_objects_v2.assert_called_with(Bucket="bucket", ContinuationToken="next")
+        client.list_objects_v2.side_effect = pages
+        with self.assertRaises(r2_release.ReleaseError):
+            r2_release.verify_combined_storage_budget(client, "bucket", available + 1)
+
+    def test_storage_budget_reserves_model_before_first_upload(self):
+        client = mock.Mock()
+        client.list_objects_v2.return_value = {"Contents": []}
+        with self.assertRaises(r2_release.ReleaseError):
+            r2_release.verify_combined_storage_budget(client, "bucket", r2_release.R2_SIZE_LIMIT)
+
     def test_whitelist_is_exact_and_excludes_installers_linux_and_older_amd(self):
         selected = r2_release.select_r2_assets(release(), r2_release.DEFAULT_PUBLIC_BASE)
 

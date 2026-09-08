@@ -1502,6 +1502,98 @@ public class KataGoAutoSetupHelperTest {
   }
 
   @Test
+  void humanSlDownloadDefaultsToMirrorAndKeepsExplicitOverrideIsolated() throws Exception {
+    String previous = System.getProperty("lizzie.humansl.model.url");
+    try {
+      System.clearProperty("lizzie.humansl.model.url");
+      assertEquals(
+          java.util.Arrays.asList(
+              "https://download.goagent.top/models/humansl/b18c384nbt-humanv0.bin.gz",
+              KataGoAutoSetupHelper.HUMAN_SL_MODEL_ORIGIN_URL),
+          KataGoAutoSetupHelper.humanSlModelDownloadUrls());
+      System.setProperty("lizzie.humansl.model.url", "http://127.0.0.1/model");
+      assertEquals(
+          java.util.Collections.singletonList("http://127.0.0.1/model"),
+          KataGoAutoSetupHelper.humanSlModelDownloadUrls());
+    } finally {
+      restoreProperty("lizzie.humansl.model.url", previous);
+    }
+  }
+
+  @Test
+  void humanSlFallsBackAfterHttpFailureOrCorruptMirrorAndReusesVerifiedModel() throws Exception {
+    byte[] bytes = repeatedBytes(4096, (byte) 7);
+    try (ErrorFixtureServer unavailable = ErrorFixtureServer.start();
+        FixtureServer corrupt = FixtureServer.start(repeatedBytes(4096, (byte) 8));
+        FixtureServer shortFile = FixtureServer.start(repeatedBytes(128, (byte) 7));
+        FixtureServer origin = FixtureServer.start(bytes)) {
+      for (String mirror :
+          java.util.Arrays.asList(unavailable.url(), corrupt.url(), shortFile.url())) {
+        Path root = Files.createTempDirectory("humansl-mirror-fallback");
+        withUserDirAndConfig(
+            root,
+            () ->
+                withHumanSlDownloadProperties(
+                    origin.url(),
+                    sha256(bytes),
+                    bytes.length,
+                    () -> {
+                      Path downloaded =
+                          KataGoAutoSetupHelper.downloadHumanSlModel(
+                              null, null, java.util.Arrays.asList(mirror, origin.url()));
+                      assertEquals(sha256(bytes), sha256(Files.readAllBytes(downloaded)));
+                      assertFalse(
+                          Files.exists(
+                              downloaded.resolveSibling(downloaded.getFileName() + ".part")));
+                      assertEquals(
+                          downloaded.toString(),
+                          Lizzie.config.uiConfig.optString("katago-human-sl-model-path"));
+                      assertEquals(
+                          downloaded,
+                          KataGoAutoSetupHelper.downloadHumanSlModel(
+                              null, null, java.util.Collections.singletonList(unavailable.url())));
+                    }));
+      }
+    }
+  }
+
+  @Test
+  void cancellingHumanSlDownloadDoesNotStartFallbackOrInstallPartialFile() throws Exception {
+    byte[] bytes = repeatedBytes(32768, (byte) 7);
+    Path root = Files.createTempDirectory("humansl-mirror-cancel");
+    try (FixtureServer mirror = FixtureServer.start(bytes)) {
+      withUserDirAndConfig(
+          root,
+          () ->
+              withHumanSlDownloadProperties(
+                  mirror.url(),
+                  sha256(bytes),
+                  bytes.length,
+                  () -> {
+                    KataGoAutoSetupHelper.DownloadSession session =
+                        new KataGoAutoSetupHelper.DownloadSession();
+                    assertThrows(
+                        KataGoAutoSetupHelper.DownloadCancelledException.class,
+                        () ->
+                            KataGoAutoSetupHelper.downloadHumanSlModel(
+                                (name, downloaded, total) -> session.cancel(),
+                                session,
+                                java.util.Arrays.asList(
+                                    mirror.url(), "invalid fallback must not be accessed")));
+                    assertFalse(
+                        Files.exists(
+                            root.resolve("human-sl-models")
+                                .resolve(KataGoAutoSetupHelper.HUMAN_SL_MODEL_FILE_NAME)));
+                    assertFalse(
+                        Files.exists(
+                            root.resolve("human-sl-models")
+                                .resolve(
+                                    KataGoAutoSetupHelper.HUMAN_SL_MODEL_FILE_NAME + ".part")));
+                  }));
+    }
+  }
+
+  @Test
   void inspectHumanSlModelRejectsTruncatedOfficialModel() throws Exception {
     Path tempRoot = Files.createTempDirectory("katago-humansl-truncated");
     Files.createDirectories(tempRoot.resolve("human-sl-models"));
@@ -1649,7 +1741,11 @@ public class KataGoAutoSetupHelperTest {
           ArrayList<EngineData> engines = new ArrayList<>();
           EngineData autoSetupEngine =
               engineData(
-                  KataGoAutoSetupHelper.getAutoSetupEngineName(), engine, gtpConfig, weight, false);
+                  KataGoAutoSetupHelper.getAutoSetupEngineName(),
+                  engine,
+                  gtpConfig,
+                  weight,
+                  false);
           autoSetupEngine.komi = 6.5F;
           autoSetupEngine.preload = true;
           autoSetupEngine.width = 13;
@@ -1695,11 +1791,7 @@ public class KataGoAutoSetupHelperTest {
         () -> {
           EngineData existing =
               engineData(
-                  KataGoAutoSetupHelper.getAutoSetupEngineName(),
-                  engine,
-                  gtpConfig,
-                  weight,
-                  false);
+                  KataGoAutoSetupHelper.getAutoSetupEngineName(), engine, gtpConfig, weight, false);
           Utils.saveEngineSettings(new ArrayList<>(List.of(existing)));
           Lizzie.config.uiConfig.remove("autoload-default");
           Lizzie.config.uiConfig.remove("autoload-empty");
