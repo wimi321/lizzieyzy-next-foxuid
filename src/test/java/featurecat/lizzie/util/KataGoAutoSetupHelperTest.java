@@ -1741,11 +1741,7 @@ public class KataGoAutoSetupHelperTest {
           ArrayList<EngineData> engines = new ArrayList<>();
           EngineData autoSetupEngine =
               engineData(
-                  KataGoAutoSetupHelper.getAutoSetupEngineName(),
-                  engine,
-                  gtpConfig,
-                  weight,
-                  false);
+                  KataGoAutoSetupHelper.getAutoSetupEngineName(), engine, gtpConfig, weight, false);
           autoSetupEngine.komi = 6.5F;
           autoSetupEngine.preload = true;
           autoSetupEngine.width = 13;
@@ -1791,7 +1787,11 @@ public class KataGoAutoSetupHelperTest {
         () -> {
           EngineData existing =
               engineData(
-                  KataGoAutoSetupHelper.getAutoSetupEngineName(), engine, gtpConfig, weight, false);
+                  KataGoAutoSetupHelper.getAutoSetupEngineName(),
+                  engine,
+                  gtpConfig,
+                  weight,
+                  false);
           Utils.saveEngineSettings(new ArrayList<>(List.of(existing)));
           Lizzie.config.uiConfig.remove("autoload-default");
           Lizzie.config.uiConfig.remove("autoload-empty");
