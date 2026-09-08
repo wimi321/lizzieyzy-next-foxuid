@@ -2844,20 +2844,7 @@ public final class KataGoAutoSetupHelper {
   }
 
   private static boolean isExcludedEngineCommand(String command, boolean useJavaSsh) {
-    if (useJavaSsh || Utils.isBlank(command)) {
-      return true;
-    }
-    String normalized = command.trim().toLowerCase(Locale.ROOT);
-    if (normalized.startsWith("remote-compute://")
-        || normalized.startsWith("ws://")
-        || normalized.startsWith("wss://")
-        || normalized.startsWith("http://")
-        || normalized.startsWith("https://")
-        || normalized.startsWith("ssh ")) {
-      return true;
-    }
-    List<String> parts = Utils.splitCommand(command);
-    return parts == null || parts.isEmpty() || Utils.isJavaCommand(parts.get(0));
+    return !EngineThreadPolicy.isLocalKataGoCommand(command, useJavaSsh);
   }
 
   private static int findCommandModeIndex(List<String> parts) {

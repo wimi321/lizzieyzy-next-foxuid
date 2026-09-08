@@ -5,6 +5,7 @@ import static java.lang.Math.round;
 import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.analysis.CaptureTsumeGo;
+import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.MoveData;
 import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.gui.HtmlMessage;
@@ -201,6 +202,29 @@ public class Utils {
       return trimmed;
     }
     return String.valueOf(getRecommendedKataGoThreads());
+  }
+
+  /** Saves the legacy global KataGo thread controls for a local engine target. */
+  public static void saveLegacyKataGoThreadSettings(
+      Leelaz target, boolean editThreads, boolean autoLoadThreads, String threadsText) {
+    if (EngineThreadPolicy.isRemoteManaged(target)) {
+      return;
+    }
+
+    Lizzie.config.chkKataEngineThreads = editThreads;
+    Lizzie.config.autoLoadKataEngineThreads = autoLoadThreads;
+    String threadsValue = threadsText;
+    if (editThreads || autoLoadThreads) {
+      threadsValue = resolveKataGoThreadsValue(threadsValue);
+    }
+    Lizzie.config.txtKataEngineThreads = threadsValue;
+    Lizzie.config.uiConfig.put("txt-kata-engine-threads", threadsValue);
+    Lizzie.config.uiConfig.put("autoload-kata-engine-threads", autoLoadThreads);
+    Lizzie.config.uiConfig.put("chk-kata-engine-threads", editThreads);
+
+    if (editThreads) {
+      target.sendCommand("kata-set-param numSearchThreads " + threadsValue);
+    }
   }
 
   public static String resolveKataGoThreadsForEngineLoad() {

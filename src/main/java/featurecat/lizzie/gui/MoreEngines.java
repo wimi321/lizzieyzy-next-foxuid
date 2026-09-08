@@ -5,6 +5,7 @@ import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationProbe;
 import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationSchema;
+import featurecat.lizzie.util.EngineThreadPolicy;
 import featurecat.lizzie.util.Utils;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -44,6 +45,8 @@ import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellRenderer;
@@ -69,6 +72,7 @@ public class MoreEngines extends JPanel {
   JTextArea command;
   JFontTextField txtName;
   JFontLabel engineName;
+  JFontLabel remoteManagedThreads;
   JFontTextField txtInitialCommand;
   JFontTextField txtWidth;
   JFontTextField txtHeight;
@@ -192,6 +196,10 @@ public class MoreEngines extends JPanel {
     JFontLabel lblWidth = new JFontLabel(this.resourceBundle.getString("MoreEngines.lblWidth"));
     JFontLabel lblHeight = new JFontLabel(this.resourceBundle.getString("MoreEngines.lblHeight"));
     JFontLabel lblKomi = new JFontLabel(this.resourceBundle.getString("MoreEngines.lblKomi"));
+    this.remoteManagedThreads =
+        new JFontLabel(this.resourceBundle.getString("EngineThreadPolicy.remoteManaged"));
+    this.remoteManagedThreads.setForeground(Color.BLUE);
+    this.remoteManagedThreads.setVisible(false);
     this.txtWidth = new JFontTextField();
     this.txtHeight = new JFontTextField();
     this.add = new JFontButton(this.resourceBundle.getString("MoreEngines.add"));
@@ -232,6 +240,26 @@ public class MoreEngines extends JPanel {
     rdoNone = new JFontRadioButton(resourceBundle.getString("ChooseMoreEngine.lblrdoNone"));
     this.chkRemoteEngine =
         new JFontCheckBox(this.resourceBundle.getString("MoreEngines.chkRemoteEngine"));
+    this.command
+        .getDocument()
+        .addDocumentListener(
+            new DocumentListener() {
+              @Override
+              public void insertUpdate(DocumentEvent event) {
+                updateRemoteThreadStatus();
+              }
+
+              @Override
+              public void removeUpdate(DocumentEvent event) {
+                updateRemoteThreadStatus();
+              }
+
+              @Override
+              public void changedUpdate(DocumentEvent event) {
+                updateRemoteThreadStatus();
+              }
+            });
+    this.chkRemoteEngine.addItemListener(event -> updateRemoteThreadStatus());
     this.chkRemoteEngine.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
@@ -377,46 +405,47 @@ public class MoreEngines extends JPanel {
     boardSettingsX = placeInRow(txtHeight, boardSettingsX, 270, 12, 40);
     boardSettingsX = placeInRow(lblKomi, boardSettingsX, 270, 4, 0);
     placeInRow(txtKomi, boardSettingsX, 270, 0, 48);
+    this.remoteManagedThreads.setBounds(5, 296, 875, 24);
     int remoteX = 5;
-    remoteX = placeInRow(chkRemoteEngine, remoteX, 296, 6, 0);
-    remoteX = placeInRow(btnRemoteEngine, remoteX, 296, 8, 24);
-    remoteX = placeInRow(lblIp, remoteX, 296, 4, 0);
-    remoteX = placeInRow(txtIP, remoteX, 296, 8, 150);
-    remoteX = placeInRow(lblPort, remoteX, 296, 4, 0);
-    remoteX = placeInRow(txtPort, remoteX, 296, 8, 58);
-    remoteX = placeInRow(lblUserName, remoteX, 296, 4, 0);
-    placeInRow(txtUserName, remoteX, 296, 0, 150);
+    remoteX = placeInRow(chkRemoteEngine, remoteX, 324, 6, 0);
+    remoteX = placeInRow(btnRemoteEngine, remoteX, 324, 8, 24);
+    remoteX = placeInRow(lblIp, remoteX, 324, 4, 0);
+    remoteX = placeInRow(txtIP, remoteX, 324, 8, 150);
+    remoteX = placeInRow(lblPort, remoteX, 324, 4, 0);
+    remoteX = placeInRow(txtPort, remoteX, 324, 8, 58);
+    remoteX = placeInRow(lblUserName, remoteX, 324, 4, 0);
+    placeInRow(txtUserName, remoteX, 324, 0, 150);
 
     int authX = 5;
-    authX = placeInRow(rdoUsePassword, authX, 324, 4, 0);
-    authX = placeInRow(txtPassword, authX, 324, 14, 150);
-    authX = placeInRow(rdoKeyGen, authX, 324, 4, 0);
-    placeInRow(scanKeygen, authX, 324, 0, 100);
+    authX = placeInRow(rdoUsePassword, authX, 352, 4, 0);
+    authX = placeInRow(txtPassword, authX, 352, 14, 150);
+    authX = placeInRow(rdoKeyGen, authX, 352, 4, 0);
+    placeInRow(scanKeygen, authX, 352, 0, 100);
 
     int orderingX = 5;
-    orderingX = placeInRow(moveUp, orderingX, 354, 2, 55);
-    orderingX = placeInRow(moveDown, orderingX, 354, 2, 55);
-    orderingX = placeInRow(moveUp5, orderingX, 354, 2, 55);
-    orderingX = placeInRow(moveDown5, orderingX, 354, 2, 55);
-    orderingX = placeInRow(moveFirst, orderingX, 354, 2, 55);
-    placeInRow(moveLast, orderingX, 354, 0, 55);
+    orderingX = placeInRow(moveUp, orderingX, 382, 2, 55);
+    orderingX = placeInRow(moveDown, orderingX, 382, 2, 55);
+    orderingX = placeInRow(moveUp5, orderingX, 382, 2, 55);
+    orderingX = placeInRow(moveDown5, orderingX, 382, 2, 55);
+    orderingX = placeInRow(moveFirst, orderingX, 382, 2, 55);
+    placeInRow(moveLast, orderingX, 382, 0, 55);
     int gtpConfigWidth =
         Math.min(200, AccessibilitySupport.localizedControlWidth(this.gtpConfig, 150));
-    this.gtpConfig.setBounds(360, 354, gtpConfigWidth, 24);
+    this.gtpConfig.setBounds(360, 382, gtpConfigWidth, 24);
 
     int actionRight = 885;
-    actionRight = placeFromRight(exit, actionRight, 354, 2, 60);
-    actionRight = placeFromRight(save, actionRight, 354, 18, 60);
-    actionRight = placeFromRight(cancel, actionRight, 354, 2, 54);
-    actionRight = placeFromRight(delete, actionRight, 354, 2, 54);
-    placeFromRight(add, actionRight, 354, 0, 54);
+    actionRight = placeFromRight(exit, actionRight, 382, 2, 60);
+    actionRight = placeFromRight(save, actionRight, 382, 18, 60);
+    actionRight = placeFromRight(cancel, actionRight, 382, 2, 54);
+    actionRight = placeFromRight(delete, actionRight, 382, 2, 54);
+    placeFromRight(add, actionRight, 382, 0, 54);
 
     int startupX = 5;
-    startupX = placeInRow(lblchooseStart, startupX, 382, 6, 0);
-    startupX = placeInRow(rdoDefault, startupX, 382, 4, 0);
-    startupX = placeInRow(rdoLast, startupX, 382, 4, 0);
-    startupX = placeInRow(rdoMannul, startupX, 382, 4, 0);
-    placeInRow(rdoNone, startupX, 382, 0, 0);
+    startupX = placeInRow(lblchooseStart, startupX, 410, 6, 0);
+    startupX = placeInRow(rdoDefault, startupX, 410, 4, 0);
+    startupX = placeInRow(rdoLast, startupX, 410, 4, 0);
+    startupX = placeInRow(rdoMannul, startupX, 410, 4, 0);
+    placeInRow(rdoNone, startupX, 410, 0, 0);
     //    this.rdoDefault.setBounds(
     //        Lizzie.config.isFrameFontSmall() ? 70 : (Lizzie.config.isFrameFontMiddle() ? 90 :
     // 110),
@@ -443,7 +472,7 @@ public class MoreEngines extends JPanel {
     JFontButton btnEncrypt =
         new JFontButton(this.resourceBundle.getString("MoreEngines.btnEncrypt"));
     btnEncrypt.setMargin(new Insets(0, 0, 0, 0));
-    btnEncrypt.setBounds(765, 382, 120, 24);
+    btnEncrypt.setBounds(765, 410, 120, 24);
     this.selectpanel.add(btnEncrypt);
     btnEncrypt.addActionListener(
         new ActionListener() {
@@ -463,8 +492,8 @@ public class MoreEngines extends JPanel {
     else rdoMannul.setSelected(true);
 
     setEnable(false);
-    this.selectpanel.setBounds(0, 0, 900, 412);
-    this.tablepanel.setBounds(0, 412, 885, 353);
+    this.selectpanel.setBounds(0, 0, 900, 440);
+    this.tablepanel.setBounds(0, 440, 885, 325);
     this.selectpanel.add(this.engineName);
     this.selectpanel.add(lblName);
     this.selectpanel.add(this.txtName);
@@ -479,6 +508,7 @@ public class MoreEngines extends JPanel {
     this.selectpanel.add(this.txtHeight);
     this.selectpanel.add(lblKomi);
     this.selectpanel.add(this.txtKomi);
+    this.selectpanel.add(this.remoteManagedThreads);
     this.selectpanel.add(this.scan);
     this.selectpanel.add(this.add);
     this.selectpanel.add(this.save);
@@ -879,6 +909,11 @@ public class MoreEngines extends JPanel {
           if (ret == 0) saveCurrentEngineConfig();
         }
     }
+  }
+
+  private void updateRemoteThreadStatus() {
+    remoteManagedThreads.setVisible(
+        EngineThreadPolicy.isRemoteManaged(command.getText(), chkRemoteEngine.isSelected()));
   }
 
   private void setEnable(boolean isEnable) {

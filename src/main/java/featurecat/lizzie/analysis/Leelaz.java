@@ -24,6 +24,7 @@ import featurecat.lizzie.rules.BoardHistoryNode;
 import featurecat.lizzie.rules.Movelist;
 import featurecat.lizzie.rules.Stone;
 import featurecat.lizzie.util.CommandLaunchHelper;
+import featurecat.lizzie.util.EngineThreadPolicy;
 import featurecat.lizzie.util.KataGoAutoSetupHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper.TensorRtRepairContext;
@@ -715,10 +716,7 @@ public class Leelaz {
       this.isSSH = false;
       this.isKatago = true;
     }
-    if (this.engineCommand.toLowerCase().contains("ssh")
-        || engineCommand.toLowerCase().contains("plink")) {
-      this.isSSH = true;
-    }
+    this.isSSH = EngineThreadPolicy.isExternalSshCommand(this.engineCommand);
     //		if (this.engineCommand.startsWith("screen")) {
     //			this.engineCommand=this.engineCommand.substring(6);
     //			this.isScreen = true;
@@ -5637,6 +5635,7 @@ public class Leelaz {
         canAddPlayer = true;
         if (engineGameTransaction == null
             && !suppressGlobalPresentation
+            && !EngineThreadPolicy.isRemoteManaged(this)
             && Utils.applyRecommendedKataGoThreads(false)) {
           Utils.persistConfigQuietly();
         }
@@ -23141,9 +23140,11 @@ public class Leelaz {
     if (Lizzie.config.autoLoadKataEnginePDA && !isKataGoPda) {
       setPda(Lizzie.config.autoLoadTxtKataEnginePDA);
     }
-    String kataGoThreads = Utils.resolveKataGoThreadsForEngineLoad();
-    if (!launchCommandSetsKataGoThreads && !kataGoThreads.isEmpty()) {
-      sendCommand("kata-set-param numSearchThreads " + kataGoThreads);
+    if (!EngineThreadPolicy.isRemoteManaged(this) && !launchCommandSetsKataGoThreads) {
+      String kataGoThreads = Utils.resolveKataGoThreadsForEngineLoad();
+      if (!kataGoThreads.isEmpty()) {
+        sendCommand("kata-set-param numSearchThreads " + kataGoThreads);
+      }
     }
     if (Lizzie.config.autoLoadKataEngineWRN) {
       try {

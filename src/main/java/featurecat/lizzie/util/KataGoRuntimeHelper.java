@@ -6,7 +6,6 @@ import featurecat.lizzie.analysis.AnalysisEngine;
 import featurecat.lizzie.analysis.AnalysisResourceCoordinator;
 import featurecat.lizzie.analysis.EngineManager;
 import featurecat.lizzie.analysis.Leelaz;
-import featurecat.lizzie.analysis.remote.RemoteComputeConfig;
 import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.logging.MaintenanceObservation;
 import featurecat.lizzie.rules.Board;
@@ -1550,6 +1549,9 @@ public final class KataGoRuntimeHelper {
     if (originalCommand == null) {
       return null;
     }
+    if (EngineThreadPolicy.isRemoteManaged(originalCommand)) {
+      return new ArrayList<>(originalCommand);
+    }
     List<String> launchCommand = new ArrayList<String>(originalCommand);
     if (enginePath == null || Lizzie.config == null) {
       return launchCommand;
@@ -2819,7 +2821,28 @@ public final class KataGoRuntimeHelper {
     }
   }
 
+  public static String benchmarkUnavailableReason(SetupSnapshot snapshot) {
+    if (snapshot == null || snapshot.enginePath == null) {
+      return resource("AutoSetup.missingEngine", "No local KataGo binary was found.");
+    }
+    String source = snapshot.discovery == null ? "" : snapshot.discovery.sourceCommand;
+    List<String> executable = List.of(snapshot.enginePath.toString());
+    if (EngineThreadPolicy.isRemoteManaged(executable)
+        || EngineThreadPolicy.isRemoteManaged(source, false)) {
+      return resource("EngineThreadPolicy.remoteManaged", "Search threads are managed by the remote server.");
+    }
+    if ((!source.isEmpty() && !EngineThreadPolicy.isLocalKataGoCommand(source, false))
+        || !KataGoAutoSetupHelper.looksLikeKataGoExecutable(snapshot.enginePath.toString())) {
+      return resource("EngineThreadPolicy.unknownBenchmarkTarget", "Cannot identify this target as a local KataGo engine.");
+    }
+    return "";
+  }
+
   private static void validateBenchmarkSnapshot(SetupSnapshot snapshot) throws IOException {
+    String unavailableReason = benchmarkUnavailableReason(snapshot);
+    if (!unavailableReason.isEmpty()) {
+      throw new IOException(unavailableReason);
+    }
     if (snapshot == null
         || snapshot.enginePath == null
         || !Files.isRegularFile(snapshot.enginePath)) {
@@ -3779,8 +3802,10 @@ public final class KataGoRuntimeHelper {
       return;
     }
     try {
-      if (Lizzie.leelaz != null && Lizzie.leelaz.isLoaded() && Lizzie.leelaz.isKatago) {
-        Lizzie.leelaz.sendCommand("kata-set-param numSearchThreads " + result.recommendedThreads);
+      Leelaz target = Lizzie.leelaz;
+      if (target != null && target.isLoaded() && target.isKatago
+          && !EngineThreadPolicy.isRemoteManaged(target)) {
+        target.sendCommand("kata-set-param numSearchThreads " + result.recommendedThreads);
       }
     } catch (Exception e) {
     }
@@ -4666,19 +4691,31 @@ public final class KataGoRuntimeHelper {
 
   private static boolean isCurrentPrimaryEngineEligibleForAutomaticBenchmark() {
     Leelaz engine = Lizzie.leelaz;
-    return engine != null
-        && isEngineEligibleForAutomaticStartupBenchmark(
-            engine.engineCommand(), engine.useRemoteCompute, engine.useJavaSSH, engine.isSSH);
+    if (engine == null || Utils.isBlank(engine.engineCommand())) {
+      return false;
+    }
+    if (isEngineEligibleForAutomaticStartupBenchmark(
+        engine.engineCommand(), engine.useRemoteCompute, engine.useJavaSSH, engine.isSSH)) {
+      return true;
+    }
+    String reason = EngineThreadPolicy.isRemoteManaged(engine) || engine.isSSH
+        ? resource("EngineThreadPolicy.remoteManaged", "Search threads are managed by the remote server.")
+        : resource("EngineThreadPolicy.unknownBenchmarkTarget", "Cannot identify this target as a local KataGo engine.");
+    String message = resource("AutoSetup.benchmarkTitle", "KataGo performance optimization") + ": " + reason;
+    System.out.println(message);
+    SwingUtilities.invokeLater(() -> {
+      if (Lizzie.gtpConsole != null) {
+        Lizzie.gtpConsole.addLine(message + "\n");
+      }
+    });
+    return false;
   }
 
   static boolean isEngineEligibleForAutomaticStartupBenchmark(
       String command, boolean usesRemoteCompute, boolean usesJavaSsh, boolean usesSsh) {
-    String normalizedCommand = command == null ? "" : command.trim();
-    return !normalizedCommand.isEmpty()
-        && !usesRemoteCompute
-        && !usesJavaSsh
+    return !usesRemoteCompute
         && !usesSsh
-        && !RemoteComputeConfig.isRemoteComputeEngineCommand(normalizedCommand);
+        && EngineThreadPolicy.isLocalKataGoCommand(command, usesJavaSsh);
   }
 
   public static String optimizeAnalysisEngineCommand(
@@ -5516,7 +5553,7 @@ public final class KataGoRuntimeHelper {
   }
 
   private static boolean isAppleSiliconOptimizationEligible(SetupSnapshot snapshot) {
-    if (!isAppleSiliconHost() || snapshot == null) {
+    if (!isAppleSiliconHost() || !benchmarkUnavailableReason(snapshot).isEmpty()) {
       return false;
     }
     if (!snapshot.hasEngine() || !snapshot.hasConfigs() || !snapshot.hasWeight()) {

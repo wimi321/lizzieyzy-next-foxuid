@@ -3811,6 +3811,11 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void startPerformanceBenchmark(boolean experimental) {
+    String unavailableReason = KataGoRuntimeHelper.benchmarkUnavailableReason(snapshot);
+    if (!unavailableReason.isEmpty()) {
+      Utils.showMsg(unavailableReason, this);
+      return;
+    }
     if (snapshot == null
         || !snapshot.hasEngine()
         || !snapshot.hasConfigs()

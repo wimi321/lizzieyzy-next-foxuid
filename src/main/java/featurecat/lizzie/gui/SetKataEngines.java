@@ -2,7 +2,9 @@ package featurecat.lizzie.gui;
 
 import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
+import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.gui.LizzieFrame.HtmlKit;
+import featurecat.lizzie.util.EngineThreadPolicy;
 import featurecat.lizzie.util.Utils;
 import java.awt.Desktop;
 import java.awt.Dimension;
@@ -48,6 +50,8 @@ public class SetKataEngines extends JDialog {
   public SetKataEngines() {
     // this.setModal(true);
     // setType(Type.POPUP);
+    Leelaz openingEngine = Lizzie.leelaz;
+    boolean remoteManagedThreads = EngineThreadPolicy.isRemoteManaged(openingEngine);
     boolean isPdaEngine = Lizzie.leelaz.isKataGoPda;
     setResizable(false);
     setTitle(Lizzie.resourceBundle.getString("SetKataEngines.title")); // ("设置KataGo引擎高级参数");
@@ -117,22 +121,13 @@ public class SetKataEngines extends JDialog {
                 Lizzie.config.chkKataEngineWRN, Lizzie.config.txtKataEngineWRN);
             //  }
 
-            Lizzie.config.chkKataEngineThreads = chkEditThreads.isSelected();
-            Lizzie.config.autoLoadKataEngineThreads = chkAutoLoadThreads.isSelected();
-            String threadsValue = txtThreads.getText();
-            if (Lizzie.config.chkKataEngineThreads || Lizzie.config.autoLoadKataEngineThreads) {
-              threadsValue = Utils.resolveKataGoThreadsValue(threadsValue);
-              txtThreads.setText(threadsValue);
-            }
-            Lizzie.config.txtKataEngineThreads = threadsValue;
-            Lizzie.config.uiConfig.put(
-                "txt-kata-engine-threads", Lizzie.config.txtKataEngineThreads);
-            Lizzie.config.uiConfig.put(
-                "autoload-kata-engine-threads", Lizzie.config.autoLoadKataEngineThreads);
-
-            if (Lizzie.config.chkKataEngineThreads) {
-              Lizzie.leelaz.sendCommand(
-                  "kata-set-param numSearchThreads " + Lizzie.config.txtKataEngineThreads);
+            if (!remoteManagedThreads && !EngineThreadPolicy.isRemoteManaged(Lizzie.leelaz)) {
+              Utils.saveLegacyKataGoThreadSettings(
+                  openingEngine,
+                  chkEditThreads.isSelected(),
+                  chkAutoLoadThreads.isSelected(),
+                  txtThreads.getText());
+              txtThreads.setText(Lizzie.config.txtKataEngineThreads);
             }
             //            Lizzie.config.chkKataEngineRPT = chkEditRPT.isSelected();
             //            Lizzie.config.autoLoadKataEngineRPT = chkAutoRPT.isSelected();
@@ -159,8 +154,6 @@ public class SetKataEngines extends JDialog {
             Lizzie.config.uiConfig.put(
                 "autoload-kata-engine-wrn", Lizzie.config.autoLoadKataEngineWRN);
             Lizzie.config.uiConfig.put("txt-kata-engine-wrn", Lizzie.config.txtKataEngineWRN);
-            Lizzie.config.uiConfig.put(
-                "chk-kata-engine-threads", Lizzie.config.chkKataEngineThreads);
             setVisible(false);
             LizzieFrame.menu.updateMenuStatusForEngine();
             if (Lizzie.leelaz.isPondering()) Lizzie.leelaz.ponder();
@@ -564,7 +557,11 @@ public class SetKataEngines extends JDialog {
     txtPDA.setText(Lizzie.config.txtKataEnginePDA);
 
     JLabel lblNumSearchThreads =
-        new JFontLabel(Lizzie.resourceBundle.getString("SetKataEngines.lblNumSearchThreads"));
+        new JFontLabel(
+            Lizzie.resourceBundle.getString(
+                remoteManagedThreads
+                    ? "EngineThreadPolicy.remoteManaged"
+                    : "SetKataEngines.lblNumSearchThreads"));
     lblNumSearchThreads.setBounds(10, 88, 664, 25);
     getContentPane().add(lblNumSearchThreads);
 
@@ -670,6 +667,15 @@ public class SetKataEngines extends JDialog {
       chkAutoLoadThreads.setSelected(true);
       txtThreads.setText(Lizzie.config.txtKataEngineThreads);
     } else chkAutoLoadThreads.setSelected(false);
+
+    if (remoteManagedThreads) {
+      chkEditThreads.setEnabled(false);
+      chkEditThreads.setVisible(false);
+      chkAutoLoadThreads.setEnabled(false);
+      chkAutoLoadThreads.setVisible(false);
+      txtThreads.setEnabled(false);
+      txtThreads.setVisible(false);
+    }
 
     //   if (Lizzie.config.chkKataEngineRPT || Lizzie.config.autoLoadKataEngineRPT)
     //  txtRPT.setText(Lizzie.config.txtKataEngineRPT);
