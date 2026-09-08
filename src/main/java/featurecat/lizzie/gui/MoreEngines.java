@@ -452,6 +452,9 @@ public class MoreEngines extends JPanel {
     JFontLabel threadSourceLabel =
         new JFontLabel(resourceBundle.getString("EngineThreadPolicy.sourceLabel"));
     threadSourceLabel.setFont(threadSourceLabel.getFont().deriveFont(Font.BOLD));
+    Dimension sourceLabelSize = threadSourceLabel.getPreferredSize();
+    sourceLabelSize.height = Math.max(28, sourceLabelSize.height);
+    threadSourceLabel.setPreferredSize(sourceLabelSize);
     AccessibilitySupport.labelFor(
         threadSourceLabel, threadPolicyCfg, threadSourceLabel.getText());
     FlowLayout threadSourceLayout = new FlowLayout(FlowLayout.LEADING, 0, 0);
