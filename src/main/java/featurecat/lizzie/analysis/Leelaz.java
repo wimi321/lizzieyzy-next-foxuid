@@ -11335,7 +11335,14 @@ public class Leelaz {
               }
             }
           },
-          Math.max(1L, readBoardGmaRestoreResponseTimeoutMillis()));
+          Math.max(
+              1L,
+              command.restartBootstrapReceipt != null
+                      && Boolean.TRUE.equals(ordinaryEngineGameBootstrapCommands.get())
+                  ? Math.max(
+                      engineStartupSynchronizationTimeoutMillis(),
+                      engineTuningSynchronizationTimeoutMillis())
+                  : readBoardGmaRestoreResponseTimeoutMillis()));
     }
     if (command.engineGameTransaction() == null
         && isAnalysisOutputOwnershipCommand(command.command)) {

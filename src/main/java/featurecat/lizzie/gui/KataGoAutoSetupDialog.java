@@ -4463,10 +4463,17 @@ public class KataGoAutoSetupDialog extends JDialog {
 
   private void onBenchmarkFailed(IOException error) {
     benchmarkDisplayState = BenchmarkDisplayState.FAILED;
-    benchmarkTransientStatus =
-        text("AutoSetup.benchmarkFailed") + " " + error.getLocalizedMessage();
-    onBackgroundError(error);
-    updateBenchmarkInfo();
+    benchmarkTransientStatus = text("AutoSetup.benchmarkFailed");
+    setBusy(false, benchmarkTransientStatus, 0, 0);
+    renderSnapshot();
+    lblBenchmarkReportStatus.setToolTipText(error.getLocalizedMessage());
+    JTextArea details = new JTextArea(error.getLocalizedMessage(), 12, 64);
+    details.setEditable(false);
+    details.setLineWrap(true);
+    details.setWrapStyleWord(true);
+    details.setCaretPosition(0);
+    JOptionPane.showMessageDialog(
+        this, new JScrollPane(details), text("AutoSetup.failed"), JOptionPane.ERROR_MESSAGE);
   }
 
   private void closeOrCancelActiveTask() {
@@ -5252,8 +5259,8 @@ public class KataGoAutoSetupDialog extends JDialog {
     if (value == null || value.length() <= maxLength) {
       return value;
     }
-    int head = Math.max(32, maxLength / 2 - 6);
-    int tail = Math.max(36, maxLength - head - 5);
+    int head = (maxLength - 5) / 2;
+    int tail = maxLength - head - 5;
     return value.substring(0, head) + " ... " + value.substring(value.length() - tail);
   }
 
