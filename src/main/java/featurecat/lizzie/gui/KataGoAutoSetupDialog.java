@@ -211,6 +211,11 @@ public class KataGoAutoSetupDialog extends JDialog {
   private final JLabel lblBenchmarkBackendValue = new JFontLabel();
   private final JLabel lblBenchmarkTimeValue = new JFontLabel();
   private final JLabel lblBenchmarkReportStatus = new JFontLabel();
+  private final JLabel lblBenchmarkTargetValue = new JFontLabel();
+  private final JLabel lblBenchmarkEngineValue = new JFontLabel();
+  private final JLabel lblBenchmarkConfigValue = new JFontLabel();
+  private final JTextArea benchmarkPolicyDetails = new JTextArea();
+  private String benchmarkFailureDetail = "";
   private final JLabel lblSelectedWeightName = new JFontLabel();
   private final JLabel lblSelectedWeightMeta = new JFontLabel();
   private final JLabel lblCurrentWeightName = new JFontLabel();
@@ -305,9 +310,17 @@ public class KataGoAutoSetupDialog extends JDialog {
   private WeightCatalogMode weightCatalogMode = WeightCatalogMode.OFFICIAL;
   private BenchmarkDisplayState benchmarkDisplayState = BenchmarkDisplayState.IDLE;
   private String benchmarkTransientStatus = "";
+  private long benchmarkOperation;
+  private KataGoRuntimeHelper.BenchmarkTarget benchmarkTarget;
+  private final String selectedBenchmarkEntryId;
 
   public KataGoAutoSetupDialog(Window owner) {
+    this(owner, "");
+  }
+
+  private KataGoAutoSetupDialog(Window owner, String selectedBenchmarkEntryId) {
     super(owner);
+    this.selectedBenchmarkEntryId = selectedBenchmarkEntryId;
     setModal(false);
     setTitle(text("AutoSetup.title"));
     configureNativeWindowChrome();
@@ -406,9 +419,22 @@ public class KataGoAutoSetupDialog extends JDialog {
     AccessibilitySupport.button(
         btnRemoteCompute, text("Menu.remoteCompute"), text("Menu.remoteCompute"));
     AccessibilitySupport.applyToTree(content);
+    if (!selectedBenchmarkEntryId.isBlank()) {
+      sectionNav.setSelectedIndex(2);
+      sectionNav.setEnabled(false);
+    }
     AccessibilitySupport.installEscapeAction(getRootPane(), this, this::closeOrCancelActiveTask);
 
     refreshState();
+  }
+
+  /** Opens the existing performance page without starting a measurement or a board engine. */
+  public static void openForSavedEntry(Window owner, String entryId) {
+    if (entryId == null || entryId.isBlank()) {
+      Utils.showMsg(featurecat.lizzie.util.EngineThreadPolicy.message("selectTarget"), owner);
+      return;
+    }
+    new KataGoAutoSetupDialog(owner, entryId).setVisible(true);
   }
 
   private void configureNativeWindowChrome() {
@@ -499,7 +525,8 @@ public class KataGoAutoSetupDialog extends JDialog {
       return;
     }
     String target = context.failedExecutable.toString();
-    lblDirectedTensorRtTarget.setText(String.format(text("AutoSetup.tensorRtDirectedTarget"), target));
+    lblDirectedTensorRtTarget.setText(
+        String.format(text("AutoSetup.tensorRtDirectedTarget"), target));
     lblDirectedTensorRtTarget.setToolTipText(target);
     AccessibilitySupport.named(
         lblDirectedTensorRtTarget,
@@ -516,6 +543,10 @@ public class KataGoAutoSetupDialog extends JDialog {
   private void refreshState(Runnable afterRefresh) {
     if (!SwingUtilities.isEventDispatchThread()) {
       SwingUtilities.invokeLater(() -> refreshState(afterRefresh));
+      return;
+    }
+    if (!selectedBenchmarkEntryId.isBlank()) {
+      refreshSelectedBenchmark(afterRefresh);
       return;
     }
     benchmarkDisplayState = BenchmarkDisplayState.IDLE;
@@ -560,6 +591,30 @@ public class KataGoAutoSetupDialog extends JDialog {
             });
     stateRefreshWorker = worker;
     worker.execute();
+  }
+
+  private void refreshSelectedBenchmark(Runnable afterRefresh) {
+    if (hasActiveBackgroundTask()) return;
+    EngineData entry =
+        featurecat.lizzie.util.EngineThreadPolicy.findSavedEntry(selectedBenchmarkEntryId);
+    if (entry == null) {
+      benchmarkDisplayState = BenchmarkDisplayState.FAILED;
+      benchmarkTransientStatus = featurecat.lizzie.util.EngineThreadPolicy.message("targetDeleted");
+      renderBenchmarkReport(null, benchmarkDisplayState, benchmarkTransientStatus);
+      btnOptimizePerformance.setEnabled(false);
+      btnExperimentalPerformance.setEnabled(false);
+      return;
+    }
+    snapshot = KataGoAutoSetupHelper.inspectSavedEngine(entry);
+    benchmarkTarget = null;
+    benchmarkDisplayState = BenchmarkDisplayState.IDLE;
+    benchmarkTransientStatus = "";
+    engineValidationResult = null;
+    updateBenchmarkInfo();
+    if (KataGoRuntimeHelper.benchmarkUnavailableReason(snapshot).isEmpty()) {
+      validateDiscoveredEngineAsync();
+    }
+    if (afterRefresh != null) afterRefresh.run();
   }
 
   private void applyDiscoveredSnapshot(SetupSnapshot discoveredSnapshot) {
@@ -979,6 +1034,7 @@ public class KataGoAutoSetupDialog extends JDialog {
       text("AutoSetup.navAcceleration")
     };
     sectionNav.setListData(sectionLabels);
+    sectionNav.setFont(new JFontLabel().getFont());
     sectionNav.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     sectionNav.setSelectedIndex(0);
     sectionNav.setFixedCellHeight(58);
@@ -1511,6 +1567,12 @@ public class KataGoAutoSetupDialog extends JDialog {
     JPanel metadata = createBenchmarkMetadataPanel();
     BenchmarkReportBody reportBody = new BenchmarkReportBody(nnMetric, visitsMetric, metadata);
     report.add(reportBody, BorderLayout.CENTER);
+    benchmarkPolicyDetails.setEditable(false);
+    benchmarkPolicyDetails.setOpaque(false);
+    benchmarkPolicyDetails.setLineWrap(true);
+    benchmarkPolicyDetails.setWrapStyleWord(true);
+    benchmarkPolicyDetails.setForeground(TEXT_SECONDARY);
+    report.add(benchmarkPolicyDetails, BorderLayout.SOUTH);
     content.add(report, BorderLayout.NORTH);
 
     JPanel explanationStack = new JPanel(new BorderLayout(0, 10));
@@ -1612,6 +1674,9 @@ public class KataGoAutoSetupDialog extends JDialog {
     gbc.anchor = GridBagConstraints.WEST;
     gbc.fill = GridBagConstraints.HORIZONTAL;
     gbc.weightx = 0;
+    addBenchmarkMetadataRow(metadata, gbc, text("MoreEngines.column1"), lblBenchmarkTargetValue);
+    addBenchmarkMetadataRow(metadata, gbc, text("AutoSetup.localEngine"), lblBenchmarkEngineValue);
+    addBenchmarkMetadataRow(metadata, gbc, text("AutoSetup.gtpConfig"), lblBenchmarkConfigValue);
     addBenchmarkMetadataRow(
         metadata, gbc, text("AutoSetup.benchmarkRecommended"), lblBenchmarkThreadsValue);
     addBenchmarkMetadataRow(
@@ -1955,6 +2020,10 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void renderSnapshot() {
+    if (!selectedBenchmarkEntryId.isBlank()) {
+      updateBenchmarkInfo();
+      return;
+    }
     renderCurrentWeightBanner();
     setInfoValue(lblEngineValue, snapshot.hasEngine(), formatPath(snapshot.enginePath));
     setInfoValue(lblWeightValue, snapshot.hasWeight(), formatWeight(snapshot));
@@ -2757,7 +2826,8 @@ public class KataGoAutoSetupDialog extends JDialog {
             : status.installed()
                 ? text("AutoSetup.experimentalBackendInstalled")
                 : text("AutoSetup.experimentalBackendNotInstalled");
-    setInfoValue(lblExperimentalBackendValue, status.installed(), backend.displayName() + " · " + state);
+    setInfoValue(
+        lblExperimentalBackendValue, status.installed(), backend.displayName() + " · " + state);
     btnInstallExperimentalBackend.setText(
         status.installed()
             ? text("AutoSetup.enableExperimentalBackend")
@@ -2848,20 +2918,54 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void updateBenchmarkInfo() {
+    EngineData targetEntry =
+        featurecat.lizzie.util.EngineThreadPolicy.findSavedEntry(
+            snapshot == null ? selectedBenchmarkEntryId : snapshot.savedEntryId);
+    String targetName =
+        benchmarkTarget != null && snapshot == benchmarkTarget.snapshot
+            ? benchmarkTarget.name
+            : snapshot != null && snapshot.discovery != null
+                ? snapshot.discovery.sourceName
+                : targetEntry == null
+                    ? featurecat.lizzie.util.EngineThreadPolicy.message("selectTarget")
+                    : targetEntry.name;
+    lblBenchmarkTargetValue.setText(compactInfoText(targetName, 34));
+    lblBenchmarkTargetValue.setToolTipText(targetName);
+    String enginePath =
+        snapshot == null || snapshot.enginePath == null ? "" : snapshot.enginePath.toString();
+    String configPath =
+        snapshot == null || snapshot.gtpConfigPath == null ? "" : snapshot.gtpConfigPath.toString();
+    if (snapshot != null && !snapshot.sourceArguments.isEmpty()) {
+      List<String> configs = new ArrayList<>();
+      for (int i = 2; i + 1 < snapshot.sourceArguments.size(); i++) {
+        String option = snapshot.sourceArguments.get(i);
+        if ("-config".equals(option) || "--config".equals(option)) {
+          configs.add(snapshot.sourceArguments.get(++i));
+        }
+      }
+      configPath = String.join("; ", configs);
+    }
+    lblBenchmarkEngineValue.setText(compactInfoText(enginePath, 34));
+    lblBenchmarkEngineValue.setToolTipText(enginePath);
+    lblBenchmarkConfigValue.setText(compactInfoText(configPath, 34));
+    lblBenchmarkConfigValue.setToolTipText(configPath);
     boolean experimentalAvailable = isExperimentalAppleSiliconTuningAvailable();
     btnExperimentalPerformance.setVisible(experimentalAvailable);
-    if (snapshot == null
-        || !snapshot.hasEngine()
-        || !snapshot.hasConfigs()
-        || !snapshot.hasWeight()) {
-      renderBenchmarkReport(null, BenchmarkDisplayState.UNAVAILABLE, "");
-      btnOptimizePerformance.setEnabled(false);
-      btnExperimentalPerformance.setEnabled(false);
-      return;
-    }
+    String unavailableReason =
+        snapshot != null
+            ? KataGoRuntimeHelper.benchmarkUnavailableReason(snapshot)
+            : targetEntry != null
+                ? featurecat.lizzie.util.EngineThreadPolicy.isRemoteManaged(
+                        targetEntry.commands, targetEntry.useJavaSSH)
+                    ? featurecat.lizzie.util.EngineThreadPolicy.message("remoteManaged")
+                    : featurecat.lizzie.util.EngineThreadPolicy.message("unknownBenchmarkTarget")
+                : KataGoRuntimeHelper.benchmarkUnavailableReason(null);
     KataGoRuntimeHelper.BenchmarkResult result =
-        KataGoRuntimeHelper.getStoredBenchmarkResult(snapshot);
+        KataGoRuntimeHelper.getStoredBenchmarkResult(targetEntry);
     BenchmarkDisplayState displayState = benchmarkDisplayState;
+    if (displayState == BenchmarkDisplayState.IDLE && !unavailableReason.isBlank()) {
+      displayState = BenchmarkDisplayState.UNAVAILABLE;
+    }
     if (displayState == BenchmarkDisplayState.IDLE) {
       if (result == null) {
         displayState = BenchmarkDisplayState.EMPTY;
@@ -2872,6 +2976,31 @@ public class KataGoAutoSetupDialog extends JDialog {
       }
     }
     renderBenchmarkReport(result, displayState, benchmarkTransientStatus);
+    List<String> details = new ArrayList<>();
+    if (targetEntry != null) {
+      details.add(
+          featurecat.lizzie.util.EngineThreadPolicy.message(
+              featurecat.lizzie.util.EngineThreadPolicy.source(targetEntry)
+                      == featurecat.lizzie.util.EngineThreadPolicy.Source.CFG
+                  ? "cfg"
+                  : "benchmark"));
+      String environment = featurecat.lizzie.util.EngineThreadPolicy.environmentStatus(targetEntry);
+      if (!environment.isBlank()) details.add(environment);
+      if (KataGoRuntimeHelper.hasEffectiveNumSearchThreadsOverride(
+          snapshot == null ? List.of() : snapshot.sourceArguments)) {
+        details.add(featurecat.lizzie.util.EngineThreadPolicy.message("explicitOverride"));
+      }
+    }
+    if (!unavailableReason.isBlank()) details.add(unavailableReason);
+    if (engineValidationResult != null && !engineValidationResult.isValid()) {
+      details.add(lblEngineValidationValue.getText());
+      if (!Utils.isBlank(engineValidationResult.detail)) details.add(engineValidationResult.detail);
+    }
+    if (!benchmarkTransientStatus.isBlank()) details.add(benchmarkTransientStatus);
+    if (displayState == BenchmarkDisplayState.FAILED && !benchmarkFailureDetail.isBlank()) {
+      details.add(benchmarkFailureDetail);
+    }
+    benchmarkPolicyDetails.setText(String.join("\n", details));
     btnOptimizePerformance.setEnabled(
         canRunBenchmark() && activeWorkerThread == null && activeDownloadSession == null);
     btnExperimentalPerformance.setEnabled(
@@ -2911,7 +3040,10 @@ public class KataGoAutoSetupDialog extends JDialog {
             ? formatWeightModel(snapshot)
             : text("AutoSetup.notFound");
     lblBenchmarkModelValue.setText(compactInfoText(model, 30));
-    lblBenchmarkModelValue.setToolTipText(model);
+    lblBenchmarkModelValue.setToolTipText(
+        snapshot == null || snapshot.activeWeightPath == null
+            ? model
+            : snapshot.activeWeightPath.toString());
     String backend =
         result != null && !Utils.isBlank(result.backendLabel)
             ? result.backendLabel
@@ -3569,7 +3701,8 @@ public class KataGoAutoSetupDialog extends JDialog {
       return;
     }
     if (status == null || !status.repairable) {
-      Utils.showMsg(status == null ? text("AutoSetup.tensorRtNotApplicable") : status.detailText, this);
+      Utils.showMsg(
+          status == null ? text("AutoSetup.tensorRtNotApplicable") : status.detailText, this);
       return;
     }
     if (!canRepairTensorRt()) {
@@ -3811,9 +3944,19 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void startPerformanceBenchmark(boolean experimental) {
+    if (hasActiveBackgroundTask()) {
+      showBackgroundTaskAlreadyRunningNotice();
+      return;
+    }
+    String unavailableReason = KataGoRuntimeHelper.benchmarkUnavailableReason(snapshot);
+    if (!unavailableReason.isEmpty()) {
+      Utils.showMsg(unavailableReason, this);
+      return;
+    }
     if (snapshot == null
         || !snapshot.hasEngine()
-        || !snapshot.hasConfigs()
+        || snapshot.gtpConfigPath == null
+        || !Files.isRegularFile(snapshot.gtpConfigPath)
         || !snapshot.hasWeight()) {
       Utils.showMsg(text("AutoSetup.benchmarkUnavailable"), this);
       return;
@@ -3834,6 +3977,16 @@ public class KataGoAutoSetupDialog extends JDialog {
         return;
       }
     }
+    final KataGoRuntimeHelper.BenchmarkTarget target;
+    try {
+      target = KataGoRuntimeHelper.captureBenchmarkTarget(snapshot, false);
+    } catch (IOException failure) {
+      onBenchmarkFailed(failure);
+      return;
+    }
+    benchmarkTarget = target;
+    snapshot = target.snapshot;
+    final long operation = ++benchmarkOperation;
 
     KataGoRuntimeHelper.BenchmarkPauseResult pauseResult =
         KataGoRuntimeHelper.pauseCurrentAnalysisForBenchmark();
@@ -3854,36 +4007,36 @@ public class KataGoAutoSetupDialog extends JDialog {
         new Thread(
             () -> {
               try {
-                SetupSnapshot currentSnapshot = snapshot;
+                SetupSnapshot currentSnapshot = target.snapshot;
                 KataGoRuntimeHelper.NvidiaRuntimeStatus runtimeStatus =
                     KataGoRuntimeHelper.inspectNvidiaRuntime(currentSnapshot);
                 if (runtimeStatus.applicable && !runtimeStatus.ready) {
                   KataGoRuntimeHelper.ensureBundledRuntimeReady(currentSnapshot.enginePath, this);
-                  currentSnapshot = KataGoAutoSetupHelper.inspectLocalSetup();
                 }
-                SetupSnapshot benchmarkSnapshot = currentSnapshot;
                 KataGoAutoSetupHelper.ProgressListener progressListener =
                     (statusText, downloadedBytes, totalBytes) ->
                         SwingUtilities.invokeLater(
-                            () ->
-                                setBusy(
-                                    true,
-                                    text("AutoSetup.benchmarking") + " " + statusText,
-                                    downloadedBytes,
-                                    totalBytes));
+                            () -> {
+                              if (operation != benchmarkOperation) return;
+                              setBusy(
+                                  true,
+                                  text("AutoSetup.benchmarking") + " " + statusText,
+                                  downloadedBytes,
+                                  totalBytes);
+                            });
                 KataGoRuntimeHelper.BenchmarkResult result =
                     experimental
                         ? KataGoRuntimeHelper.runExperimentalAppleSiliconBenchmarkAndApply(
-                            benchmarkSnapshot, progressListener, session)
+                            target, progressListener, session)
                         : KataGoRuntimeHelper.runBenchmarkAndApply(
-                            benchmarkSnapshot, progressListener, session);
-                applyBenchmarkToRunningEngine(result);
+                            target, progressListener, session);
                 SwingUtilities.invokeLater(
                     () -> {
+                      if (operation != benchmarkOperation) return;
                       benchmarkDisplayState = BenchmarkDisplayState.COMPLETE;
                       benchmarkTransientStatus = "";
                       setBusy(false, text("AutoSetup.benchmarkDone"), 0, 0);
-                      snapshot = KataGoAutoSetupHelper.inspectLocalSetup();
+                      snapshot = target.snapshot;
                       renderSnapshot();
                       updateSelectedRemoteWeightInfo();
                       Utils.showMsg(
@@ -3893,13 +4046,22 @@ public class KataGoAutoSetupDialog extends JDialog {
                           this);
                     });
               } catch (DownloadCancelledException e) {
-                SwingUtilities.invokeLater(() -> onBenchmarkCancelled());
+                SwingUtilities.invokeLater(
+                    () -> {
+                      if (operation == benchmarkOperation) onBenchmarkCancelled();
+                    });
               } catch (IOException e) {
-                SwingUtilities.invokeLater(() -> onBenchmarkFailed(e));
+                SwingUtilities.invokeLater(
+                    () -> {
+                      if (operation == benchmarkOperation) onBenchmarkFailed(e);
+                    });
               } finally {
                 KataGoRuntimeHelper.restoreAnalysisAfterBenchmark(analysisWasPondering);
                 clearActiveDownload(session, Thread.currentThread());
-                SwingUtilities.invokeLater(() -> setStopAction("AutoSetup.stopDownload"));
+                SwingUtilities.invokeLater(
+                    () -> {
+                      if (operation == benchmarkOperation) setStopAction("AutoSetup.stopDownload");
+                    });
               }
             },
             experimental
@@ -4405,9 +4567,19 @@ public class KataGoAutoSetupDialog extends JDialog {
   }
 
   private void onBenchmarkFailed(IOException error) {
+    benchmarkFailureDetail = error.getLocalizedMessage();
     benchmarkDisplayState = BenchmarkDisplayState.FAILED;
-    benchmarkTransientStatus = "";
-    onBackgroundError(error);
+    benchmarkTransientStatus = text("AutoSetup.benchmarkFailed");
+    setBusy(false, benchmarkTransientStatus, 0, 0);
+    renderSnapshot();
+    lblBenchmarkReportStatus.setToolTipText(error.getLocalizedMessage());
+    JTextArea details = new JTextArea(error.getLocalizedMessage(), 12, 64);
+    details.setEditable(false);
+    details.setLineWrap(true);
+    details.setWrapStyleWord(true);
+    details.setCaretPosition(0);
+    JOptionPane.showMessageDialog(
+        this, new JScrollPane(details), text("AutoSetup.failed"), JOptionPane.ERROR_MESSAGE);
   }
 
   private void closeOrCancelActiveTask() {
@@ -4431,9 +4603,6 @@ public class KataGoAutoSetupDialog extends JDialog {
     setVisible(false);
   }
 
-  private void applyBenchmarkToRunningEngine(KataGoRuntimeHelper.BenchmarkResult result) {
-    KataGoRuntimeHelper.applyBenchmarkResultToRunningEngines(result);
-  }
 
   private void setBusy(boolean busy, String statusText, long downloadedBytes, long totalBytes) {
     String previousStatus = progressStatusLabel.getText();
@@ -4627,9 +4796,7 @@ public class KataGoAutoSetupDialog extends JDialog {
 
   private boolean canRunBenchmark() {
     return snapshot != null
-        && snapshot.hasEngine()
-        && snapshot.hasConfigs()
-        && snapshot.hasWeight()
+        && KataGoRuntimeHelper.benchmarkUnavailableReason(snapshot).isEmpty()
         && isEngineValidationReady();
   }
 
@@ -5195,8 +5362,8 @@ public class KataGoAutoSetupDialog extends JDialog {
     if (value == null || value.length() <= maxLength) {
       return value;
     }
-    int head = Math.max(32, maxLength / 2 - 6);
-    int tail = Math.max(36, maxLength - head - 5);
+    int head = (maxLength - 5) / 2;
+    int tail = maxLength - head - 5;
     return value.substring(0, head) + " ... " + value.substring(value.length() - tail);
   }
 
@@ -5494,6 +5661,13 @@ public class KataGoAutoSetupDialog extends JDialog {
 
   private void refreshIdleControls() {
     if (activeDownloadSession != null || activeWorkerThread != null) {
+      return;
+    }
+    if (!selectedBenchmarkEntryId.isBlank()) {
+      btnRefresh.setEnabled(true);
+      updateBenchmarkInfo();
+      btnStopDownload.setEnabled(false);
+      btnClose.setEnabled(true);
       return;
     }
     btnRefresh.setEnabled(true);

@@ -3,6 +3,8 @@ package featurecat.lizzie.gui;
 import org.json.JSONObject;
 
 public class EngineData {
+  public String id = "";
+  public JSONObject threadPolicy;
   public int index;
   public String commands;
   public String name;

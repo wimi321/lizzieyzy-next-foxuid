@@ -2,8 +2,9 @@ package featurecat.lizzie.gui;
 
 import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
+import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.gui.LizzieFrame.HtmlKit;
-import featurecat.lizzie.util.Utils;
+import featurecat.lizzie.util.EngineThreadPolicy;
 import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -16,7 +17,6 @@ import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JEditorPane;
 import javax.swing.JLabel;
-import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -29,8 +29,6 @@ import javax.swing.text.html.StyleSheet;
 public class SetKataEngines extends JDialog {
   private JFontTextField txtPDA;
   private JCheckBox chkEditPDA;
-  private JCheckBox chkEditThreads;
-  private JCheckBox chkAutoLoadThreads;
   private JCheckBox chkAutoLoadPDA;
   private JFontLabel lblWRN;
   private JCheckBox chkEditWRN;
@@ -43,12 +41,17 @@ public class SetKataEngines extends JDialog {
   private JFontTextField txtRPT;
   private JCheckBox chkAutoRPT;
   private JFontLabel lblHint;
-  private JTextField txtThreads;
 
   public SetKataEngines() {
     // this.setModal(true);
     // setType(Type.POPUP);
-    boolean isPdaEngine = Lizzie.leelaz.isKataGoPda;
+    Leelaz openingEngine = Lizzie.leelaz;
+    String openingEntryId =
+        openingEngine == null || openingEngine.savedEntryId == null
+            ? ""
+            : openingEngine.savedEntryId;
+    boolean remoteManagedThreads = EngineThreadPolicy.isRemoteManaged(openingEngine);
+    boolean isPdaEngine = openingEngine != null && openingEngine.isKataGoPda;
     setResizable(false);
     setTitle(Lizzie.resourceBundle.getString("SetKataEngines.title")); // ("设置KataGo引擎高级参数");
     setAlwaysOnTop(true);
@@ -117,23 +120,6 @@ public class SetKataEngines extends JDialog {
                 Lizzie.config.chkKataEngineWRN, Lizzie.config.txtKataEngineWRN);
             //  }
 
-            Lizzie.config.chkKataEngineThreads = chkEditThreads.isSelected();
-            Lizzie.config.autoLoadKataEngineThreads = chkAutoLoadThreads.isSelected();
-            String threadsValue = txtThreads.getText();
-            if (Lizzie.config.chkKataEngineThreads || Lizzie.config.autoLoadKataEngineThreads) {
-              threadsValue = Utils.resolveKataGoThreadsValue(threadsValue);
-              txtThreads.setText(threadsValue);
-            }
-            Lizzie.config.txtKataEngineThreads = threadsValue;
-            Lizzie.config.uiConfig.put(
-                "txt-kata-engine-threads", Lizzie.config.txtKataEngineThreads);
-            Lizzie.config.uiConfig.put(
-                "autoload-kata-engine-threads", Lizzie.config.autoLoadKataEngineThreads);
-
-            if (Lizzie.config.chkKataEngineThreads) {
-              Lizzie.leelaz.sendCommand(
-                  "kata-set-param numSearchThreads " + Lizzie.config.txtKataEngineThreads);
-            }
             //            Lizzie.config.chkKataEngineRPT = chkEditRPT.isSelected();
             //            Lizzie.config.autoLoadKataEngineRPT = chkAutoRPT.isSelected();
             //            Lizzie.config.txtKataEngineRPT = txtRPT.getText();
@@ -159,8 +145,6 @@ public class SetKataEngines extends JDialog {
             Lizzie.config.uiConfig.put(
                 "autoload-kata-engine-wrn", Lizzie.config.autoLoadKataEngineWRN);
             Lizzie.config.uiConfig.put("txt-kata-engine-wrn", Lizzie.config.txtKataEngineWRN);
-            Lizzie.config.uiConfig.put(
-                "chk-kata-engine-threads", Lizzie.config.chkKataEngineThreads);
             setVisible(false);
             LizzieFrame.menu.updateMenuStatusForEngine();
             if (Lizzie.leelaz.isPondering()) Lizzie.leelaz.ponder();
@@ -563,51 +547,38 @@ public class SetKataEngines extends JDialog {
     //   if (Lizzie.config.chkKataEnginePDA || Lizzie.config.autoLoadKataEnginePDA)
     txtPDA.setText(Lizzie.config.txtKataEnginePDA);
 
-    JLabel lblNumSearchThreads =
-        new JFontLabel(Lizzie.resourceBundle.getString("SetKataEngines.lblNumSearchThreads"));
-    lblNumSearchThreads.setBounds(10, 88, 664, 25);
+    EngineData openingEntry = EngineThreadPolicy.findSavedEntry(openingEntryId);
+    String threadTargetText;
+    if (remoteManagedThreads) {
+      threadTargetText = EngineThreadPolicy.message("remoteManaged");
+    } else if (openingEntry == null) {
+      threadTargetText = EngineThreadPolicy.message("unknownBenchmarkTarget");
+    } else {
+      threadTargetText = String.format(EngineThreadPolicy.message("target"), openingEntry.name);
+    }
+    int threadSettingsX =
+        Lizzie.config.isFrameFontSmall() ? 482 : (Lizzie.config.isFrameFontMiddle() ? 591 : 711);
+    JLabel lblNumSearchThreads = new JFontLabel(threadTargetText);
+    lblNumSearchThreads.setBounds(10, 88, threadSettingsX - 20, 25);
+    lblNumSearchThreads.setToolTipText(threadTargetText);
     getContentPane().add(lblNumSearchThreads);
 
-    chkEditThreads = new JCheckBox();
-    chkEditThreads.setBounds(
-        Lizzie.config.isFrameFontSmall() ? 451 : (Lizzie.config.isFrameFontMiddle() ? 560 : 680),
-        87,
-        25,
-        23);
-    getContentPane().add(chkEditThreads);
-
-    chkEditThreads.addActionListener(
-        new ActionListener() {
-          @Override
-          public void actionPerformed(ActionEvent e) {
-            // TODO Auto-generated method stub
-            if (chkEditThreads.isSelected()) {
-              txtThreads.setEnabled(true);
-              chkAutoLoadThreads.setEnabled(true);
-            } else {
-              chkAutoLoadThreads.setSelected(false);
-              txtThreads.setEnabled(false);
-              chkAutoLoadThreads.setEnabled(false);
-            }
+    JFontButton btnThreadSettings = new JFontButton(EngineThreadPolicy.message("settings"));
+    btnThreadSettings.setBounds(threadSettingsX, 87, 133, 25);
+    btnThreadSettings.addActionListener(
+        event -> {
+          if (openingEntryId.isBlank()) {
+            showThreadPolicyNavigationError(EngineThreadPolicy.message("selectTarget"));
+            return;
           }
+          if (EngineThreadPolicy.findSavedEntry(openingEntryId) == null) {
+            showThreadPolicyNavigationError(EngineThreadPolicy.message("targetDeleted"));
+            return;
+          }
+          setVisible(false);
+          MoreEngines.createDialog(openingEntryId).setVisible(true);
         });
-
-    txtThreads = new JFontTextField();
-    txtThreads.setDocument(new IntDocument());
-    txtThreads.setBounds(
-        Lizzie.config.isFrameFontSmall() ? 482 : (Lizzie.config.isFrameFontMiddle() ? 591 : 711),
-        87,
-        133,
-        24);
-    getContentPane().add(txtThreads);
-
-    chkAutoLoadThreads = new JCheckBox();
-    chkAutoLoadThreads.setBounds(
-        Lizzie.config.isFrameFontSmall() ? 640 : (Lizzie.config.isFrameFontMiddle() ? 756 : 885),
-        87,
-        25,
-        23);
-    getContentPane().add(chkAutoLoadThreads);
+    getContentPane().add(btnThreadSettings);
 
     if (!Lizzie.config.chkKataEnginePDA) {
       txtPDA.setEnabled(false);
@@ -652,24 +623,6 @@ public class SetKataEngines extends JDialog {
       chkPDAInMenu.setSelected(false);
     }
 
-    if (Lizzie.config.chkKataEngineThreads) {
-      chkEditThreads.setSelected(true);
-      txtThreads.setEnabled(true);
-      chkAutoLoadThreads.setEnabled(true);
-      txtThreads.setText(Lizzie.config.txtKataEngineThreads);
-    } else {
-      chkEditThreads.setSelected(false);
-      txtThreads.setEnabled(false);
-      chkAutoLoadThreads.setEnabled(false);
-      chkAutoLoadThreads.setSelected(false);
-    }
-    if (Lizzie.config.autoLoadKataEngineThreads) {
-      chkEditThreads.setSelected(true);
-      txtThreads.setEnabled(true);
-      chkAutoLoadThreads.setEnabled(true);
-      chkAutoLoadThreads.setSelected(true);
-      txtThreads.setText(Lizzie.config.txtKataEngineThreads);
-    } else chkAutoLoadThreads.setSelected(false);
 
     //   if (Lizzie.config.chkKataEngineRPT || Lizzie.config.autoLoadKataEngineRPT)
     //  txtRPT.setText(Lizzie.config.txtKataEngineRPT);
@@ -703,6 +656,14 @@ public class SetKataEngines extends JDialog {
           400,
           23);
     }
+  }
+
+  private void showThreadPolicyNavigationError(String message) {
+    javax.swing.JOptionPane.showMessageDialog(
+        this,
+        message,
+        EngineThreadPolicy.message("settings"),
+        javax.swing.JOptionPane.WARNING_MESSAGE);
   }
 
   private class LinkLabel extends JTextPane {

@@ -881,9 +881,6 @@ public class Config {
   public String autoLoadTxtKataEngineWRN = "";
   public boolean autoLoadKataEngineWRN = false;
 
-  public boolean chkKataEngineThreads = false;
-  public String txtKataEngineThreads = "";
-  public boolean autoLoadKataEngineThreads = false;
 
   public boolean showWRNInMenu = true;
   public boolean showPDAInMenu = true;
@@ -1986,9 +1983,6 @@ public class Config {
     txtKataEngineWRN = uiConfig.optString("txt-kata-engine-wrn", "");
     autoLoadKataEngineWRN = uiConfig.optBoolean("autoload-kata-engine-wrn", false);
 
-    chkKataEngineThreads = uiConfig.optBoolean("chk-kata-engine-threads", false);
-    txtKataEngineThreads = uiConfig.optString("txt-kata-engine-threads", "");
-    autoLoadKataEngineThreads = uiConfig.optBoolean("autoload-kata-engine-threads", false);
 
     showWRNInMenu = uiConfig.optBoolean("show-wrn-in-menu", true);
     showPDAInMenu = uiConfig.optBoolean("show-pda-in-menu", true);
