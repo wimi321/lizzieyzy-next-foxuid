@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.parse
 from pathlib import Path
@@ -19,6 +20,11 @@ from typing import Any, Iterable
 
 
 R2_SIZE_LIMIT = 9_000_000_000
+HUMAN_SL_SIZE_BYTES = 99_066_230
+HUMAN_SL_FILE = "b18c384nbt-humanv0.bin.gz"
+HUMAN_SL_KEY = "models/humansl/" + HUMAN_SL_FILE
+HUMAN_SL_SHA256 = "637746e44f0efe00ad1245a50aa9bbf0716efe364c43965ead97bd6835d84ab5"
+HUMAN_SL_ORIGIN = "https://media.katagotraining.org/uploaded/networks/models_extra/" + HUMAN_SL_FILE
 DEFAULT_REPOSITORY = "wimi321/lizzieyzy-next"
 DEFAULT_BUCKET = "lizzieyzy-next-downloads"
 DEFAULT_PUBLIC_BASE = "https://download.goagent.top"
@@ -176,9 +182,10 @@ def select_r2_assets(
     if len(names) != len(set(names)):
         raise ReleaseError("R2 asset whitelist contains duplicate names")
     total = sum(asset.size for asset in selected)
-    if enforce_size_limit and total > R2_SIZE_LIMIT:
+    if enforce_size_limit and total + HUMAN_SL_SIZE_BYTES > R2_SIZE_LIMIT:
         raise ReleaseError(
-            f"R2 stable assets total {total:,} bytes, above the {R2_SIZE_LIMIT:,}-byte hard limit"
+            f"R2 stable assets total {total:,} bytes plus {HUMAN_SL_SIZE_BYTES:,} reserved "
+            f"for HumanSL, above the {R2_SIZE_LIMIT:,}-byte hard limit"
         )
     return sorted(selected, key=lambda asset: asset.name)
 
@@ -983,6 +990,34 @@ def stale_release_keys(existing: Iterable[str], keep_keys: set[str]) -> list[str
     return sorted(key for key in existing if key not in keep_keys)
 
 
+def verify_combined_storage_budget(client, bucket: str, release_bytes: int) -> None:
+    """Keep persistent models and metadata inside the same release storage budget."""
+    persistent_bytes = 0
+    model_bytes = 0
+    token = None
+    while True:
+        kwargs = {"Bucket": bucket}
+        if token:
+            kwargs["ContinuationToken"] = token
+        response = client.list_objects_v2(**kwargs)
+        for entry in response.get("Contents", []):
+            key = str(entry["Key"])
+            if not key.startswith("releases/"):
+                size = int(entry["Size"])
+                persistent_bytes += size
+                if key == HUMAN_SL_KEY:
+                    model_bytes = size
+        if not response.get("IsTruncated"):
+            break
+        token = response["NextContinuationToken"]
+    total = release_bytes + persistent_bytes + max(0, HUMAN_SL_SIZE_BYTES - model_bytes)
+    if total > R2_SIZE_LIMIT:
+        raise ReleaseError(
+            f"R2 releases, persistent objects and HumanSL reserve total {total:,} bytes, "
+            f"above the {R2_SIZE_LIMIT:,}-byte hard limit"
+        )
+
+
 def delete_unselected_release_objects(
     client, bucket: str, keep_keys: set[str]
 ) -> None:
@@ -1054,6 +1089,7 @@ def verify_r2_inventory(client, bucket: str, assets: Iterable[Asset]) -> None:
             f"R2 actual release inventory is {total:,} bytes, above the "
             f"{R2_SIZE_LIMIT:,}-byte hard limit"
         )
+    verify_combined_storage_budget(client, bucket, total)
 
 
 def download_small_asset(session, asset: Asset) -> bytes:
@@ -1609,6 +1645,7 @@ def promote(args: argparse.Namespace) -> None:
     legacy = build_legacy_manifest(manifest)
 
     client = r2_client(account_id, access_key, secret_key)
+    verify_combined_storage_budget(client, args.bucket, total)
     publish_maintenance_catalog(
         client,
         args.bucket,
@@ -1679,6 +1716,59 @@ def plan(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def receive_humansl(session, url: str, output) -> None:
+    digest = hashlib.sha256()
+    size = 0
+    with session.get(url, stream=True, timeout=(30, 60),
+                     headers={"Accept-Encoding": "identity"}) as response:
+        if response.status_code != 200:
+            raise ReleaseError(f"HumanSL download returned HTTP {response.status_code}")
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            size += len(chunk)
+            if size > HUMAN_SL_SIZE_BYTES:
+                raise ReleaseError("HumanSL download exceeds pinned size")
+            digest.update(chunk)
+            output.write(chunk)
+    if size != HUMAN_SL_SIZE_BYTES or digest.hexdigest() != HUMAN_SL_SHA256:
+        raise ReleaseError("HumanSL download failed pinned size/SHA-256 verification")
+
+
+def mirror_humansl(args: argparse.Namespace) -> None:
+    import requests
+
+    names = ("CLOUDFLARE_R2_ACCOUNT_ID", "CLOUDFLARE_R2_ACCESS_KEY_ID",
+             "CLOUDFLARE_R2_SECRET_ACCESS_KEY")
+    values = [os.environ.get(name, "").strip() for name in names]
+    if not all(values):
+        raise ReleaseError("Missing R2 publisher credentials")
+    client = r2_client(*values)
+    release_bytes = 0
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=args.bucket, Prefix="releases/"):
+        release_bytes += sum(int(entry["Size"]) for entry in page.get("Contents", []))
+    verify_combined_storage_budget(client, args.bucket, release_bytes)
+    asset = Asset(HUMAN_SL_FILE, HUMAN_SL_SIZE_BYTES, HUMAN_SL_SHA256,
+                  HUMAN_SL_ORIGIN, HUMAN_SL_ORIGIN, "human-sl-model", r2_key=HUMAN_SL_KEY)
+    with requests.Session() as session:
+        if not object_matches(client, args.bucket, asset):
+            with tempfile.TemporaryFile() as model:
+                receive_humansl(session, HUMAN_SL_ORIGIN, model)
+                model.seek(0)
+                client.put_object(
+                    Bucket=args.bucket, Key=HUMAN_SL_KEY, Body=model,
+                    ContentLength=HUMAN_SL_SIZE_BYTES, ContentType="application/octet-stream",
+                    CacheControl="public, max-age=31536000, immutable",
+                    ContentDisposition=f'attachment; filename="{HUMAN_SL_FILE}"',
+                    Metadata={"sha256": HUMAN_SL_SHA256})
+        if not object_matches(client, args.bucket, asset):
+            raise ReleaseError("HumanSL R2 metadata verification failed")
+        public_url = args.public_base.rstrip("/") + "/" + HUMAN_SL_KEY
+        _verify_public_object(session, public_url, asset)
+        with tempfile.TemporaryFile() as downloaded:
+            receive_humansl(session, public_url, downloaded)
+    verify_combined_storage_budget(client, args.bucket, release_bytes)
+    print(f"HumanSL public download verified: {public_url}; {HUMAN_SL_SIZE_BYTES} bytes; SHA-256 {HUMAN_SL_SHA256}")
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     subcommands = root.add_subparsers(dest="command", required=True)
@@ -1701,6 +1791,9 @@ def parser() -> argparse.ArgumentParser:
     test_channel.add_argument("--tag", required=True)
     test_channel.add_argument("--private-key", required=True)
     test_channel.add_argument("--key-id", default=DEFAULT_KEY_ID)
+    human_sl = subcommands.add_parser("mirror-humansl")
+    human_sl.add_argument("--bucket", default=DEFAULT_BUCKET)
+    human_sl.add_argument("--public-base", default=DEFAULT_PUBLIC_BASE)
     return root
 
 
@@ -1711,6 +1804,8 @@ def main() -> int:
             plan(args)
         elif args.command == "publish-test-channel":
             publish_test_channel(args)
+        elif args.command == "mirror-humansl":
+            mirror_humansl(args)
         else:
             promote(args)
         return 0

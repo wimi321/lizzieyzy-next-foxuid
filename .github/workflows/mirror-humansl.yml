@@ -1,0 +1,37 @@
+name: Mirror HumanSL model to R2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-r2-promotion
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: stable-release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install publisher dependencies
+        run: python -m pip install --disable-pip-version-check boto3 cryptography requests
+      - name: Test publisher
+        run: python -m unittest scripts.test_r2_release
+      - name: Mirror and verify pinned HumanSL model
+        env:
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
+          R2_PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE_URL }}
+        run: |
+          python scripts/r2_release.py mirror-humansl \
+            --bucket "${R2_BUCKET:-lizzieyzy-next-downloads}" \
+            --public-base "${R2_PUBLIC_BASE:-https://download.goagent.top}"

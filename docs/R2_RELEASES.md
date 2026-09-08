@@ -2,7 +2,7 @@
 
 用户唯一公开入口是 `https://goagent.top/download/`。`download.goagent.top` 只作为安装包、
 公开目录和软件更新接口的技术后台；GitHub Release 始终保留完整资产、安装器、Linux 包、
-历史版本和自动备用下载，pre-release 不上传 R2。
+历史版本和自动备用下载，pre-release 安装包不上传 R2。
 
 测试通道不走 R2。签名测试清单只发布到 GitHub：版本化 pre-release 上的
 `lizzieyzy-next-update-envelope.json`，以及固定 tag `channel-beta` 上的同名指针。
@@ -13,7 +13,7 @@
 
 ## 固定资源范围
 
-R2 桶名固定为 `lizzieyzy-next-downloads`，只保留一个正式版。发布脚本要求每个正式版恰好
+R2 桶名固定为 `lizzieyzy-next-downloads`，安装包只保留一个正式版。发布脚本要求每个正式版恰好
 包含以下 13 个镜像对象，数量或名称不一致会直接停止：
 
 - 4 个 Windows 免安装包：OpenCL、CPU、统一 NVIDIA CUDA、无引擎
@@ -21,6 +21,19 @@ R2 桶名固定为 `lizzieyzy-next-downloads`，只保留一个正式版。发�
 - macOS Apple Silicon 与 Intel 两个 DMG
 - Windows AMD RX 9000 / RDNA4 `gfx120x` ROCm 实验免安装包
 - TensorRT `.7z.001`、`.7z.002`、README、manifest、SHA-256 文件
+
+另独立保留 HumanSL 人类模型 `models/humansl/b18c384nbt-humanv0.bin.gz`（99,066,230 字节），
+供软件内“一键设置”与“AI 陪练”按需下载。模型与版本无关，不加入安装包目录或更新清单，
+也不随 `releases/` 清理。客户端优先使用
+`https://download.goagent.top/models/humansl/b18c384nbt-humanv0.bin.gz`，
+连接、下载或校验失败时回退 KataGo 官方源；用户取消时不启动备用下载。
+两源均必须通过相同的大小与 SHA-256 校验：
+`637746e44f0efe00ad1245a50aa9bbf0716efe364c43965ead97bd6835d84ab5`。
+已有校验通过的模型直接复用；旧版客户端仍使用其内置官方地址，需要更新软件后使用镜像。
+
+首次上传或修复镜像运行 `Mirror HumanSL model to R2` 工作流。它与正式发布共用并发锁，
+先检查桶容量并验证官方原文件，再上传固定对象，最后从公网完整下载校验大小、SHA 和 Range。
+工作流复用现有桶级凭据，不改 Release、安装包、catalog 或签名更新清单。
 
 Windows 安装器、Linux 包、其他 AMD ROCm 架构、pre-release 和历史版本不占用 R2。
 RX 6000、RX 7000 与 Ryzen AI Max 的实验包继续由 GitHub Release 提供。版本化对象位于
@@ -35,9 +48,11 @@ RX 6000、RX 7000 与 Ryzen AI Max 的实验包继续由 GitHub Release 提供�
 
 Cloudflare Redirect Rule 必须仅匹配 `download.goagent.top` 的 `/` 和 `/index.html`，以 301
 跳转到 `https://goagent.top/download/` 并保留查询字符串。`/releases/*` 与 `/channels/*`
-不能被重定向。发布器会同时验证两个根入口的 301，以及目录、更新清单和安装包接口。
+以及 `/models/*` 不能被重定向。发布器会同时验证两个根入口的 301，以及目录、更新清单和安装包接口。
 
-镜像资产总量不得超过 `9,000,000,000` 字节。门禁失败、旧版本对象清理失败或任一 SHA-256
+镜像资产、持久模型和现有元数据总量不得超过 `9,000,000,000` 字节。
+发布前为 HumanSL 预留空间，查询桶中非版本对象并合并核算，防止后续发布挤占模型容量。
+门禁失败、旧版本对象清理失败或任一 SHA-256
 不一致时，GitHub Release 保持原状态，不会被晋升为正式版。
 
 ## 发布流程
