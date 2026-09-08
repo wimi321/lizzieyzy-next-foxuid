@@ -165,10 +165,6 @@ public final class EngineThreadPolicy {
         } catch (IOException unavailable) {
           // The attributable result remains usable; missing metadata only recommends retesting.
         }
-      } else if (!legacyUi.optBoolean("engine-thread-policy-migrated", false)
-          && (legacyUi.has("txt-kata-engine-threads")
-              || legacyUi.has("katago-benchmark-threads"))) {
-        entry.threadPolicy.put("legacyOverrideStopped", true);
       }
     }
   }

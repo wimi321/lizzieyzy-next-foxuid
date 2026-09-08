@@ -32,6 +32,7 @@ public class PanelWithToolTips extends JPanel {
     SwingUtilities.invokeLater(
         new Runnable() {
           public void run() {
+            if (label.getParent() != PanelWithToolTips.this) return;
             remove(label);
             addImpl(label, null, -1);
           }

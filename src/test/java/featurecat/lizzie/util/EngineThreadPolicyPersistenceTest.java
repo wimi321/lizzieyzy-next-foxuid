@@ -315,7 +315,6 @@ class EngineThreadPolicyPersistenceTest {
       for (EngineData migrated : Utils.normalizeEngineSettings()) {
         assertEquals(EngineThreadPolicy.Source.CFG, EngineThreadPolicy.source(migrated));
         assertEquals(0, EngineThreadPolicy.recommendedThreads(migrated));
-        assertTrue(migrated.threadPolicy.getBoolean("legacyOverrideStopped"));
       }
     }
   }

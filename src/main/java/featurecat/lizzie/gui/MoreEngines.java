@@ -34,6 +34,7 @@ import java.util.concurrent.ExecutionException;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.ButtonGroup;
 import javax.swing.ImageIcon;
 import javax.swing.JDialog;
@@ -78,7 +79,6 @@ public class MoreEngines extends JPanel {
   JTextArea threadPolicyStatus;
   private JPanel threadPolicyPanel;
   private JPanel threadPolicyControls;
-  private JPanel threadPolicyChoices;
   private JPanel engineActionsPanel;
   JFontRadioButton threadPolicyCfg;
   JFontRadioButton threadPolicyBenchmark;
@@ -235,6 +235,9 @@ public class MoreEngines extends JPanel {
     this.threadPolicyStatus.setWrapStyleWord(true);
     this.benchmarkSelectedEngine =
         new JFontButton(this.resourceBundle.getString("EngineThreadPolicy.startBenchmark"));
+    Dimension benchmarkButtonSize = benchmarkSelectedEngine.getPreferredSize();
+    benchmarkButtonSize.height = Math.max(24, benchmarkButtonSize.height);
+    benchmarkSelectedEngine.setPreferredSize(benchmarkButtonSize);
     ButtonGroup threadPolicyGroup = new ButtonGroup();
     threadPolicyGroup.add(threadPolicyCfg);
     threadPolicyGroup.add(threadPolicyBenchmark);
@@ -451,15 +454,17 @@ public class MoreEngines extends JPanel {
     threadSourceLabel.setFont(threadSourceLabel.getFont().deriveFont(Font.BOLD));
     AccessibilitySupport.labelFor(
         threadSourceLabel, threadPolicyCfg, threadSourceLabel.getText());
-    threadPolicyChoices = new JPanel(new FlowLayout(FlowLayout.LEADING, 12, 0));
-    threadPolicyChoices.setOpaque(false);
-    threadPolicyChoices.add(threadPolicyCfg);
-    threadPolicyChoices.add(threadPolicyBenchmark);
-    threadPolicyControls = new JPanel(new BorderLayout(12, 0));
+    FlowLayout threadSourceLayout = new FlowLayout(FlowLayout.LEADING, 0, 0);
+    threadSourceLayout.setAlignOnBaseline(true);
+    threadPolicyControls = new JPanel(threadSourceLayout);
     threadPolicyControls.setOpaque(false);
-    threadPolicyControls.add(threadSourceLabel, BorderLayout.WEST);
-    threadPolicyControls.add(threadPolicyChoices, BorderLayout.CENTER);
-    threadPolicyControls.add(benchmarkSelectedEngine, BorderLayout.EAST);
+    threadPolicyControls.add(threadSourceLabel);
+    threadPolicyControls.add(Box.createHorizontalStrut(16));
+    threadPolicyControls.add(threadPolicyCfg);
+    threadPolicyControls.add(Box.createHorizontalStrut(12));
+    threadPolicyControls.add(threadPolicyBenchmark);
+    threadPolicyControls.add(Box.createHorizontalStrut(12));
+    threadPolicyControls.add(benchmarkSelectedEngine);
     threadPolicyControls.setPreferredSize(
         new Dimension(880, Math.max(28, threadPolicyControls.getPreferredSize().height)));
     threadPolicyPanel = new JPanel(new BorderLayout(0, 6));
@@ -986,7 +991,6 @@ public class MoreEngines extends JPanel {
         curIndex >= 0 && isUnknownThreadTarget(command.getText(), remote, local);
     threadPolicyPanel.setVisible(remote || local || unknown);
     remoteManagedThreads.setVisible(remote);
-    threadPolicyChoices.setVisible(local);
     threadPolicyCfg.setVisible(local);
     threadPolicyBenchmark.setVisible(local);
     benchmarkSelectedEngine.setVisible(local && saved != null);
@@ -1038,10 +1042,6 @@ public class MoreEngines extends JPanel {
     if (saved != null) {
       String environment = EngineThreadPolicy.environmentStatus(saved);
       if (!environment.isBlank()) statuses.add(environment);
-      if (saved.threadPolicy != null
-          && saved.threadPolicy.optBoolean("legacyOverrideStopped", false)) {
-        statuses.add(EngineThreadPolicy.message("legacyOverrideStopped"));
-      }
       if (hasExplicitThreadOverride(command.getText())) {
         statuses.add(EngineThreadPolicy.message("explicitOverride"));
       }

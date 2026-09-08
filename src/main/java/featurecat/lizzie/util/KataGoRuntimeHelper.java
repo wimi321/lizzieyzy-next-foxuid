@@ -3941,7 +3941,6 @@ public final class KataGoRuntimeHelper {
       policy.put("katago-benchmark-average-batch-size", result.averageBatchSize);
       policy.put("environment", new JSONObject(target.environment.toString()));
       policy.put(APPLE_AUTO_OPTIMIZE_VERSION_KEY, APPLE_AUTO_OPTIMIZE_VERSION);
-      policy.remove("legacyOverrideStopped");
       if (result.tuningProfile != null) new KataGoTuningStore(policy).save(result.tuningProfile);
       else new KataGoTuningStore(policy).clear();
       if (target.initialSetup
