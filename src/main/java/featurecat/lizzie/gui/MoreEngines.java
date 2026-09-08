@@ -869,7 +869,18 @@ public class MoreEngines extends JPanel {
   }
 
   private boolean isCurrentEngineConfigDirty(EngineData saved) {
-    if (saved == null) return true;
+    if (saved == null) {
+      return !this.command.getText().trim().isEmpty()
+          || !this.txtName.getText().isEmpty()
+          || !currentInitialCommand().isEmpty()
+          || this.preload.isSelected()
+          || !this.txtWidth.getText().equals("19")
+          || !this.txtHeight.getText().equals("19")
+          || !this.txtKomi.getText().equals("7.5")
+          || this.chkDefault.isSelected()
+          || this.chkRemoteEngine.isSelected()
+          || selectedThreadSource != EngineThreadPolicy.Source.CFG;
+    }
     if (selectedThreadSource != EngineThreadPolicy.source(saved)) return true;
     if (!this.command.getText().trim().equals(saved.commands)) return true;
     if (!this.txtName.getText().equals(saved.name)) return true;
@@ -1215,6 +1226,7 @@ public class MoreEngines extends JPanel {
       return false;
     }
     EngineData latest = targetIndex >= 0 ? engineData.get(targetIndex) : null;
+    if (latest == null && !isCurrentEngineConfigDirty(null)) return true;
     EngineData engineDt = new EngineData();
     String editedCommand = this.command.getText().trim();
     if (latest != null) {
