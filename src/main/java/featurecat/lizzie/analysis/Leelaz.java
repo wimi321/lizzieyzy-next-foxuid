@@ -3,20 +3,21 @@ package featurecat.lizzie.analysis;
 import featurecat.lizzie.Config;
 import featurecat.lizzie.EngineStartupStatus;
 import featurecat.lizzie.Lizzie;
+import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationProbe;
+import featurecat.lizzie.analysis.remote.EngineTransport;
+import featurecat.lizzie.analysis.remote.RemoteComputeConfig;
 import featurecat.lizzie.enginegame.EngineGamePlayMode;
 import featurecat.lizzie.enginegame.EngineGameSide;
 import featurecat.lizzie.enginegame.EngineGameSideLimits;
 import featurecat.lizzie.enginegame.GameOutcome;
 import featurecat.lizzie.enginegame.ParticipantBinding;
-import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationProbe;
-import featurecat.lizzie.analysis.remote.EngineTransport;
-import featurecat.lizzie.analysis.remote.RemoteComputeConfig;
 import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.gui.EngineFailedMessage;
 import featurecat.lizzie.gui.JFontCheckBox;
 import featurecat.lizzie.gui.JFontLabel;
 import featurecat.lizzie.gui.LizzieFrame;
 import featurecat.lizzie.gui.Message;
+import featurecat.lizzie.logging.EngineObservation;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryList;
@@ -31,7 +32,6 @@ import featurecat.lizzie.util.KataGoRuntimeHelper.TensorRtRepairContext;
 import featurecat.lizzie.util.KataGoRuntimeHelper.TensorRtRuntimeException;
 import featurecat.lizzie.util.Utils;
 import featurecat.lizzie.util.YikeSyncDebugLog;
-import featurecat.lizzie.logging.EngineObservation;
 import java.awt.Component;
 import java.awt.GraphicsEnvironment;
 import java.io.BufferedOutputStream;
@@ -479,6 +479,11 @@ public class Leelaz {
   private long pdaStartupQueryGeneration;
   private volatile boolean openClFp32CompatibilityActive = false;
   private volatile boolean launchCommandSetsKataGoThreads = false;
+  public String savedEntryId = "";
+  private EngineData threadPolicyAtStart;
+  private JSONObject threadStartupEnvironment;
+  private volatile int appliedSearchThreads;
+  private volatile boolean threadPolicyReloadPending;
   private final AtomicBoolean openClCompatibilityRecoveryAttempted = new AtomicBoolean(false);
   public boolean isCheckingVersion;
   public volatile boolean isCheckingName;
@@ -863,6 +868,20 @@ public class Leelaz {
         CommandLaunchHelper.prepare(Utils.splitCommand(engineCommand));
     commands = launchSpec.getCommandParts();
     rememberKataGoThreadLaunchOverride(commands);
+    threadPolicyAtStart = EngineThreadPolicy.findSavedEntry(savedEntryId);
+    if (threadPolicyAtStart != null && !engineCommand.equals(threadPolicyAtStart.commands))
+      threadPolicyAtStart = null;
+    int selectedThreads = EngineThreadPolicy.threadsForLaunch(threadPolicyAtStart, commands);
+    threadStartupEnvironment = null;
+    if (threadPolicyAtStart != null) {
+      try {
+        threadStartupEnvironment =
+            EngineThreadPolicy.environment(
+                KataGoAutoSetupHelper.inspectSavedEngine(threadPolicyAtStart));
+      } catch (IOException | RuntimeException unavailable) {
+        /* Metadata cannot disable a valid recommendation. */
+      }
+    }
     pda = 0;
     // Get weight name
     //	Pattern wPattern = Pattern.compile("(?s).*?(--weights |-w |-model )([^'\" ]+)(?s).*");
@@ -995,7 +1014,10 @@ public class Leelaz {
       }
       List<String> launchCommands =
           KataGoRuntimeHelper.prepareBundledLaunchCommand(commands, engineExecutable);
-      rememberKataGoThreadLaunchOverride(launchCommands);
+      launchCommands =
+          KataGoRuntimeHelper.applyEntryLaunchPolicy(
+              launchCommands, engineExecutable, threadPolicyAtStart);
+      appliedSearchThreads = selectedThreads;
       openClFp32CompatibilityActive =
           KataGoRuntimeHelper.isOpenClFp32CompatibilityActive(launchCommands, engineExecutable);
       if (openClFp32CompatibilityActive && bundledCommand && !preload) {
@@ -4233,7 +4255,7 @@ public class Leelaz {
           }
           claimed = true;
           int commandNumberBeforePonder = cmdNumber;
-          if (!ponderAfterTrackingIfAnalysisControlAllows()) {
+          if (!ponderIfAnalysisControlAllows()) {
             return false;
           }
           if (cmdNumber > commandNumberBeforePonder) {
@@ -5633,12 +5655,6 @@ public class Leelaz {
       //							sendCommandToLeelazWithOutLog("lizzie_use");
       if (params[1].toLowerCase().startsWith("kata")) {
         canAddPlayer = true;
-        if (engineGameTransaction == null
-            && !suppressGlobalPresentation
-            && !EngineThreadPolicy.isRemoteManaged(this)
-            && Utils.applyRecommendedKataGoThreads(false)) {
-          Utils.persistConfigQuietly();
-        }
         if (params[1].startsWith("KataGoPda")) {
           isKatagoCustom = true;
           isKataGoPda = true;
@@ -15888,7 +15904,7 @@ public class Leelaz {
     }
   }
 
-  private boolean ponderAfterTrackingIfAnalysisControlAllows() {
+  public boolean ponderIfAnalysisControlAllows() {
     synchronized (analysisControlPonderLock()) {
       if (Lizzie.frame != null && Lizzie.frame.isUserAnalysisPaused()) {
         return false;
@@ -23116,6 +23132,63 @@ public class Leelaz {
         KataGoRuntimeHelper.hasEffectiveNumSearchThreadsOverride(effectiveLaunchCommand);
   }
 
+  public boolean matchesThreadStartupEnvironment(JSONObject environment) {
+    return threadStartupEnvironment != null && threadStartupEnvironment.similar(environment);
+  }
+
+  /** Applies a saved policy only through this instance's existing safe restart owner. */
+  public boolean applySavedThreadPolicy(EngineData entry) {
+    if (entry != null) entry = EngineThreadPolicy.findSavedEntry(entry.id);
+    if (entry == null
+        || !entry.id.equals(savedEntryId)
+        || !entry.commands.equals(engineCommand)
+        || EngineThreadPolicy.isRemoteManaged(this)
+        || EngineThreadPolicy.isRemoteManaged(entry.commands, entry.useJavaSSH)
+        || !isKatago
+        || !isLoaded()) return false;
+    int desired;
+    try {
+      desired = EngineThreadPolicy.threadsForLaunch(entry, Utils.splitCommand(engineCommand));
+    } catch (IllegalStateException invalid) {
+      return false;
+    }
+    if (desired == appliedSearchThreads && !threadPolicyReloadPending) return true;
+    threadPolicyReloadPending = true;
+    if (KataGoRuntimeHelper.isBenchmarkEngineSyncSuppressed()) return false;
+    AutomaticRestartAttempt attempt = beginAutomaticEngineRestartAttempt();
+    if (attempt == null) return false;
+    AtomicBoolean failed = new AtomicBoolean();
+    try {
+      normalQuit();
+      shutdown();
+      attempt.restartClosedEngine(
+          currentEngineN,
+          () -> {
+            if (!failed.get()) threadPolicyReloadPending = false;
+          },
+          detail -> {
+            failed.set(true);
+            threadPolicyReloadPending = true;
+          });
+      return true;
+    } catch (IOException | RuntimeException failure) {
+      attempt.close();
+      return false;
+    }
+  }
+
+  public boolean isThreadPolicyPending(EngineData entry) {
+    if (entry == null || !entry.id.equals(savedEntryId) || !started) return false;
+    try {
+      return threadPolicyReloadPending
+          || !entry.commands.equals(engineCommand)
+          || appliedSearchThreads
+              != EngineThreadPolicy.threadsForLaunch(entry, Utils.splitCommand(engineCommand));
+    } catch (IllegalStateException invalid) {
+      return true;
+    }
+  }
+
   //	public void toggleGtpConsole() {
   //		gtpConsole = !gtpConsole;
   //	}
@@ -23141,10 +23214,8 @@ public class Leelaz {
       setPda(Lizzie.config.autoLoadTxtKataEnginePDA);
     }
     if (!EngineThreadPolicy.isRemoteManaged(this) && !launchCommandSetsKataGoThreads) {
-      String kataGoThreads = Utils.resolveKataGoThreadsForEngineLoad();
-      if (!kataGoThreads.isEmpty()) {
-        sendCommand("kata-set-param numSearchThreads " + kataGoThreads);
-      }
+      int threads = EngineThreadPolicy.threadsForLaunch(threadPolicyAtStart, commands);
+      if (threads > 0) sendCommandNoLeelaz2("kata-set-param numSearchThreads " + threads);
     }
     if (Lizzie.config.autoLoadKataEngineWRN) {
       try {

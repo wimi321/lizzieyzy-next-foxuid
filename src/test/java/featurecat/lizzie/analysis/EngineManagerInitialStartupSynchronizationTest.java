@@ -5653,35 +5653,6 @@ class EngineManagerInitialStartupSynchronizationTest {
     }
   }
 
-  @Test
-  void nameMutationRuntimeFailureCannotPublishLoaded() throws Exception {
-    try (StartupTestEnvironment env = StartupTestEnvironment.open()) {
-      ThrowingStartupConfig config = allocate(ThrowingStartupConfig.class);
-      config.uiConfig = new org.json.JSONObject();
-      config.firstLoadKataGo = true;
-      config.txtKataEngineThreads = "1";
-      config.saveFailure = new IllegalStateException("controlled startup config save failure");
-      Lizzie.config = config;
-      StartupSyncLeelaz engine = new StartupSyncLeelaz(true);
-      Board board = boardWithHistory(emptyRootHistory(0));
-      env.publish(engine, board);
-      Lizzie.setPrimaryEngine(engine);
-      engine.bindCurrentPrimaryEngineGeneration();
-      engine.started = true;
-      engine.isLoaded = false;
-      engine.isCheckingName = true;
-      int readyBaseline = env.readyTransitions.get();
-
-      RuntimeException startupFailure =
-          assertThrows(RuntimeException.class, () -> invokeParseLine(engine, "= KataGo"));
-
-      assertSame(config.saveFailure, startupFailure.getCause());
-      assertFalse(engine.isLoaded, "classifier failure must not publish loaded");
-      assertTrue(engine.isDownWithError, "classifier failure must fail the exact reader closed");
-      assertEquals(0, env.readyTransitions.get() - readyBaseline);
-      assertEquals(0, ((SilentStartupMenu) LizzieFrame.menu).readyPrimaryIconCount);
-    }
-  }
 
   @Test
   void terminalDiagnosticCallbackRejectsReplacementReader() throws Exception {

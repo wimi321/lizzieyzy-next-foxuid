@@ -8,7 +8,6 @@ import featurecat.lizzie.analysis.LeelazEngineCommandSink;
 import featurecat.lizzie.analysis.remote.RemoteComputeConfig;
 import featurecat.lizzie.enginegame.EngineGameModule;
 import featurecat.lizzie.enginegame.EngineGameSnapshot;
-
 import featurecat.lizzie.gui.AppleStyleSupport;
 import featurecat.lizzie.gui.BottomToolbar;
 import featurecat.lizzie.gui.DesktopTimeControl;
@@ -45,8 +44,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.function.Consumer;
-import java.util.function.IntConsumer;
 import java.util.Locale;
 import java.util.ResourceBundle;
 import java.util.concurrent.Callable;
@@ -54,6 +51,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -1250,7 +1249,7 @@ public class Lizzie {
           }
           if (!isEngineGame && currentFrame != null && !currentFrame.isPlayingAgainstLeelaz) {
             if (startPondering && !Lizzie.config.notStartPondering) {
-              engine.ponder();
+              engine.ponderIfAnalysisControlAllows();
               engine.setResponseUpToDate();
             } else {
               engine.notPondering();

@@ -5,7 +5,6 @@ import static java.lang.Math.round;
 import featurecat.lizzie.Config;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.analysis.CaptureTsumeGo;
-import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.MoveData;
 import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.gui.HtmlMessage;
@@ -129,9 +128,6 @@ public class Utils {
     if (hideGtpConsoleByDefaultOnce()) {
       changed = true;
     }
-    if (applyRecommendedKataGoThreads(false)) {
-      changed = true;
-    }
     if (KataGoAutoSetupHelper.migrateAutoSetupCommandsIfNeeded()) {
       changed = true;
     }
@@ -146,49 +142,8 @@ public class Utils {
     }
   }
 
-  public static boolean applyRecommendedKataGoThreads(boolean force) {
-    if (Lizzie.config == null || Lizzie.config.uiConfig == null) {
-      return false;
-    }
-
-    String currentValue =
-        Lizzie.config.txtKataEngineThreads == null ? "" : Lizzie.config.txtKataEngineThreads.trim();
-    boolean hasValidValue = isPositiveInteger(currentValue);
-    boolean shouldInitializeAutoLoad = force || Lizzie.config.firstLoadKataGo;
-    String resolvedValue = currentValue;
-    if (force
-        || (!hasValidValue
-            && (shouldInitializeAutoLoad
-                || Lizzie.config.autoLoadKataEngineThreads
-                || Lizzie.config.chkKataEngineThreads))) {
-      resolvedValue = resolveKataGoThreadsValue(currentValue);
-    }
-
-    boolean changed = false;
-    if (!resolvedValue.equals(currentValue)) {
-      Lizzie.config.txtKataEngineThreads = resolvedValue;
-      Lizzie.config.uiConfig.put("txt-kata-engine-threads", resolvedValue);
-      changed = true;
-    }
-    if (shouldInitializeAutoLoad && !Lizzie.config.autoLoadKataEngineThreads) {
-      Lizzie.config.autoLoadKataEngineThreads = true;
-      Lizzie.config.uiConfig.put("autoload-kata-engine-threads", true);
-      changed = true;
-    }
-    if (Lizzie.config.firstLoadKataGo) {
-      Lizzie.config.firstLoadKataGo = false;
-      Lizzie.config.uiConfig.put("first-load-katago", false);
-      changed = true;
-    }
-    return changed;
-  }
 
   public static int getRecommendedKataGoThreads() {
-    KataGoRuntimeHelper.BenchmarkResult benchmarkResult =
-        KataGoRuntimeHelper.getStoredBenchmarkResult();
-    if (benchmarkResult != null && benchmarkResult.recommendedThreads > 0) {
-      return benchmarkResult.recommendedThreads;
-    }
     int processors = Math.max(1, Runtime.getRuntime().availableProcessors());
     if (processors <= 4) {
       return processors;
@@ -196,53 +151,6 @@ public class Utils {
     return Math.max(2, Math.min(MAX_AUTO_KATAGO_THREADS, processors - 1));
   }
 
-  public static String resolveKataGoThreadsValue(String value) {
-    String trimmed = value == null ? "" : value.trim();
-    if (isPositiveInteger(trimmed)) {
-      return trimmed;
-    }
-    return String.valueOf(getRecommendedKataGoThreads());
-  }
-
-  /** Saves the legacy global KataGo thread controls for a local engine target. */
-  public static void saveLegacyKataGoThreadSettings(
-      Leelaz target, boolean editThreads, boolean autoLoadThreads, String threadsText) {
-    if (EngineThreadPolicy.isRemoteManaged(target)) {
-      return;
-    }
-
-    Lizzie.config.chkKataEngineThreads = editThreads;
-    Lizzie.config.autoLoadKataEngineThreads = autoLoadThreads;
-    String threadsValue = threadsText;
-    if (editThreads || autoLoadThreads) {
-      threadsValue = resolveKataGoThreadsValue(threadsValue);
-    }
-    Lizzie.config.txtKataEngineThreads = threadsValue;
-    Lizzie.config.uiConfig.put("txt-kata-engine-threads", threadsValue);
-    Lizzie.config.uiConfig.put("autoload-kata-engine-threads", autoLoadThreads);
-    Lizzie.config.uiConfig.put("chk-kata-engine-threads", editThreads);
-
-    if (editThreads) {
-      target.sendCommand("kata-set-param numSearchThreads " + threadsValue);
-    }
-  }
-
-  public static String resolveKataGoThreadsForEngineLoad() {
-    if (Lizzie.config == null
-        || (!Lizzie.config.chkKataEngineThreads && !Lizzie.config.autoLoadKataEngineThreads)) {
-      return "";
-    }
-    String currentValue =
-        Lizzie.config.txtKataEngineThreads == null ? "" : Lizzie.config.txtKataEngineThreads.trim();
-    String resolvedValue = resolveKataGoThreadsValue(currentValue);
-    if (!resolvedValue.equals(currentValue)) {
-      Lizzie.config.txtKataEngineThreads = resolvedValue;
-      if (Lizzie.config.uiConfig != null) {
-        Lizzie.config.uiConfig.put("txt-kata-engine-threads", resolvedValue);
-      }
-    }
-    return resolvedValue;
-  }
 
   public static void persistConfigQuietly() {
     if (Lizzie.config == null) {
@@ -809,7 +717,7 @@ public class Utils {
     targetLeelazConfig.put("analysis-engine-ssh-info", remoteEngineInfo);
   }
 
-  public static ArrayList<EngineData> getEngineData() {
+  public static synchronized ArrayList<EngineData> getEngineData() {
     ArrayList<EngineData> engineData = new ArrayList<>();
     Optional<JSONArray> engineOpt =
         Optional.ofNullable(Lizzie.config.leelazConfig.optJSONArray("engine-settings-list"));
@@ -820,38 +728,81 @@ public class Utils {
       }
     } else {
       engineData = getEngineDataOld();
-      Lizzie.config.leelazConfig.remove("engine-command");
-      Lizzie.config.leelazConfig.remove("engine-command-list");
-      Lizzie.config.leelazConfig.remove("engine-name-list");
-      Lizzie.config.leelazConfig.remove("engine-preload-list");
-      Lizzie.config.leelazConfig.remove("engine-width-list");
-      Lizzie.config.leelazConfig.remove("engine-height-list");
-      Lizzie.config.leelazConfig.remove("engine-komi-list");
       saveEngineSettings(engineData);
     }
     return engineData;
   }
 
-  public static void saveEngineSettings(ArrayList<EngineData> engineData) {
+  /** Persists legacy identity/policy once before callers bind a saved entry. */
+  public static synchronized ArrayList<EngineData> normalizeEngineSettings() {
+    ArrayList<EngineData> engineData = getEngineData();
+    java.util.HashSet<String> ids = new java.util.HashSet<>();
+    boolean normalize = !Lizzie.config.uiConfig.optBoolean("engine-thread-policy-migrated", false);
+    for (EngineData entry : engineData) {
+      normalize |= entry.id.isBlank() || !ids.add(entry.id) || entry.threadPolicy == null;
+    }
+    if (normalize) saveEngineSettings(engineData);
+    return engineData;
+  }
+
+  public static synchronized void saveEngineSettings(ArrayList<EngineData> engineData) {
+    saveEngineSettings(
+        engineData,
+        Lizzie.config.uiConfig == null
+            ? new JSONObject()
+            : new JSONObject(Lizzie.config.uiConfig.toString()));
+  }
+
+  static synchronized void saveEngineSettings(
+      ArrayList<EngineData> engineData, JSONObject candidateUi) {
     JSONArray engineDate = new JSONArray();
+    ArrayList<EngineData> candidates = new ArrayList<>(engineData.size());
+    java.util.HashSet<String> ids = new java.util.HashSet<>();
+    for (EngineData entry : engineData) {
+      EngineData candidate = engineDataFromJson(engineDataToJson(entry), entry.index);
+      if (candidate.id.isBlank() || !ids.add(candidate.id)) {
+        candidate.id = java.util.UUID.randomUUID().toString();
+        ids.add(candidate.id);
+      }
+      candidates.add(candidate);
+    }
+    EngineThreadPolicy.migrateLegacyEntries(
+        candidates, Lizzie.config.uiConfig == null ? new JSONObject() : Lizzie.config.uiConfig);
     int configuredDefaultEngine = -1;
-    if (Lizzie.config.uiConfig != null
-        && Lizzie.config.uiConfig.optBoolean("autoload-default", false)) {
-      configuredDefaultEngine = Lizzie.config.uiConfig.optInt("default-engine", -1);
+    if (candidateUi.optBoolean("autoload-default", false)) {
+      configuredDefaultEngine = candidateUi.optInt("default-engine", -1);
     }
-    int defaultEngineIndex =
-        normalizeDefaultEngineFlags(engineData, configuredDefaultEngine);
+    int defaultEngineIndex = normalizeDefaultEngineFlags(candidates, configuredDefaultEngine);
     for (int i = 0; i < engineData.size(); i++) {
-      engineDate.put(engineDataToJson(engineData.get(i)));
+      engineDate.put(engineDataToJson(candidates.get(i)));
     }
-    Lizzie.config.leelazConfig.put("engine-settings-list", engineDate);
-    if (Lizzie.config.uiConfig != null) {
-      Lizzie.config.uiConfig.put("default-engine", defaultEngineIndex);
+    JSONObject candidateLeelaz = new JSONObject(Lizzie.config.leelazConfig.toString());
+    candidateUi.put("engine-thread-policy-migrated", true);
+    for (String key :
+        List.of(
+            "engine-command",
+            "engine-command-list",
+            "engine-name-list",
+            "engine-preload-list",
+            "engine-width-list",
+            "engine-height-list",
+            "engine-komi-list")) {
+      candidateLeelaz.remove(key);
     }
+    candidateLeelaz.put("engine-settings-list", engineDate);
+    candidateUi.put("default-engine", defaultEngineIndex);
     try {
-      Lizzie.config.save();
+      Lizzie.config.saveConfigSections(candidateUi, candidateLeelaz);
     } catch (IOException e) {
-      e.printStackTrace();
+      throw new java.io.UncheckedIOException(e);
+    }
+    for (int i = 0; i < engineData.size(); i++) {
+      EngineData candidate = candidates.get(i);
+      EngineData entry = engineData.get(i);
+      entry.id = candidate.id;
+      entry.index = candidate.index;
+      entry.isDefault = candidate.isDefault;
+      entry.threadPolicy = candidate.threadPolicy;
     }
   }
 
@@ -1291,6 +1242,9 @@ public class Utils {
 
   static EngineData engineDataFromJson(JSONObject engineInfo, int index) {
     EngineData engineDt = new EngineData();
+    engineDt.id = engineInfo.optString("id", "");
+    JSONObject threadPolicy = engineInfo.optJSONObject("threadPolicy");
+    engineDt.threadPolicy = threadPolicy == null ? null : new JSONObject(threadPolicy.toString());
     engineDt.index = index;
     engineDt.commands = engineInfo.optString("command", "");
     engineDt.name = engineInfo.optString("name", "");
@@ -1317,6 +1271,10 @@ public class Utils {
 
   static JSONObject engineDataToJson(EngineData engineDt) {
     JSONObject engineInfo = new JSONObject();
+    if (!engineDt.id.isBlank()) engineInfo.put("id", engineDt.id);
+    if (engineDt.threadPolicy != null) {
+      engineInfo.put("threadPolicy", new JSONObject(engineDt.threadPolicy.toString()));
+    }
     engineInfo.put("command", engineDt.commands);
     engineInfo.put("name", engineDt.name);
     engineInfo.put("preload", engineDt.preload);

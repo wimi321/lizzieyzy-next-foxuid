@@ -3,27 +3,26 @@ package featurecat.lizzie.analysis;
 import featurecat.lizzie.Config;
 import featurecat.lizzie.EngineStartupStatus;
 import featurecat.lizzie.Lizzie;
-import featurecat.lizzie.gui.DesktopTimeControl;
-import featurecat.lizzie.gui.EngineData;
-import featurecat.lizzie.gui.EnginePkIdentity;
-import featurecat.lizzie.enginegame.EngineParticipantIdentity;
+import featurecat.lizzie.enginegame.BatchSummary;
 import featurecat.lizzie.enginegame.EngineGamePlan;
+import featurecat.lizzie.enginegame.EngineGamePlayMode;
+import featurecat.lizzie.enginegame.EngineGameSide;
+import featurecat.lizzie.enginegame.EngineGameSideLimits;
+import featurecat.lizzie.enginegame.EngineGameTimeModes;
+import featurecat.lizzie.enginegame.EngineParticipantIdentity;
+import featurecat.lizzie.enginegame.LifecycleBinding;
 import featurecat.lizzie.enginegame.MatchRulesAdmission;
 import featurecat.lizzie.enginegame.MatchRulesPrepareException;
 import featurecat.lizzie.enginegame.MatchRulesSnapshot;
-import featurecat.lizzie.enginegame.BatchSummary;
-import featurecat.lizzie.enginegame.EngineGamePlayMode;
 import featurecat.lizzie.enginegame.OpeningStanding;
-import featurecat.lizzie.enginegame.EngineGameResignPolicy;
-import featurecat.lizzie.enginegame.EngineGameSide;
-import featurecat.lizzie.enginegame.EngineGameSideLimits;
-import featurecat.lizzie.enginegame.EngineGameTimeMode;
-import featurecat.lizzie.enginegame.EngineGameTimeModes;
-import featurecat.lizzie.enginegame.LifecycleBinding;
 import featurecat.lizzie.enginegame.ParticipantBinding;
+import featurecat.lizzie.gui.DesktopTimeControl;
+import featurecat.lizzie.gui.EngineData;
+import featurecat.lizzie.gui.EnginePkIdentity;
 import featurecat.lizzie.gui.LizzieFrame;
 import featurecat.lizzie.gui.Menu;
 import featurecat.lizzie.gui.SgfWinLossList;
+import featurecat.lizzie.logging.LogCategories;
 import featurecat.lizzie.rules.Board;
 import featurecat.lizzie.rules.BoardData;
 import featurecat.lizzie.rules.BoardHistoryList;
@@ -34,7 +33,6 @@ import featurecat.lizzie.rules.SGFParser;
 import featurecat.lizzie.rules.Stone;
 import featurecat.lizzie.rules.Zobrist;
 import featurecat.lizzie.util.Utils;
-import featurecat.lizzie.logging.LogCategories;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.BufferedWriter;
@@ -50,7 +48,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -575,7 +572,7 @@ public class EngineManager {
 
   public EngineManager(Config config, int index, boolean loadDefault)
       throws JSONException, IOException {
-    this(config, index, loadDefault, Utils.getEngineData(), Leelaz::new);
+    this(config, index, loadDefault, Utils.normalizeEngineSettings(), Leelaz::new);
   }
 
   @FunctionalInterface
@@ -651,6 +648,7 @@ public class EngineManager {
       EngineData engineDt = engineData.get(i);
       Leelaz e;
       e = engineFactory.create(engineDt.commands);
+      e.savedEntryId = engineDt.id;
       e.preload = engineDt.preload;
       e.width = engineDt.width;
       e.height = engineDt.height;
@@ -4299,6 +4297,8 @@ public class EngineManager {
   private boolean isSameEngineProcess(Leelaz engine, EngineData engineDt) {
     return engine != null
         && engineDt != null
+        && !engineDt.id.isBlank()
+        && engineDt.id.equals(engine.savedEntryId)
         && safeEquals(engine.oriEngineCommand, engineDt.commands)
         && engine.oriWidth == engineDt.width
         && engine.oriHeight == engineDt.height
@@ -4320,6 +4320,7 @@ public class EngineManager {
   }
 
   private void applySavedEngineMetadata(Leelaz engine, EngineData engineDt, int index) {
+    if (engine.savedEntryId.isBlank()) engine.savedEntryId = engineDt.id;
     engine.preload = engineDt.preload;
     engine.width = engineDt.width;
     engine.height = engineDt.height;

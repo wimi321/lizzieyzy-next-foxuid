@@ -284,6 +284,7 @@ public final class KataGoAutoSetupHelper {
     public final PackageFlavor packageFlavor;
     public final List<MissingComponent> missingComponents;
     public final List<String> diagnostics;
+    private String savedEntryId = "";
 
     private LocalKataGoDiscoveryResult(
         Path workingDir,
@@ -354,6 +355,8 @@ public final class KataGoAutoSetupHelper {
     public final Path activeWeightPath;
     public final List<Path> weightCandidates;
     public final LocalKataGoDiscoveryResult discovery;
+    public final String savedEntryId;
+    public final Path executionDirectory;
 
     private SetupSnapshot(
         Path workingDir,
@@ -391,6 +394,11 @@ public final class KataGoAutoSetupHelper {
       this.activeWeightPath = activeWeightPath;
       this.weightCandidates = Collections.unmodifiableList(new ArrayList<>(weightCandidates));
       this.discovery = discovery;
+      this.savedEntryId = discovery == null ? "" : discovery.savedEntryId;
+      this.executionDirectory =
+          Lizzie.config == null
+              ? workingDir
+              : Lizzie.config.getRuntimeWorkDirectory().toPath().toAbsolutePath().normalize();
     }
 
     public boolean hasEngine() {
@@ -591,6 +599,7 @@ public final class KataGoAutoSetupHelper {
       if (result == null) {
         continue;
       }
+      result.savedEntryId = candidate.savedEntryId;
       if (result.isComplete()) {
         return result;
       }
@@ -677,6 +686,26 @@ public final class KataGoAutoSetupHelper {
         "",
         PackageFlavor.EXTERNAL,
         new ArrayList<String>());
+  }
+
+  /** Inspects this saved entry only; it does not start an engine or select a fallback entry. */
+  public static SetupSnapshot inspectSavedEngine(EngineData entry) {
+    Path workingDir = currentWorkingDir();
+    Path appRoot = findAppRoot().orElse(workingDir);
+    LocalKataGoDiscoveryResult result =
+        discoverFromCommand(
+            entry.commands,
+            DiscoverySource.MANUAL_SELECTION,
+            entry.name,
+            entry.useJavaSSH,
+            workingDir,
+            appRoot,
+            List.of(),
+            detectPackageFlavor(appRoot),
+            new ArrayList<>());
+    if (result == null) return null;
+    result.savedEntryId = entry.id;
+    return result.toSnapshot();
   }
 
   public static void rememberSelectedLocalKataGo(LocalKataGoDiscoveryResult result)
@@ -1935,40 +1964,52 @@ public final class KataGoAutoSetupHelper {
     engineData.useKeyGen = false;
     engineData.keyGenPath = "";
     engineData.initialCommand = createdEngine ? "" : safeString(engineData.initialCommand);
+    if (createdEngine) {
+      engineData.threadPolicy =
+          new JSONObject().put("source", "CFG").put("sourceRevision", 0L).put("initialSetup", true);
+    }
+    JSONObject candidateUi = new JSONObject(Lizzie.config.uiConfig.toString());
 
     // Only force autoload=default on a truly fresh install. Once the user has picked
     // "start with no engine" or "pick manually", respect that choice across setup runs.
     if (firstRunSetup) {
-      Lizzie.config.uiConfig.put("autoload-default", true);
-      Lizzie.config.uiConfig.put("autoload-empty", false);
-      Lizzie.config.uiConfig.put("autoload-last", false);
+      candidateUi.put("autoload-default", true);
+      candidateUi.put("autoload-empty", false);
+      candidateUi.put("autoload-last", false);
     }
     if (selectAsDefault) {
-      Lizzie.config.uiConfig.put("default-engine", engineIndex);
+      candidateUi.put("default-engine", engineIndex);
     }
-    Utils.saveEngineSettings(engines);
-    rememberPreferredWeight(snapshot.activeWeightPath);
+    candidateUi.put(
+        "katago-preferred-weight-path",
+        snapshot.activeWeightPath.toAbsolutePath().normalize().toString());
     if (!Lizzie.config.analysisEngineCommandCustomized) {
-      Lizzie.config.analysisEngineCommand = analysisCommand;
-      Lizzie.config.uiConfig.put("analysis-engine-command", analysisCommand);
+      candidateUi.put("analysis-engine-command", analysisCommand);
     }
-    Lizzie.config.uiConfig.put(
+    candidateUi.put(
         "katago-auto-setup-weight-name", snapshot.activeWeightPath.getFileName().toString());
-    Lizzie.config.uiConfig.put(
+    candidateUi.put(
         "katago-auto-setup-weight-path",
         snapshot.activeWeightPath.toAbsolutePath().normalize().toString());
-    Lizzie.config.uiConfig.put(
+    candidateUi.put(
         "katago-auto-setup-engine-path",
         snapshot.enginePath.toAbsolutePath().normalize().toString());
-    Lizzie.config.uiConfig.put(
+    candidateUi.put(
         "katago-auto-setup-gtp-config-path",
         snapshot.gtpConfigPath.toAbsolutePath().normalize().toString());
-    Lizzie.config.uiConfig.put(
+    candidateUi.put(
         "katago-auto-setup-analysis-config-path",
         snapshot.analysisConfigPath.toAbsolutePath().normalize().toString());
-    Lizzie.config.uiConfig.put("katago-auto-setup-updated-at", System.currentTimeMillis());
-    Lizzie.config.save();
-    return new SetupResult(snapshot, engineIndex, resolvedEngineName, createdEngine);
+    candidateUi.put("katago-auto-setup-updated-at", System.currentTimeMillis());
+    try {
+      Utils.saveEngineSettings(engines, candidateUi);
+    } catch (UncheckedIOException failure) {
+      throw failure.getCause();
+    }
+    if (!Lizzie.config.analysisEngineCommandCustomized)
+      Lizzie.config.analysisEngineCommand = analysisCommand;
+    return new SetupResult(
+        inspectSavedEngine(engineData), engineIndex, resolvedEngineName, createdEngine);
   }
 
   private static int normalizeBoardSize(int size) {
@@ -2028,13 +2069,6 @@ public final class KataGoAutoSetupHelper {
     return AUTO_SETUP_ENGINE_NAME;
   }
 
-  private static void rememberPreferredWeight(Path weightPath) {
-    if (weightPath == null || Lizzie.config == null || Lizzie.config.uiConfig == null) {
-      return;
-    }
-    Lizzie.config.uiConfig.put(
-        "katago-preferred-weight-path", weightPath.toAbsolutePath().normalize().toString());
-  }
 
   private static Path humanSlModelsDir(Path workingDir) {
     return workingDir.resolve(HUMAN_SL_MODEL_DIR_NAME).toAbsolutePath().normalize();
@@ -2614,7 +2648,7 @@ public final class KataGoAutoSetupHelper {
       }
       candidates.add(
           new SavedEngineCandidate(
-              engine.commands, engine.name, engine.useJavaSSH, entry.getValue()));
+              engine.commands, engine.name, engine.useJavaSSH, entry.getValue(), engine.id));
     }
     return candidates;
   }
@@ -2828,19 +2862,22 @@ public final class KataGoAutoSetupHelper {
 
   private static LocalKataGoDiscoveryResult copyDiscovery(
       LocalKataGoDiscoveryResult source, List<String> diagnostics) {
-    return new LocalKataGoDiscoveryResult(
-        source.workingDir,
-        source.appRoot,
-        source.enginePath,
-        source.gtpConfigPath,
-        source.analysisConfigPath,
-        source.activeWeightPath,
-        source.weightCandidates,
-        source.source,
-        source.sourceName,
-        source.sourceCommand,
-        source.packageFlavor,
-        diagnostics);
+    LocalKataGoDiscoveryResult copy =
+        new LocalKataGoDiscoveryResult(
+            source.workingDir,
+            source.appRoot,
+            source.enginePath,
+            source.gtpConfigPath,
+            source.analysisConfigPath,
+            source.activeWeightPath,
+            source.weightCandidates,
+            source.source,
+            source.sourceName,
+            source.sourceCommand,
+            source.packageFlavor,
+            diagnostics);
+    copy.savedEntryId = source.savedEntryId;
+    return copy;
   }
 
   private static boolean isExcludedEngineCommand(String command, boolean useJavaSsh) {
@@ -3111,13 +3148,19 @@ public final class KataGoAutoSetupHelper {
     private final String name;
     private final boolean useJavaSsh;
     private final DiscoverySource source;
+    private final String savedEntryId;
 
     private SavedEngineCandidate(
-        String command, String name, boolean useJavaSsh, DiscoverySource source) {
+        String command,
+        String name,
+        boolean useJavaSsh,
+        DiscoverySource source,
+        String savedEntryId) {
       this.command = command == null ? "" : command;
       this.name = name == null ? "" : name;
       this.useJavaSsh = useJavaSsh;
       this.source = source;
+      this.savedEntryId = savedEntryId;
     }
   }
 

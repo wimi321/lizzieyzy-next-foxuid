@@ -6,7 +6,9 @@ import featurecat.lizzie.Config;
 import featurecat.lizzie.ConfigTestHelper;
 import featurecat.lizzie.Lizzie;
 import featurecat.lizzie.analysis.remote.RemoteComputeConfig;
+import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.gui.GtpConsolePane;
+import featurecat.lizzie.util.EngineThreadPolicy;
 import featurecat.lizzie.util.KataGoAutoSetupHelper;
 import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.Utils;
@@ -44,11 +46,9 @@ class LeelazKataGoThreadSettingsTest {
     assertTrue(executable.toFile().setExecutable(true));
     try (Environment env =
         new Environment("\"" + executable + "\" gtp -override-config numSearchThreads=12")) {
-      var data = new featurecat.lizzie.gui.EngineData();
-      data.commands = env.engine.engineCommand();
-      data.name = "Controlled KataGo";
-      data.width = data.height = 19;
-      Utils.saveEngineSettings(new java.util.ArrayList<>(List.of(data)));
+      EngineData data =
+          saveEntry(env.engine.engineCommand(), EngineThreadPolicy.Source.BENCHMARK, 7);
+      env.engine.savedEntryId = data.id;
       env.engine.startEngine(0);
       Path log = root.resolve("gtp-commands");
       long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
@@ -63,7 +63,7 @@ class LeelazKataGoThreadSettingsTest {
 
   @Test
   @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
-  void localBenchmarkResultAfterForegroundSwitchDoesNotRetuneRemote() throws Exception {
+  void capturedBenchmarkPersistsOnlyToItsSavedEntryAfterForegroundSwitch() throws Exception {
     try (Environment env = new Environment(RemoteComputeConfig.COMMAND_CUSTOM_WS)) {
       Path executable =
           Files.writeString(
@@ -75,25 +75,31 @@ class LeelazKataGoThreadSettingsTest {
       assertTrue(executable.toFile().setExecutable(true));
       Path cfg = Files.writeString(root.resolve("gtp.cfg"), "numSearchThreads=12");
       Path model = Files.writeString(root.resolve("model.bin.gz"), "fixture model");
-      var snapshot =
-          KataGoAutoSetupHelper.inspectSelectedLocalKataGo(executable, cfg, model).toSnapshot();
+      String command = executable + " gtp -config " + cfg + " -model " + model;
+      EngineData targetEntry = saveEntry(command, EngineThreadPolicy.Source.CFG, 0);
+      var snapshot = KataGoAutoSetupHelper.inspectSavedEngine(targetEntry);
+      var target = KataGoRuntimeHelper.captureBenchmarkTarget(snapshot, false);
       env.engine.isLoaded = true;
       env.engine.isKatago = true;
+
       var result =
           KataGoRuntimeHelper.runBenchmarkAndApply(
-              snapshot, (status, downloaded, total) -> Lizzie.leelaz = env.engine, null);
+              target, (status, downloaded, total) -> Lizzie.leelaz = env.engine, null);
+
       assertEquals(8, result.recommendedThreads);
       assertSame(env.engine, Lizzie.leelaz);
-      KataGoRuntimeHelper.applyBenchmarkResultToRunningEngines(result);
       assertEquals("", env.commands());
-      assertEquals(8, KataGoRuntimeHelper.getStoredBenchmarkResult().recommendedThreads);
+      EngineData saved = EngineThreadPolicy.findSavedEntry(targetEntry.id);
+      assertNotNull(saved);
+      assertEquals(8, KataGoRuntimeHelper.getStoredBenchmarkResult(saved).recommendedThreads);
+      assertEquals(EngineThreadPolicy.Source.CFG, EngineThreadPolicy.source(saved));
       assertTrue(Files.readString(root.resolve("benchmark-argv")).contains("benchmark\n"));
       assertEquals("numSearchThreads=12", Files.readString(cfg));
     }
   }
 
   @Test
-  void remoteInitializationAndBenchmarkApplicationPreserveServerThreads() throws Exception {
+  void remoteInitializationPreservesServerThreadsAndDirectUserCommands() throws Exception {
     for (String command :
         List.of(
             RemoteComputeConfig.COMMAND_ZHIZI,
@@ -110,12 +116,6 @@ class LeelazKataGoThreadSettingsTest {
         assertTrue(startup.contains("analysisWideRootNoise 0.2"), startup);
         assertEquals(command, env.engine.engineCommand());
 
-        Lizzie.leelaz = env.engine;
-        env.engine.isLoaded = true;
-        Lizzie.config.uiConfig.put("katago-benchmark-threads", 8);
-        KataGoRuntimeHelper.applyBenchmarkResultToRunningEngines(
-            KataGoRuntimeHelper.getStoredBenchmarkResult());
-        assertFalse(env.commands().contains("numSearchThreads"), env.commands());
 
         env.engine.sendCommand("kata-set-param numSearchThreads 12");
         assertTrue(env.commands().contains("kata-set-param numSearchThreads 12"));
@@ -124,31 +124,47 @@ class LeelazKataGoThreadSettingsTest {
   }
 
   @Test
-  void localInitializationStillAppliesThreadsWithoutConfusingSshInPaths() throws Exception {
-    try (Environment env = new Environment("/engines/ssh-data/katago gtp")) {
-      env.initialize();
-      assertTrue(env.commands().contains("kata-set-param numSearchThreads 6"), env.commands());
-      assertTrue(env.commands().contains("analysisWideRootNoise 0.2"));
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+  void benchmarkSourceAppliesSavedThreadsAndWideRootNoiseAtActualStartup() throws Exception {
+    Path executable =
+        Files.writeString(
+            root.resolve("katago-saved-policy"),
+            """
+        #!/usr/bin/python3
+        import sys,pathlib,re
+        p=pathlib.Path(__file__).parent
+        (p/'saved-policy-launch-args').write_text('\\n'.join(sys.argv[1:]))
+        for line in sys.stdin:
+            with (p/'saved-policy-commands').open('a') as f: f.write(line)
+            match=re.match(r'(?:(\\d+) )?(.*)',line.strip())
+            ident=match[1] or ''
+            command=match[2]
+            answer={'name':'KataGo','version':'1.15.3','list_commands':'protocol_version\\nname\\nversion'}.get(command,'')
+            print('='+ident+' '+answer+'\\n',flush=True)
+            if command=='quit': break
+        """);
+    assertTrue(executable.toFile().setExecutable(true));
+    try (Environment env = new Environment("\"" + executable + "\" gtp")) {
+      EngineData data =
+          saveEntry(env.engine.engineCommand(), EngineThreadPolicy.Source.BENCHMARK, 6);
+      env.engine.savedEntryId = data.id;
+      env.engine.startEngine(0);
+      Path commandsLog = root.resolve("saved-policy-commands");
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+      while ((!Files.exists(commandsLog)
+              || !Files.readString(commandsLog).contains("analysisWideRootNoise 0.2")
+              || !Files.readString(commandsLog).contains("kata-set-param numSearchThreads 6"))
+          && System.nanoTime() < deadline) Thread.sleep(10);
+
+      String commands = Files.readString(commandsLog);
+      assertTrue(commands.contains("analysisWideRootNoise 0.2"), commands);
+      assertTrue(commands.contains("kata-set-param numSearchThreads 6"), commands);
+      assertTrue(
+          Files.readString(root.resolve("saved-policy-launch-args"))
+              .contains("numSearchThreads=6"));
     }
   }
 
-  @Test
-  void legacyThreadSavingCannotChangeRemoteContext() throws Exception {
-    try (Environment env = new Environment(RemoteComputeConfig.COMMAND_ZHIZI)) {
-      String before = Lizzie.config.uiConfig.toString();
-      Utils.saveLegacyKataGoThreadSettings(env.engine, false, false, "19");
-      assertEquals("6", Lizzie.config.txtKataEngineThreads);
-      assertTrue(Lizzie.config.chkKataEngineThreads);
-      assertTrue(Lizzie.config.autoLoadKataEngineThreads);
-      assertEquals(before, Lizzie.config.uiConfig.toString());
-      assertEquals("", env.commands());
-    }
-    try (Environment env = new Environment("katago gtp")) {
-      Utils.saveLegacyKataGoThreadSettings(env.engine, true, true, " 9 ");
-      assertEquals("9", Lizzie.config.uiConfig.getString("txt-kata-engine-threads"));
-      assertTrue(env.commands().contains("kata-set-param numSearchThreads 9"));
-    }
-  }
 
   @Test
   void manualBenchmarkRejectsSshAndUnknownExecutablesBeforeStartingProcess() throws Exception {
@@ -168,6 +184,21 @@ class LeelazKataGoThreadSettingsTest {
         assertFalse(Files.exists(root.resolve("started")), name);
       }
     }
+  }
+
+  private EngineData saveEntry(
+      String command, EngineThreadPolicy.Source source, int recommendedThreads) {
+    EngineData data = new EngineData();
+    data.commands = command;
+    data.name = "Controlled KataGo";
+    data.width = data.height = 19;
+    data.threadPolicy =
+        new org.json.JSONObject().put("source", source.name()).put("sourceRevision", 0L);
+    if (recommendedThreads > 0) {
+      data.threadPolicy.put("katago-benchmark-threads", recommendedThreads);
+    }
+    Utils.saveEngineSettings(new java.util.ArrayList<>(List.of(data)));
+    return data;
   }
 
   private final class Environment implements AutoCloseable {
@@ -191,9 +222,6 @@ class LeelazKataGoThreadSettingsTest {
       Lizzie.frame =
           (QuietFrame) ((sun.misc.Unsafe) unsafeField.get(null)).allocateInstance(QuietFrame.class);
       Lizzie.config.firstLoadKataGo = false;
-      Lizzie.config.chkKataEngineThreads = true;
-      Lizzie.config.autoLoadKataEngineThreads = true;
-      Lizzie.config.txtKataEngineThreads = "6";
       Lizzie.config.autoLoadKataEngineWRN = true;
       Lizzie.config.autoLoadTxtKataEngineWRN = "0.2";
       engine = new Leelaz(command);

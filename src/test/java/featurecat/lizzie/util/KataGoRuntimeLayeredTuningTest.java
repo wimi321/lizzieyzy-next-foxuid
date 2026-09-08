@@ -3,14 +3,12 @@ package featurecat.lizzie.util;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import featurecat.lizzie.Config;
 import featurecat.lizzie.ConfigTestHelper;
 import featurecat.lizzie.Lizzie;
+import featurecat.lizzie.gui.EngineData;
 import featurecat.lizzie.util.KataGoAutoSetupHelper.SetupSnapshot;
 import featurecat.lizzie.util.katago.tuning.AppleSiliconHardwareProbe;
 import featurecat.lizzie.util.katago.tuning.KataGoCommandSpec;
@@ -19,8 +17,6 @@ import featurecat.lizzie.util.katago.tuning.KataGoTuningFingerprint;
 import featurecat.lizzie.util.katago.tuning.KataGoTuningProfile;
 import featurecat.lizzie.util.katago.tuning.KataGoTuningStore;
 import java.io.IOException;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -115,7 +111,7 @@ class KataGoRuntimeLayeredTuningTest {
       assertFalse(overrides.containsKey("metalDeviceToUseModel0Thread2"), alias);
       assertFalse(overrides.containsKey("metalUseFP16-0"), alias);
       assertEquals("3", overrides.get("nnMaxBatchSize"), alias);
-      assertEquals("7", overrides.get("numSearchThreads"), alias);
+      assertFalse(overrides.containsKey("numSearchThreads"), alias);
     }
   }
 
@@ -130,38 +126,57 @@ class KataGoRuntimeLayeredTuningTest {
   }
 
   @Test
-  void officialThreadProfileAddsOnlyThreadsAndKeepsCurrentHardwareSettings() {
-    List<String> command =
-        List.of(
-            "katago",
-            "gtp",
-            "-override-config",
-            "numNNServerThreadsPerModel=2,metalDeviceToUseModel0Thread0=0,"
-                + "metalDeviceToUseModel0Thread1=100,nnMaxBatchSize=4,userSetting=keep");
+  void entryLaunchPolicyHonorsCfgBenchmarkAndExplicitThreadPriority() throws Exception {
+    Config previousConfig = Lizzie.config;
+    try {
+      Config config =
+          ConfigTestHelper.createForTests(
+              Files.createDirectories(temporaryDirectory.resolve("entry-priority-config")));
+      Lizzie.config = config;
+      initializeConfigJson(config);
+      SetupSnapshot snapshot = createSnapshot();
+      List<String> command =
+          List.of(
+              snapshot.enginePath.toString(),
+              "gtp",
+              "-config",
+              snapshot.gtpConfigPath.toString(),
+              "-model",
+              snapshot.activeWeightPath.toString());
+      JSONObject policy =
+          new JSONObject()
+              .put("source", "CFG")
+              .put("sourceRevision", 0L)
+              .put("katago-benchmark-threads", 7);
+      EngineData entry = saveEntry(command, policy);
 
-    KataGoCommandSpec merged =
-        KataGoCommandSpec.parse(KataGoRuntimeHelper.mergeStoredAppleThreadProfile(command, 7));
+      assertEquals(
+          command, KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry));
 
-    assertEquals("7", merged.overrideValue("numSearchThreads").orElseThrow());
-    assertEquals("2", merged.overrideValue("numNNServerThreadsPerModel").orElseThrow());
-    assertEquals("0", merged.overrideValue("metalDeviceToUseModel0Thread0").orElseThrow());
-    assertEquals("100", merged.overrideValue("metalDeviceToUseModel0Thread1").orElseThrow());
-    assertEquals("4", merged.overrideValue("nnMaxBatchSize").orElseThrow());
-    assertEquals("keep", merged.overrideValue("userSetting").orElseThrow());
-  }
+      entry = EngineThreadPolicy.saveSource(entry.id, EngineThreadPolicy.Source.BENCHMARK);
+      KataGoCommandSpec benchmark =
+          KataGoCommandSpec.parse(
+              KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry));
+      assertEquals("7", benchmark.overrideValue("numSearchThreads").orElseThrow());
 
-  @Test
-  void explicitThreadOverrideWinsOverOfficialStoredRecommendation() {
-    List<String> command =
-        List.of(
-            "katago",
-            "gtp",
-            "--override-config",
-            "numSearchThreads=11,nnMaxBatchSize=4,userSetting=keep");
-
-    List<String> merged = KataGoRuntimeHelper.mergeStoredAppleThreadProfile(command, 7);
-
-    assertEquals(command, merged);
+      List<String> explicit =
+          List.of(
+              snapshot.enginePath.toString(),
+              "gtp",
+              "-config",
+              snapshot.gtpConfigPath.toString(),
+              "-model",
+              snapshot.activeWeightPath.toString(),
+              "--override-config",
+              "numSearchThreads=11,userSetting=keep");
+      KataGoCommandSpec explicitResult =
+          KataGoCommandSpec.parse(
+              KataGoRuntimeHelper.applyEntryLaunchPolicy(explicit, snapshot.enginePath, entry));
+      assertEquals("11", explicitResult.overrideValue("numSearchThreads").orElseThrow());
+      assertEquals("keep", explicitResult.overrideValue("userSetting").orElseThrow());
+    } finally {
+      Lizzie.config = previousConfig;
+    }
   }
 
   @Test
@@ -256,7 +271,12 @@ class KataGoRuntimeLayeredTuningTest {
               gtp,
               new AppleSiliconHardwareProbe().probe(),
               KataGoRuntimeHelper.officialTuningCommandSemantics(sourceCommand));
-      new KataGoTuningStore(config.uiConfig)
+      JSONObject policy =
+          new JSONObject()
+              .put("source", "BENCHMARK")
+              .put("sourceRevision", 0L)
+              .put("katago-benchmark-threads", 7);
+      new KataGoTuningStore(policy)
           .save(
               KataGoTuningProfile.officialThreads(
                   fingerprint,
@@ -264,10 +284,11 @@ class KataGoRuntimeLayeredTuningTest {
                   new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
                   "Metal",
                   123L));
+      EngineData entry = saveEntry(sourceCommand, policy);
 
       KataGoCommandSpec applied =
           KataGoCommandSpec.parse(
-              KataGoRuntimeHelper.applyStoredAppleTuningProfile(sourceCommand, engine));
+              KataGoRuntimeHelper.applyEntryLaunchPolicy(sourceCommand, engine, entry));
 
       assertEquals("7", applied.overrideValue("numSearchThreads").orElseThrow());
       assertEquals("2", applied.overrideValue("numNNServerThreadsPerModel").orElseThrow());
@@ -283,91 +304,7 @@ class KataGoRuntimeLayeredTuningTest {
   }
 
   @Test
-  void layeredResultDoesNotEnableGlobalThreadControl() throws Exception {
-    Config previousConfig = Lizzie.config;
-    try {
-      Config config =
-          ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("layered-config")));
-      Lizzie.config = config;
-      initializeConfigJson(config);
-      config.chkKataEngineThreads = false;
-      config.autoLoadKataEngineThreads = false;
-      config.txtKataEngineThreads = "13";
-      config.uiConfig.put("chk-kata-engine-threads", false);
-      config.uiConfig.put("autoload-kata-engine-threads", false);
-      config.uiConfig.put("txt-kata-engine-threads", "13");
-
-      KataGoTuningProfile profile =
-          new KataGoTuningProfile(
-              "test-fingerprint",
-              List.of(0, 100),
-              2,
-              7,
-              new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
-              "Metal",
-              123L);
-      KataGoRuntimeHelper.applyBenchmarkResult(layeredResult(profile));
-
-      assertFalse(config.chkKataEngineThreads);
-      assertFalse(config.autoLoadKataEngineThreads);
-      assertEquals("13", config.txtKataEngineThreads);
-      assertFalse(config.uiConfig.getBoolean("chk-kata-engine-threads"));
-      assertFalse(config.uiConfig.getBoolean("autoload-kata-engine-threads"));
-      assertEquals("13", config.uiConfig.getString("txt-kata-engine-threads"));
-      assertEquals(7, config.uiConfig.getInt("katago-benchmark-threads"));
-      assertTrue(new KataGoTuningStore(config.uiConfig).hasStoredProfile());
-    } finally {
-      Lizzie.config = previousConfig;
-    }
-  }
-
-  @Test
-  void officialAppleResultDoesNotEnableGlobalThreadControlOrOwnHardware() throws Exception {
-    Config previousConfig = Lizzie.config;
-    try {
-      Config config =
-          ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("official-config")));
-      Lizzie.config = config;
-      initializeConfigJson(config);
-      config.chkKataEngineThreads = false;
-      config.autoLoadKataEngineThreads = false;
-      config.txtKataEngineThreads = "13";
-      config.uiConfig.put("chk-kata-engine-threads", false);
-      config.uiConfig.put("autoload-kata-engine-threads", false);
-      config.uiConfig.put("txt-kata-engine-threads", "13");
-      config.uiConfig.put("katago-benchmark-topology", "old-experimental-topology");
-      config.uiConfig.put("katago-benchmark-batch-size", 8);
-      KataGoTuningProfile profile =
-          KataGoTuningProfile.officialThreads(
-              "official-fingerprint",
-              7,
-              new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
-              "Metal",
-              123L);
-
-      KataGoRuntimeHelper.applyBenchmarkResult(officialResult(profile));
-
-      assertFalse(config.chkKataEngineThreads);
-      assertFalse(config.autoLoadKataEngineThreads);
-      assertEquals("13", config.txtKataEngineThreads);
-      KataGoTuningProfile stored =
-          KataGoTuningProfile.fromJson(config.uiConfig.getJSONObject(KataGoTuningStore.KEY))
-              .orElseThrow();
-      assertFalse(stored.managesHardwareSettings());
-      assertTrue(stored.devices().isEmpty());
-      assertEquals(0, stored.batch());
-      assertEquals(7, stored.threads());
-      assertEquals("", config.uiConfig.getString("katago-benchmark-topology"));
-      assertEquals(0, config.uiConfig.getInt("katago-benchmark-batch-size"));
-    } finally {
-      Lizzie.config = previousConfig;
-    }
-  }
-
-  @Test
-  void benchmarkDisplayHidesAppleResultAfterSelectedModelChanges() throws Exception {
+  void staleAppleHardwareProfileKeepsValidEntryThreadsButSuppressesHardware() throws Exception {
     Config previousConfig = Lizzie.config;
     String previousOsName = System.getProperty("os.name");
     String previousOsArch = System.getProperty("os.arch");
@@ -376,40 +313,57 @@ class KataGoRuntimeLayeredTuningTest {
       System.setProperty("os.arch", "aarch64");
       Config config =
           ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("display-signature-config")));
+              Files.createDirectories(temporaryDirectory.resolve("stale-apple-config")));
       Lizzie.config = config;
       initializeConfigJson(config);
-      SetupSnapshot snapshot = createBundledAppleSnapshot("display-signature-app");
-      config.uiConfig.put("katago-benchmark-threads", 7);
-      config.uiConfig.put("katago-benchmark-current-threads", 1);
-      config.uiConfig.put("katago-benchmark-backend", "Metal");
-      config.uiConfig.put("katago-apple-auto-optimize-version", 5);
-      config.uiConfig.put(
-          "katago-benchmark-signature", KataGoRuntimeHelper.buildBenchmarkSignature(snapshot));
+      SetupSnapshot snapshot = createBundledAppleSnapshot("stale-apple-app");
+      List<String> command =
+          List.of(
+              snapshot.enginePath.toString(),
+              "gtp",
+              "-config",
+              snapshot.gtpConfigPath.toString(),
+              "-model",
+              snapshot.activeWeightPath.toString());
       KataGoTuningFingerprint fingerprint =
           KataGoTuningFingerprint.create(
               snapshot.enginePath,
               snapshot.activeWeightPath,
               snapshot.gtpConfigPath,
               new AppleSiliconHardwareProbe().probe(),
-              KataGoRuntimeHelper.officialTuningCommandSemantics(List.of()));
-      new KataGoTuningStore(config.uiConfig)
-          .save(
-              KataGoTuningProfile.officialThreads(
-                  fingerprint,
-                  7,
-                  new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
-                  "Metal",
-                  123L));
+              KataGoRuntimeHelper.tuningCommandSemantics(command));
+      KataGoTuningProfile profile =
+          new KataGoTuningProfile(
+              fingerprint,
+              List.of(0, 100),
+              2,
+              7,
+              new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
+              "Metal",
+              123L);
+      JSONObject policy =
+          new JSONObject()
+              .put("source", "BENCHMARK")
+              .put("sourceRevision", 0L)
+              .put("katago-benchmark-threads", 7);
+      new KataGoTuningStore(policy).save(profile);
+      EngineData entry = saveEntry(command, policy);
 
-      assertNotNull(KataGoRuntimeHelper.getStoredBenchmarkResult(snapshot));
+      KataGoCommandSpec current =
+          KataGoCommandSpec.parse(
+              KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry));
+      assertEquals("7", current.overrideValue("numSearchThreads").orElseThrow());
+      assertEquals("2", current.overrideValue("numNNServerThreadsPerModel").orElseThrow());
+      assertEquals("0", current.overrideValue("metalDeviceToUseModel0Thread0").orElseThrow());
 
       Files.writeString(snapshot.activeWeightPath, "changed-model-content");
-
-      assertNull(KataGoRuntimeHelper.getStoredBenchmarkResult(snapshot));
-      assertNotNull(
-          KataGoRuntimeHelper.getStoredBenchmarkResult(),
-          "The result remains stored but must not be presented as current.");
+      KataGoCommandSpec stale =
+          KataGoCommandSpec.parse(
+              KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry));
+      assertEquals("7", stale.overrideValue("numSearchThreads").orElseThrow());
+      assertTrue(stale.overrideValue("numNNServerThreadsPerModel").isEmpty());
+      assertTrue(stale.overrideValue("metalDeviceToUseModel0Thread0").isEmpty());
+      assertTrue(stale.overrideValue("nnMaxBatchSize").isEmpty());
     } finally {
       restoreProperty("os.name", previousOsName);
       restoreProperty("os.arch", previousOsArch);
@@ -428,13 +382,15 @@ class KataGoRuntimeLayeredTuningTest {
       Lizzie.config = config;
       initializeConfigJson(config);
       SetupSnapshot snapshot = createSnapshot();
-      config.uiConfig.put("katago-benchmark-threads", 8);
-      config.uiConfig.put("katago-benchmark-current-threads", 4);
-      config.uiConfig.put("katago-benchmark-backend", "CUDA");
-      config.uiConfig.put("katago-benchmark-nn-server-threads", 2);
-      config.uiConfig.put("katago-benchmark-batch-size", 4);
-      config.uiConfig.put(
-          "katago-benchmark-signature", KataGoRuntimeHelper.buildBenchmarkSignature(snapshot));
+      JSONObject policy =
+          new JSONObject()
+              .put("source", "CFG")
+              .put("sourceRevision", 0L)
+              .put("katago-benchmark-threads", 8)
+              .put("katago-benchmark-current-threads", 4)
+              .put("katago-benchmark-backend", "CUDA")
+              .put("katago-benchmark-nn-server-threads", 2)
+              .put("katago-benchmark-batch-size", 4);
       List<String> command =
           List.of(
               snapshot.enginePath.toString(),
@@ -444,17 +400,16 @@ class KataGoRuntimeLayeredTuningTest {
               "-model",
               snapshot.activeWeightPath.toString());
 
+      EngineData entry = saveEntry(command, policy);
       List<String> applied =
-          KataGoRuntimeHelper.applyStoredOfficialBenchmarkGpuSettings(
-              command, snapshot.enginePath);
+          KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry);
       KataGoCommandSpec appliedSpec = KataGoCommandSpec.parse(applied);
       assertEquals("2", appliedSpec.overrideValue("numNNServerThreadsPerModel").orElseThrow());
       assertEquals("4", appliedSpec.overrideValue("nnMaxBatchSize").orElseThrow());
 
       Files.writeString(snapshot.activeWeightPath, "changed-model-content");
       List<String> stale =
-          KataGoRuntimeHelper.applyStoredOfficialBenchmarkGpuSettings(
-              command, snapshot.enginePath);
+          KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry);
       assertTrue(KataGoCommandSpec.parse(stale).effectiveOverrides().isEmpty());
     } finally {
       Lizzie.config = previousConfig;
@@ -471,11 +426,13 @@ class KataGoRuntimeLayeredTuningTest {
       Lizzie.config = config;
       initializeConfigJson(config);
       SetupSnapshot snapshot = createSnapshot();
-      config.uiConfig.put("katago-benchmark-threads", 8);
-      config.uiConfig.put("katago-benchmark-nn-server-threads", 2);
-      config.uiConfig.put("katago-benchmark-batch-size", 4);
-      config.uiConfig.put(
-          "katago-benchmark-signature", KataGoRuntimeHelper.buildBenchmarkSignature(snapshot));
+      JSONObject policy =
+          new JSONObject()
+              .put("source", "CFG")
+              .put("sourceRevision", 0L)
+              .put("katago-benchmark-threads", 8)
+              .put("katago-benchmark-nn-server-threads", 2)
+              .put("katago-benchmark-batch-size", 4);
       List<String> command =
           List.of(
               snapshot.enginePath.toString(),
@@ -487,9 +444,9 @@ class KataGoRuntimeLayeredTuningTest {
               "-override-config",
               "numNNServerThreadsPerModel=1,nnMaxBatchSize=9");
 
+      EngineData entry = saveEntry(command, policy);
       List<String> applied =
-          KataGoRuntimeHelper.applyStoredOfficialBenchmarkGpuSettings(
-              command, snapshot.enginePath);
+          KataGoRuntimeHelper.applyEntryLaunchPolicy(command, snapshot.enginePath, entry);
       KataGoCommandSpec appliedSpec = KataGoCommandSpec.parse(applied);
       assertEquals("1", appliedSpec.overrideValue("numNNServerThreadsPerModel").orElseThrow());
       assertEquals("9", appliedSpec.overrideValue("nnMaxBatchSize").orElseThrow());
@@ -498,157 +455,17 @@ class KataGoRuntimeLayeredTuningTest {
     }
   }
 
-  @Test
-  void benchmarkDisplayHidesAppleResultAfterSourceTopologyChanges() throws Exception {
-    Config previousConfig = Lizzie.config;
-    String previousOsName = System.getProperty("os.name");
-    String previousOsArch = System.getProperty("os.arch");
-    try {
-      System.setProperty("os.name", "Mac OS X");
-      System.setProperty("os.arch", "aarch64");
-      Config config =
-          ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("display-topology-config")));
-      Lizzie.config = config;
-      initializeConfigJson(config);
-      Path app = Files.createDirectories(temporaryDirectory.resolve("display-topology-app"));
-      Path engine =
-          Files.writeString(
-              Files.createDirectories(app.resolve("engines/katago/macos-arm64")).resolve("katago"),
-              "engine");
-      Path configs = Files.createDirectories(app.resolve("engines/katago/configs"));
-      Path gtp = Files.writeString(configs.resolve("gtp.cfg"), "config");
-      Path analysis = Files.writeString(configs.resolve("analysis.cfg"), "analysis");
-      Path model = Files.writeString(app.resolve("model.bin.gz"), "model");
-      String originalCommand =
-          engine
-              + " analysis -model "
-              + model
-              + " -config "
-              + analysis
-              + " -override-config metalDeviceToUseModel0Thread0=0,nnMaxBatchSize=1";
-      config.uiConfig.put("analysis-engine-command", originalCommand);
-      SetupSnapshot originalSnapshot = KataGoAutoSetupHelper.inspectLocalKataGo().toSnapshot();
-      config.uiConfig.put("katago-benchmark-threads", 7);
-      config.uiConfig.put("katago-benchmark-current-threads", 1);
-      config.uiConfig.put("katago-benchmark-backend", "Metal");
-      config.uiConfig.put("katago-apple-auto-optimize-version", 5);
-      config.uiConfig.put(
-          "katago-benchmark-signature",
-          KataGoRuntimeHelper.buildBenchmarkSignature(originalSnapshot));
-      KataGoTuningFingerprint fingerprint =
-          KataGoTuningFingerprint.create(
-              engine,
-              model,
-              gtp,
-              new AppleSiliconHardwareProbe().probe(),
-              KataGoRuntimeHelper.officialTuningCommandSemantics(
-                  Utils.splitCommand(originalCommand)));
-      new KataGoTuningStore(config.uiConfig)
-          .save(
-              KataGoTuningProfile.officialThreads(
-                  fingerprint,
-                  7,
-                  new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
-                  "Metal",
-                  123L));
-
-      assertNotNull(KataGoRuntimeHelper.getStoredBenchmarkResult(originalSnapshot));
-
-      config.uiConfig.put(
-          "analysis-engine-command",
-          originalCommand.replace("nnMaxBatchSize=1", "nnMaxBatchSize=2"));
-      SetupSnapshot changedSnapshot = KataGoAutoSetupHelper.inspectLocalKataGo().toSnapshot();
-
-      assertEquals(
-          KataGoRuntimeHelper.buildBenchmarkSignature(originalSnapshot),
-          KataGoRuntimeHelper.buildBenchmarkSignature(changedSnapshot),
-          "The file signature intentionally stays stable; command semantics must invalidate it.");
-      assertNull(KataGoRuntimeHelper.getStoredBenchmarkResult(changedSnapshot));
-    } finally {
-      restoreProperty("os.name", previousOsName);
-      restoreProperty("os.arch", previousOsArch);
-      Lizzie.config = previousConfig;
-    }
-  }
-
-  @Test
-  void failedConfigSaveLeavesPreviousBenchmarkProfileAndMemoryUntouched() throws Exception {
-    Config previousConfig = Lizzie.config;
-    try {
-      Config config =
-          ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("failed-save-config")));
-      Lizzie.config = config;
-      initializeConfigJson(config);
-      config.chkKataEngineThreads = false;
-      config.autoLoadKataEngineThreads = false;
-      config.txtKataEngineThreads = "13";
-      config.uiConfig.put("sentinel", "keep");
-      KataGoTuningProfile previousProfile =
-          KataGoTuningProfile.officialThreads(
-              "previous-fingerprint",
-              3,
-              new KataGoTuningProfile.Metrics(3, 3, 80.0, 70.0, 20.0, 3.5),
-              "Metal",
-              100L);
-      new KataGoTuningStore(config.uiConfig).save(previousProfile);
-      Path nonEmptyDirectory =
-          Files.createDirectories(temporaryDirectory.resolve("config-target-is-directory"));
-      Files.writeString(nonEmptyDirectory.resolve("block-replacement"), "keep");
-      Field configFilename = Config.class.getDeclaredField("configFilename");
-      configFilename.setAccessible(true);
-      configFilename.set(config, nonEmptyDirectory.toString());
-      KataGoTuningProfile replacement =
-          KataGoTuningProfile.officialThreads(
-              "replacement-fingerprint",
-              7,
-              new KataGoTuningProfile.Metrics(3, 3, 120.0, 100.0, 25.0, 4.0),
-              "Metal",
-              123L);
-
-      assertThrows(
-          IOException.class,
-          () -> KataGoRuntimeHelper.applyBenchmarkResult(officialResult(replacement)));
-
-      assertEquals("keep", config.uiConfig.getString("sentinel"));
-      assertEquals(
-          previousProfile,
-          KataGoTuningProfile.fromJson(config.uiConfig.getJSONObject(KataGoTuningStore.KEY))
-              .orElseThrow());
-      assertFalse(config.uiConfig.has("katago-benchmark-threads"));
-      assertFalse(config.chkKataEngineThreads);
-      assertFalse(config.autoLoadKataEngineThreads);
-      assertEquals("13", config.txtKataEngineThreads);
-    } finally {
-      Lizzie.config = previousConfig;
-    }
-  }
-
-  @Test
-  void legacyResultStillEnablesGlobalThreadControl() throws Exception {
-    Config previousConfig = Lizzie.config;
-    try {
-      Config config =
-          ConfigTestHelper.createForTests(
-              Files.createDirectories(temporaryDirectory.resolve("legacy-config")));
-      Lizzie.config = config;
-      initializeConfigJson(config);
-      config.chkKataEngineThreads = false;
-      config.autoLoadKataEngineThreads = false;
-      config.txtKataEngineThreads = "";
-
-      KataGoRuntimeHelper.applyBenchmarkResult(legacyResult(5));
-
-      assertTrue(config.chkKataEngineThreads);
-      assertTrue(config.autoLoadKataEngineThreads);
-      assertEquals("5", config.txtKataEngineThreads);
-      assertTrue(config.uiConfig.getBoolean("chk-kata-engine-threads"));
-      assertTrue(config.uiConfig.getBoolean("autoload-kata-engine-threads"));
-      assertEquals("5", config.uiConfig.getString("txt-kata-engine-threads"));
-    } finally {
-      Lizzie.config = previousConfig;
-    }
+  private EngineData saveEntry(List<String> command, JSONObject policy) throws IOException {
+    EngineData entry = new EngineData();
+    entry.commands = String.join(" ", command);
+    entry.name = "Saved KataGo";
+    entry.width = entry.height = 19;
+    entry.threadPolicy = policy;
+    Utils.saveEngineSettings(new java.util.ArrayList<>(List.of(entry)));
+    SetupSnapshot saved = KataGoAutoSetupHelper.inspectSavedEngine(entry);
+    entry.threadPolicy.put("environment", EngineThreadPolicy.environment(saved));
+    Utils.saveEngineSettings(new java.util.ArrayList<>(List.of(entry)));
+    return entry;
   }
 
   private SetupSnapshot createSnapshot() throws IOException {
@@ -678,55 +495,6 @@ class KataGoRuntimeLayeredTuningTest {
     return command.get(index + 1);
   }
 
-  private static KataGoRuntimeHelper.BenchmarkResult layeredResult(KataGoTuningProfile profile)
-      throws Exception {
-    return profileResult(profile, "GA", 2);
-  }
-
-  private static KataGoRuntimeHelper.BenchmarkResult officialResult(KataGoTuningProfile profile)
-      throws Exception {
-    return profileResult(profile, "", 0);
-  }
-
-  private static KataGoRuntimeHelper.BenchmarkResult profileResult(
-      KataGoTuningProfile profile, String topology, int batch) throws Exception {
-    Constructor<KataGoRuntimeHelper.BenchmarkResult> constructor =
-        KataGoRuntimeHelper.BenchmarkResult.class.getDeclaredConstructor(
-            int.class,
-            int.class,
-            String.class,
-            String.class,
-            long.class,
-            String.class,
-            int.class,
-            int.class,
-            double.class,
-            double.class,
-            double.class,
-            KataGoTuningProfile.class);
-    constructor.setAccessible(true);
-    return constructor.newInstance(
-        profile.threads(),
-        1,
-        "Metal",
-        "profile",
-        123L,
-        topology,
-        0,
-        batch,
-        120.0,
-        100.0,
-        4.0,
-        profile);
-  }
-
-  private static KataGoRuntimeHelper.BenchmarkResult legacyResult(int threads) throws Exception {
-    Constructor<KataGoRuntimeHelper.BenchmarkResult> constructor =
-        KataGoRuntimeHelper.BenchmarkResult.class.getDeclaredConstructor(
-            int.class, int.class, String.class, String.class, long.class);
-    constructor.setAccessible(true);
-    return constructor.newInstance(threads, 1, "Metal", "legacy", 123L);
-  }
 
   private static void initializeConfigJson(Config config) {
     config.uiConfig = new JSONObject();

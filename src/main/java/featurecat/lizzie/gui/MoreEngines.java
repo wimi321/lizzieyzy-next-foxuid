@@ -6,6 +6,7 @@ import featurecat.lizzie.analysis.Leelaz;
 import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationProbe;
 import featurecat.lizzie.analysis.gtpconfig.GtpConfigurationSchema;
 import featurecat.lizzie.util.EngineThreadPolicy;
+import featurecat.lizzie.util.KataGoRuntimeHelper;
 import featurecat.lizzie.util.Utils;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -73,6 +74,9 @@ public class MoreEngines extends JPanel {
   JFontTextField txtName;
   JFontLabel engineName;
   JFontLabel remoteManagedThreads;
+  JFontLabel threadPolicyStatus;
+  JFontRadioButton threadPolicyCfg;
+  JFontRadioButton threadPolicyBenchmark;
   JFontTextField txtInitialCommand;
   JFontTextField txtWidth;
   JFontTextField txtHeight;
@@ -106,11 +110,22 @@ public class MoreEngines extends JPanel {
   JFontTextField txtUserName;
   JPasswordField txtPassword;
   JFontButton scanKeygen;
+  String selectedEntryId = "";
+  EngineThreadPolicy.Source selectedThreadSource = EngineThreadPolicy.Source.CFG;
+  boolean threadPolicySourceChanged;
+  boolean loadingThreadPolicy;
+  Timer threadPolicyRefreshTimer;
 
   private final ResourceBundle resourceBundle = Lizzie.resourceBundle;
 
   public MoreEngines() {
     setLayout((LayoutManager) null);
+    try {
+      Utils.normalizeEngineSettings();
+    } catch (java.io.UncheckedIOException failure) {
+      showThreadPolicySaveFailure(failure.getCause());
+      throw failure;
+    }
     this.dataModel = getTableModel();
     table = new JTable(this.dataModel);
     this.winrateFont = new Font(Config.sysDefaultFontName, 0, Math.max(Config.frameFontSize, 14));
@@ -200,6 +215,18 @@ public class MoreEngines extends JPanel {
         new JFontLabel(this.resourceBundle.getString("EngineThreadPolicy.remoteManaged"));
     this.remoteManagedThreads.setForeground(Color.BLUE);
     this.remoteManagedThreads.setVisible(false);
+    this.threadPolicyCfg =
+        new JFontRadioButton(this.resourceBundle.getString("EngineThreadPolicy.cfg"));
+    this.threadPolicyBenchmark =
+        new JFontRadioButton(this.resourceBundle.getString("EngineThreadPolicy.benchmark"));
+    this.threadPolicyStatus = new JFontLabel();
+    this.threadPolicyStatus.setForeground(Color.BLUE);
+    ButtonGroup threadPolicyGroup = new ButtonGroup();
+    threadPolicyGroup.add(threadPolicyCfg);
+    threadPolicyGroup.add(threadPolicyBenchmark);
+    threadPolicyCfg.addActionListener(event -> selectThreadPolicy(EngineThreadPolicy.Source.CFG));
+    threadPolicyBenchmark.addActionListener(
+        event -> selectThreadPolicy(EngineThreadPolicy.Source.BENCHMARK));
     this.txtWidth = new JFontTextField();
     this.txtHeight = new JFontTextField();
     this.add = new JFontButton(this.resourceBundle.getString("MoreEngines.add"));
@@ -246,20 +273,20 @@ public class MoreEngines extends JPanel {
             new DocumentListener() {
               @Override
               public void insertUpdate(DocumentEvent event) {
-                updateRemoteThreadStatus();
+                updateThreadPolicyDetails();
               }
 
               @Override
               public void removeUpdate(DocumentEvent event) {
-                updateRemoteThreadStatus();
+                updateThreadPolicyDetails();
               }
 
               @Override
               public void changedUpdate(DocumentEvent event) {
-                updateRemoteThreadStatus();
+                updateThreadPolicyDetails();
               }
             });
-    this.chkRemoteEngine.addItemListener(event -> updateRemoteThreadStatus());
+    this.chkRemoteEngine.addItemListener(event -> updateThreadPolicyDetails());
     this.chkRemoteEngine.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
@@ -405,47 +432,52 @@ public class MoreEngines extends JPanel {
     boardSettingsX = placeInRow(txtHeight, boardSettingsX, 270, 12, 40);
     boardSettingsX = placeInRow(lblKomi, boardSettingsX, 270, 4, 0);
     placeInRow(txtKomi, boardSettingsX, 270, 0, 48);
-    this.remoteManagedThreads.setBounds(5, 296, 875, 24);
+    int policyX = 5;
+    policyX = placeInRow(threadPolicyCfg, policyX, 296, 8, 0);
+    placeInRow(threadPolicyBenchmark, policyX, 296, 0, 0);
+    this.threadPolicyStatus.setBounds(5, 320, 875, 64);
+    this.threadPolicyStatus.setVerticalAlignment(JLabel.TOP);
+    this.remoteManagedThreads.setBounds(5, 320, 875, 24);
     int remoteX = 5;
-    remoteX = placeInRow(chkRemoteEngine, remoteX, 324, 6, 0);
-    remoteX = placeInRow(btnRemoteEngine, remoteX, 324, 8, 24);
-    remoteX = placeInRow(lblIp, remoteX, 324, 4, 0);
-    remoteX = placeInRow(txtIP, remoteX, 324, 8, 150);
-    remoteX = placeInRow(lblPort, remoteX, 324, 4, 0);
-    remoteX = placeInRow(txtPort, remoteX, 324, 8, 58);
-    remoteX = placeInRow(lblUserName, remoteX, 324, 4, 0);
-    placeInRow(txtUserName, remoteX, 324, 0, 150);
+    remoteX = placeInRow(chkRemoteEngine, remoteX, 384, 6, 0);
+    remoteX = placeInRow(btnRemoteEngine, remoteX, 384, 8, 24);
+    remoteX = placeInRow(lblIp, remoteX, 384, 4, 0);
+    remoteX = placeInRow(txtIP, remoteX, 384, 8, 150);
+    remoteX = placeInRow(lblPort, remoteX, 384, 4, 0);
+    remoteX = placeInRow(txtPort, remoteX, 384, 8, 58);
+    remoteX = placeInRow(lblUserName, remoteX, 384, 4, 0);
+    placeInRow(txtUserName, remoteX, 384, 0, 150);
 
     int authX = 5;
-    authX = placeInRow(rdoUsePassword, authX, 352, 4, 0);
-    authX = placeInRow(txtPassword, authX, 352, 14, 150);
-    authX = placeInRow(rdoKeyGen, authX, 352, 4, 0);
-    placeInRow(scanKeygen, authX, 352, 0, 100);
+    authX = placeInRow(rdoUsePassword, authX, 412, 4, 0);
+    authX = placeInRow(txtPassword, authX, 412, 14, 150);
+    authX = placeInRow(rdoKeyGen, authX, 412, 4, 0);
+    placeInRow(scanKeygen, authX, 412, 0, 100);
 
     int orderingX = 5;
-    orderingX = placeInRow(moveUp, orderingX, 382, 2, 55);
-    orderingX = placeInRow(moveDown, orderingX, 382, 2, 55);
-    orderingX = placeInRow(moveUp5, orderingX, 382, 2, 55);
-    orderingX = placeInRow(moveDown5, orderingX, 382, 2, 55);
-    orderingX = placeInRow(moveFirst, orderingX, 382, 2, 55);
-    placeInRow(moveLast, orderingX, 382, 0, 55);
+    orderingX = placeInRow(moveUp, orderingX, 442, 2, 55);
+    orderingX = placeInRow(moveDown, orderingX, 442, 2, 55);
+    orderingX = placeInRow(moveUp5, orderingX, 442, 2, 55);
+    orderingX = placeInRow(moveDown5, orderingX, 442, 2, 55);
+    orderingX = placeInRow(moveFirst, orderingX, 442, 2, 55);
+    placeInRow(moveLast, orderingX, 442, 0, 55);
     int gtpConfigWidth =
         Math.min(200, AccessibilitySupport.localizedControlWidth(this.gtpConfig, 150));
-    this.gtpConfig.setBounds(360, 382, gtpConfigWidth, 24);
+    this.gtpConfig.setBounds(360, 442, gtpConfigWidth, 24);
 
     int actionRight = 885;
-    actionRight = placeFromRight(exit, actionRight, 382, 2, 60);
-    actionRight = placeFromRight(save, actionRight, 382, 18, 60);
-    actionRight = placeFromRight(cancel, actionRight, 382, 2, 54);
-    actionRight = placeFromRight(delete, actionRight, 382, 2, 54);
-    placeFromRight(add, actionRight, 382, 0, 54);
+    actionRight = placeFromRight(exit, actionRight, 442, 2, 60);
+    actionRight = placeFromRight(save, actionRight, 442, 18, 60);
+    actionRight = placeFromRight(cancel, actionRight, 442, 2, 54);
+    actionRight = placeFromRight(delete, actionRight, 442, 2, 54);
+    placeFromRight(add, actionRight, 442, 0, 54);
 
     int startupX = 5;
-    startupX = placeInRow(lblchooseStart, startupX, 410, 6, 0);
-    startupX = placeInRow(rdoDefault, startupX, 410, 4, 0);
-    startupX = placeInRow(rdoLast, startupX, 410, 4, 0);
-    startupX = placeInRow(rdoMannul, startupX, 410, 4, 0);
-    placeInRow(rdoNone, startupX, 410, 0, 0);
+    startupX = placeInRow(lblchooseStart, startupX, 470, 6, 0);
+    startupX = placeInRow(rdoDefault, startupX, 470, 4, 0);
+    startupX = placeInRow(rdoLast, startupX, 470, 4, 0);
+    startupX = placeInRow(rdoMannul, startupX, 470, 4, 0);
+    placeInRow(rdoNone, startupX, 470, 0, 0);
     //    this.rdoDefault.setBounds(
     //        Lizzie.config.isFrameFontSmall() ? 70 : (Lizzie.config.isFrameFontMiddle() ? 90 :
     // 110),
@@ -472,7 +504,7 @@ public class MoreEngines extends JPanel {
     JFontButton btnEncrypt =
         new JFontButton(this.resourceBundle.getString("MoreEngines.btnEncrypt"));
     btnEncrypt.setMargin(new Insets(0, 0, 0, 0));
-    btnEncrypt.setBounds(765, 410, 120, 24);
+    btnEncrypt.setBounds(765, 470, 120, 24);
     this.selectpanel.add(btnEncrypt);
     btnEncrypt.addActionListener(
         new ActionListener() {
@@ -492,8 +524,8 @@ public class MoreEngines extends JPanel {
     else rdoMannul.setSelected(true);
 
     setEnable(false);
-    this.selectpanel.setBounds(0, 0, 900, 440);
-    this.tablepanel.setBounds(0, 440, 885, 325);
+    this.selectpanel.setBounds(0, 0, 900, 500);
+    this.tablepanel.setBounds(0, 500, 885, 285);
     this.selectpanel.add(this.engineName);
     this.selectpanel.add(lblName);
     this.selectpanel.add(this.txtName);
@@ -509,6 +541,9 @@ public class MoreEngines extends JPanel {
     this.selectpanel.add(lblKomi);
     this.selectpanel.add(this.txtKomi);
     this.selectpanel.add(this.remoteManagedThreads);
+    this.selectpanel.add(this.threadPolicyCfg);
+    this.selectpanel.add(this.threadPolicyBenchmark);
+    this.selectpanel.add(this.threadPolicyStatus);
     this.selectpanel.add(this.scan);
     this.selectpanel.add(this.add);
     this.selectpanel.add(this.save);
@@ -544,24 +579,22 @@ public class MoreEngines extends JPanel {
         });
     this.gtpConfig.addActionListener(event -> configureSelectedEngine());
     this.add.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            checkSave();
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            EngineData newEng = new EngineData();
-            newEng.commands = "";
-            newEng.height = 19;
-            newEng.index = 0;
-            newEng.isDefault = false;
-            newEng.komi = 7.5F;
-            newEng.name = resourceBundle.getString("ChooseMoreEngine.newEngine");
-            newEng.preload = false;
-            newEng.width = 19;
-            engData.add(0, newEng);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            handleTableClick(0);
-          }
+        event -> {
+          if (!checkSave()) return;
+          ArrayList<EngineData> engData = Utils.getEngineData();
+          EngineData newEng = new EngineData();
+          newEng.commands = "";
+          newEng.height = 19;
+          newEng.index = 0;
+          newEng.isDefault = false;
+          newEng.komi = 7.5F;
+          newEng.name = resourceBundle.getString("ChooseMoreEngine.newEngine");
+          newEng.preload = false;
+          newEng.width = 19;
+          engData.add(0, newEng);
+          if (!saveEngineCatalog(engData)) return;
+          markEngineCatalogChangedAndRefresh();
+          handleTableClick(0);
         });
     this.delete.addActionListener(
         new ActionListener() {
@@ -585,13 +618,20 @@ public class MoreEngines extends JPanel {
                             options1[0]);
                     if (ret1 != 0) return;
                     ArrayList<EngineData> engineData = Utils.getEngineData();
-                    engineData.remove(curIndex);
-                    Utils.saveEngineSettings(engineData);
+                    int selectedIndex = findEntryIndex(engineData, selectedEntryId);
+                    if (selectedIndex < 0) {
+                      showThreadPolicySaveFailure(
+                          new IOException(EngineThreadPolicy.message("targetDeleted")));
+                      return;
+                    }
+                    engineData.remove(selectedIndex);
+                    if (!saveEngineCatalog(engineData)) return;
                     table.validate();
                     table.updateUI();
                     table.getSelectionModel().clearSelection();
                     markEngineCatalogChangedAndRefresh();
-                    handleTableClick(curIndex);
+                    selectedEntryId = "";
+                    handleTableClick(Math.min(selectedIndex, engineData.size()));
                   }
                 });
           }
@@ -599,7 +639,7 @@ public class MoreEngines extends JPanel {
     this.exit.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
-            checkSave();
+            if (!checkSave()) return;
             MoreEngines.engjf.setVisible(false);
             if (needUpdateEngine)
               try {
@@ -636,6 +676,8 @@ public class MoreEngines extends JPanel {
             scanKeygen.setToolTipText("");
             scanKeygen.setToolTipText("");
             curIndex = -1;
+            selectedEntryId = "";
+            threadPolicySourceChanged = false;
             setEnable(false);
             table.getSelectionModel().clearSelection();
           }
@@ -643,14 +685,11 @@ public class MoreEngines extends JPanel {
     this.save.addActionListener(
         new ActionListener() {
           public void actionPerformed(ActionEvent e) {
-            saveDefaultEngine();
-            boolean empty = false;
-            if (command.getText().equals("")) {
-              empty = true;
-              command.setText(" ");
-            }
-            if (curIndex >= 0) saveCurrentEngineConfig();
+            boolean empty = command.getText().equals("");
+            if (empty) command.setText(" ");
+            boolean saved = curIndex < 0 || saveCurrentEngineConfig();
             if (empty) command.setText("");
+            if (!saved || !saveDefaultEngine()) return;
             table.validate();
             table.updateUI();
           }
@@ -659,100 +698,16 @@ public class MoreEngines extends JPanel {
         new MouseAdapter() {
           public void mouseClicked(MouseEvent e) {
             int row = table.rowAtPoint(e.getPoint());
-            checkSave();
+            if (!checkSave()) return;
             handleTableClick(row);
           }
         });
-    this.moveFirst.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 1 || curIndex > engData.size() - 1) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(0, enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex = 0;
-          }
-        });
-    this.moveLast.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 0 || curIndex > engData.size() - 1) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(engData.size(), enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex = engData.size() - 1;
-          }
-        });
-    this.moveUp.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 1 || curIndex > engData.size() - 1) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(curIndex - 1, enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex--;
-          }
-        });
-    this.moveUp5.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 5 || curIndex > engData.size() - 1) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(curIndex - 5, enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex -= 5;
-          }
-        });
-    this.moveDown.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 0 || curIndex > engData.size() - 2) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(curIndex + 1, enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex++;
-          }
-        });
-    this.moveDown5.addActionListener(
-        new ActionListener() {
-          public void actionPerformed(ActionEvent e) {
-            ArrayList<EngineData> engData = Utils.getEngineData();
-            if (curIndex < 0 || curIndex > engData.size() - 6) return;
-            EngineData enginedt = engData.get(curIndex);
-            engData.remove(curIndex);
-            engData.add(curIndex + 5, enginedt);
-            Utils.saveEngineSettings(engData);
-            markEngineCatalogChangedAndRefresh();
-            table.validate();
-            table.updateUI();
-            curIndex += 5;
-          }
-        });
+    this.moveFirst.addActionListener(event -> moveSelectedEngine(Integer.MIN_VALUE));
+    this.moveLast.addActionListener(event -> moveSelectedEngine(Integer.MAX_VALUE));
+    this.moveUp.addActionListener(event -> moveSelectedEngine(-1));
+    this.moveUp5.addActionListener(event -> moveSelectedEngine(-5));
+    this.moveDown.addActionListener(event -> moveSelectedEngine(1));
+    this.moveDown5.addActionListener(event -> moveSelectedEngine(5));
   }
 
   private static int placeInRow(
@@ -804,20 +759,55 @@ public class MoreEngines extends JPanel {
     }
   }
 
-  public void saveDefaultEngine() {
-    // if (this.chkDefault.isSelected()) Lizzie.config.uiConfig.put("default-engine",
-    // this.curIndex);
-    if (updateStartupMode(
+  public boolean saveDefaultEngine() {
+    boolean oldDefault = Lizzie.config.uiConfig.optBoolean("autoload-default", false);
+    boolean oldLast = Lizzie.config.uiConfig.optBoolean("autoload-last", false);
+    boolean oldEmpty = Lizzie.config.uiConfig.optBoolean("autoload-empty", false);
+    if (!updateStartupMode(
         Lizzie.config.uiConfig,
         rdoDefault.isSelected(),
         rdoLast.isSelected(),
-        rdoNone.isSelected())) {
-      try {
-        Lizzie.config.save();
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
+        rdoNone.isSelected())) return true;
+    try {
+      Lizzie.config.save();
+      return true;
+    } catch (IOException failure) {
+      Lizzie.config.uiConfig.put("autoload-default", oldDefault);
+      Lizzie.config.uiConfig.put("autoload-last", oldLast);
+      Lizzie.config.uiConfig.put("autoload-empty", oldEmpty);
+      showThreadPolicySaveFailure(failure);
+      return false;
     }
+  }
+
+  private boolean saveEngineCatalog(ArrayList<EngineData> entries) {
+    try {
+      Utils.saveEngineSettings(entries);
+      return true;
+    } catch (java.io.UncheckedIOException failure) {
+      showThreadPolicySaveFailure(failure.getCause());
+      return false;
+    }
+  }
+
+  private void moveSelectedEngine(int direction) {
+    ArrayList<EngineData> entries = Utils.getEngineData();
+    int from = findEntryIndex(entries, selectedEntryId);
+    if (from < 0 || entries.size() < 2) return;
+    int requestedIndex =
+        direction == Integer.MIN_VALUE
+            ? 0
+            : direction == Integer.MAX_VALUE ? entries.size() - 1 : from + direction;
+    int to = Math.max(0, Math.min(requestedIndex, entries.size() - 1));
+    if (from == to) return;
+    EngineData selected = entries.remove(from);
+    entries.add(to, selected);
+    if (!saveEngineCatalog(entries)) return;
+    curIndex = to;
+    markEngineCatalogChangedAndRefresh();
+    table.getSelectionModel().setSelectionInterval(to, to);
+    table.validate();
+    table.updateUI();
   }
 
   static boolean updateStartupMode(
@@ -835,14 +825,15 @@ public class MoreEngines extends JPanel {
     return oldDefault != newDefault || oldLast != newLast || oldEmpty != newEmpty;
   }
 
-  private void checkSave() {
-    if (this.curIndex < 0) return;
-    boolean isChanged = false;
-    ArrayList<EngineData> engData = Utils.getEngineData();
-    if (this.curIndex >= engData.size()) {
-      isChanged = true;
-    } else {
-      EngineData engDt = engData.get(this.curIndex);
+  private boolean checkSave() {
+    if (this.curIndex < 0) return true;
+    EngineData engDt = EngineThreadPolicy.findSavedEntry(selectedEntryId);
+    if (engDt == null && !selectedEntryId.isBlank()) {
+      showThreadPolicySaveFailure(new IOException(EngineThreadPolicy.message("targetDeleted")));
+      return false;
+    }
+    boolean isChanged = engDt == null || threadPolicySourceChanged;
+    if (engDt != null) {
       if (!this.command.getText().startsWith("encryption||")
           && !this.command.getText().equals(engDt.commands)) isChanged = true;
       if (!this.txtName.getText().equals(engDt.name)) isChanged = true;
@@ -851,15 +842,9 @@ public class MoreEngines extends JPanel {
               .equals(resourceBundle.getString("MoreEngines.initialCommandHint"))
           && !this.txtInitialCommand.getText().equals(engDt.initialCommand)) isChanged = true;
       if (this.preload.isSelected() != engDt.preload) isChanged = true;
-      if (!this.txtWidth
-          .getText()
-          .equals((new StringBuilder(String.valueOf(engDt.width))).toString())) isChanged = true;
-      if (!this.txtHeight
-          .getText()
-          .equals((new StringBuilder(String.valueOf(engDt.height))).toString())) isChanged = true;
-      if (!this.txtKomi
-          .getText()
-          .equals((new StringBuilder(String.valueOf(engDt.komi))).toString())) isChanged = true;
+      if (!this.txtWidth.getText().equals(String.valueOf(engDt.width))) isChanged = true;
+      if (!this.txtHeight.getText().equals(String.valueOf(engDt.height))) isChanged = true;
+      if (!this.txtKomi.getText().equals(String.valueOf(engDt.komi))) isChanged = true;
       if (this.chkDefault.isSelected() != engDt.isDefault) isChanged = true;
       if (this.chkRemoteEngine.isSelected() != engDt.useJavaSSH) isChanged = true;
       if (this.chkRemoteEngine.isSelected()) {
@@ -874,46 +859,121 @@ public class MoreEngines extends JPanel {
           isChanged = true;
         }
       }
-      if (isChanged)
-        if (this.command.getText().equals("")) {
-          Object[] options1 = {
-            this.resourceBundle.getString("MoreEngines.deleteHint"),
-            this.resourceBundle.getString("MoreEngines.deleteHint2")
-          };
-          int ret1 =
-              JOptionPane.showOptionDialog(
-                  this,
-                  this.resourceBundle.getString("MoreEngines.deleteHint3"),
-                  this.resourceBundle.getString("MoreEngines.deleteHint4"),
-                  0,
-                  3,
-                  null,
-                  options1,
-                  options1[0]);
-          if (ret1 == 0) saveCurrentEngineConfig();
-        } else {
-          Object[] options = {
-            this.resourceBundle.getString("MoreEngines.saveHint"),
-            this.resourceBundle.getString("MoreEngines.saveHint2")
-          };
-          int ret =
-              JOptionPane.showOptionDialog(
-                  this,
-                  this.resourceBundle.getString("MoreEngines.saveHint3"),
-                  this.resourceBundle.getString("MoreEngines.saveHint4"),
-                  0,
-                  3,
-                  null,
-                  options,
-                  options[0]);
-          if (ret == 0) saveCurrentEngineConfig();
-        }
     }
+    if (!isChanged) return true;
+    Object[] options = {
+      this.resourceBundle.getString("MoreEngines.saveHint"),
+      this.resourceBundle.getString("MoreEngines.saveHint2")
+    };
+    int ret =
+        JOptionPane.showOptionDialog(
+            this,
+            this.resourceBundle.getString("MoreEngines.saveHint3"),
+            this.resourceBundle.getString("MoreEngines.saveHint4"),
+            0,
+            3,
+            null,
+            options,
+            options[0]);
+    return ret != 0 || saveCurrentEngineConfig();
   }
 
-  private void updateRemoteThreadStatus() {
-    remoteManagedThreads.setVisible(
-        EngineThreadPolicy.isRemoteManaged(command.getText(), chkRemoteEngine.isSelected()));
+  private void selectThreadPolicy(EngineThreadPolicy.Source source) {
+    if (loadingThreadPolicy) return;
+    selectedThreadSource = source;
+    threadPolicySourceChanged = true;
+    updateThreadPolicyDetails();
+  }
+
+  private void updateThreadPolicyDetails() {
+    boolean remote =
+        EngineThreadPolicy.isRemoteManaged(command.getText(), chkRemoteEngine.isSelected());
+    EngineData saved = EngineThreadPolicy.findSavedEntry(selectedEntryId);
+    boolean local =
+        !remote
+            && EngineThreadPolicy.isLocalKataGoCommand(
+                command.getText(), chkRemoteEngine.isSelected());
+    boolean unknown = isUnknownThreadTarget(command.getText(), remote, local);
+    remoteManagedThreads.setVisible(remote);
+    threadPolicyCfg.setVisible(local);
+    threadPolicyBenchmark.setVisible(local);
+    threadPolicyStatus.setVisible(local || unknown);
+    if (remote) return;
+    if (!local) {
+      threadPolicyStatus.setText(
+          unknown ? EngineThreadPolicy.message("unknownBenchmarkTarget") : "");
+      return;
+    }
+    int recommendation = EngineThreadPolicy.recommendedThreads(saved);
+    loadingThreadPolicy = true;
+    try {
+      threadPolicyCfg.setSelected(selectedThreadSource == EngineThreadPolicy.Source.CFG);
+      threadPolicyBenchmark.setSelected(
+          selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK);
+      threadPolicyCfg.setEnabled(curIndex >= 0);
+      threadPolicyBenchmark.setEnabled(
+          curIndex >= 0
+              && (recommendation > 0
+                  || selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK));
+    } finally {
+      loadingThreadPolicy = false;
+    }
+    ArrayList<String> statuses = new ArrayList<>();
+    if (recommendation > 0) {
+      statuses.add(String.format(EngineThreadPolicy.message("recommendation"), recommendation));
+    } else if (selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK) {
+      statuses.add(EngineThreadPolicy.message("invalidRecommendation"));
+    } else {
+      statuses.add(EngineThreadPolicy.message("notDetected"));
+    }
+    if (saved != null) {
+      String environment = EngineThreadPolicy.environmentStatus(saved);
+      if (!environment.isBlank()) statuses.add(environment);
+      if (saved.threadPolicy != null
+          && saved.threadPolicy.optBoolean("legacyOverrideStopped", false)) {
+        statuses.add(EngineThreadPolicy.message("legacyOverrideStopped"));
+      }
+      if (hasExplicitThreadOverride(command.getText())) {
+        statuses.add(EngineThreadPolicy.message("explicitOverride"));
+      }
+      if (isThreadPolicyPending(saved)) {
+        statuses.add(EngineThreadPolicy.message("pendingReload"));
+      }
+    }
+    String statusText = String.join(" · ", statuses);
+    threadPolicyStatus.setText(
+        "<html><div style='width:840px'>"
+            + statusText.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            + "</div></html>");
+    threadPolicyStatus.setToolTipText(statusText);
+  }
+
+  private boolean isUnknownThreadTarget(String rawCommand, boolean remote, boolean local) {
+    if (remote || local) return false;
+    String decoded = rawCommand == null ? "" : rawCommand.trim();
+    if (decoded.startsWith("encryption||")) decoded = Utils.doDecrypt2(decoded.substring(12));
+    java.util.List<String> tokens = Utils.splitCommand(decoded);
+    return decoded.isBlank()
+        || tokens == null
+        || tokens.isEmpty()
+        || tokens.get(0).contains("://")
+        || decoded.toLowerCase(java.util.Locale.ROOT).contains("katago");
+  }
+
+  private boolean hasExplicitThreadOverride(String rawCommand) {
+    String decoded = rawCommand == null ? "" : rawCommand;
+    if (decoded.startsWith("encryption||")) {
+      decoded = Utils.doDecrypt2(decoded.substring(12));
+    }
+    return KataGoRuntimeHelper.hasEffectiveNumSearchThreadsOverride(Utils.splitCommand(decoded));
+  }
+
+  private boolean isThreadPolicyPending(EngineData entry) {
+    if (Lizzie.engineManager == null || Lizzie.engineManager.engineList == null) return false;
+    for (Leelaz engine : Lizzie.engineManager.engineList) {
+      if (entry.id.equals(engine.savedEntryId) && engine.isThreadPolicyPending(entry)) return true;
+    }
+    return false;
   }
 
   private void setEnable(boolean isEnable) {
@@ -947,6 +1007,7 @@ public class MoreEngines extends JPanel {
       this.moveDown.setEnabled(true);
       this.moveDown5.setEnabled(true);
       this.gtpConfig.setEnabled(true);
+      updateThreadPolicyDetails();
     } else {
       this.txtName.setEnabled(false);
       txtInitialCommand.setEnabled(false);
@@ -975,13 +1036,23 @@ public class MoreEngines extends JPanel {
       this.rdoKeyGen.setEnabled(false);
       this.scanKeygen.setEnabled(false);
       this.gtpConfig.setEnabled(false);
+      threadPolicyCfg.setEnabled(false);
+      threadPolicyBenchmark.setEnabled(false);
+      threadPolicyCfg.setVisible(false);
+      threadPolicyBenchmark.setVisible(false);
+      threadPolicyStatus.setVisible(false);
+      remoteManagedThreads.setVisible(false);
     }
   }
 
   private void handleTableClick(int row) {
     ArrayList<EngineData> engineDatas = Utils.getEngineData();
+    if (row < 0) return;
+    loadingThreadPolicy = true;
     if (row < engineDatas.size()) {
       EngineData engineData = engineDatas.get(row);
+      selectedEntryId = engineData.id;
+      selectedThreadSource = EngineThreadPolicy.source(engineData);
       this.command.setText(engineData.commands);
       this.engineName.setText(
           String.valueOf(this.resourceBundle.getString("MoreEngines.editEngine"))
@@ -1025,6 +1096,8 @@ public class MoreEngines extends JPanel {
         this.scanKeygen.setToolTipText("");
       }
     } else {
+      selectedEntryId = "";
+      selectedThreadSource = EngineThreadPolicy.Source.CFG;
       this.command.setText("");
       this.txtName.setText("");
       this.txtInitialCommand.setText("");
@@ -1065,22 +1138,48 @@ public class MoreEngines extends JPanel {
       this.txtPassword.setEnabled(false);
       this.scanKeygen.setEnabled(false);
     }
-    this.curIndex = Integer.parseInt(table.getModel().getValueAt(row, 0).toString()) - 1;
+    this.curIndex = row;
+    threadPolicySourceChanged = false;
+    loadingThreadPolicy = false;
     setEnable(true);
+    updateThreadPolicyDetails();
     table.validate();
     table.updateUI();
   }
 
-  private void saveCurrentEngineConfig() {
-    needUpdateEngine = true;
+  private boolean saveCurrentEngineConfig() {
     ArrayList<EngineData> engineData = Utils.getEngineData();
+    int targetIndex = findEntryIndex(engineData, selectedEntryId);
+    if (!selectedEntryId.isBlank() && targetIndex < 0) {
+      showThreadPolicySaveFailure(new IOException(EngineThreadPolicy.message("targetDeleted")));
+      return false;
+    }
+    EngineData latest = targetIndex >= 0 ? engineData.get(targetIndex) : null;
     EngineData engineDt = new EngineData();
     String editedCommand = this.command.getText().trim();
-    if (this.curIndex >= 0 && this.curIndex < engineData.size()) {
-      copyGtpConfigurationForUnchangedCommand(
-          engineDt, engineData.get(this.curIndex), editedCommand);
+    if (latest != null) {
+      copyGtpConfigurationForUnchangedCommand(engineDt, latest, editedCommand);
+      engineDt.id = latest.id;
+      engineDt.threadPolicy =
+          latest.threadPolicy == null
+              ? new JSONObject().put("source", "CFG").put("sourceRevision", 0L)
+              : new JSONObject(latest.threadPolicy.toString());
     }
-    engineDt.index = this.curIndex;
+    if (engineDt.threadPolicy == null) {
+      engineDt.threadPolicy = new JSONObject().put("source", "CFG").put("sourceRevision", 0L);
+    }
+    if (threadPolicySourceChanged) {
+      if (selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK
+          && EngineThreadPolicy.recommendedThreads(latest) <= 0) {
+        showThreadPolicySaveFailure(
+            new IOException(EngineThreadPolicy.message("invalidRecommendation")));
+        return false;
+      }
+      engineDt.threadPolicy.put("source", selectedThreadSource.name());
+      engineDt.threadPolicy.put(
+          "sourceRevision", engineDt.threadPolicy.optLong("sourceRevision", 0L) + 1L);
+    }
+    engineDt.index = targetIndex >= 0 ? targetIndex : engineData.size();
     engineDt.commands = editedCommand;
     engineDt.name = this.txtName.getText();
     if (txtInitialCommand
@@ -1099,25 +1198,90 @@ public class MoreEngines extends JPanel {
       engineDt.port = this.txtPort.getText();
       engineDt.useKeyGen = this.rdoKeyGen.isSelected();
       engineDt.userName = this.txtUserName.getText();
-      if (engineDt.useKeyGen) {
-        engineDt.keyGenPath = this.keyGenPath;
-      } else {
-        engineDt.password = Utils.doEncrypt(new String(this.txtPassword.getPassword()));
-      }
+      if (engineDt.useKeyGen) engineDt.keyGenPath = this.keyGenPath;
+      else engineDt.password = Utils.doEncrypt(new String(this.txtPassword.getPassword()));
     }
     if (engineDt.isDefault) {
-      for (EngineData engine : engineData) {
-        engine.isDefault = false;
-      }
+      for (EngineData engine : engineData) engine.isDefault = false;
     }
-    if (this.curIndex + 1 > engineData.size()) {
-      engineData.add(engineDt);
-    } else {
-      engineData.remove(this.curIndex);
-      engineData.add(this.curIndex, engineDt);
+    if (targetIndex >= 0) engineData.set(targetIndex, engineDt);
+    else engineData.add(engineDt);
+    try {
+      Utils.saveEngineSettings(engineData);
+    } catch (java.io.UncheckedIOException failure) {
+      showThreadPolicySaveFailure(failure.getCause());
+      return false;
     }
-    Utils.saveEngineSettings(engineData);
+    ArrayList<EngineData> savedEntries = Utils.getEngineData();
+    if (engineDt.id.isBlank() && engineDt.index < savedEntries.size()) {
+      engineDt = savedEntries.get(engineDt.index);
+    }
+    selectedEntryId = engineDt.id;
+    curIndex = findEntryIndex(savedEntries, selectedEntryId);
+    selectedThreadSource = EngineThreadPolicy.source(engineDt);
+    threadPolicySourceChanged = false;
+    needUpdateEngine = true;
     refreshEngineCatalogIfReady();
+    applyThreadPolicyOffEdt(selectedEntryId);
+    updateThreadPolicyDetails();
+    return true;
+  }
+
+  private static int findEntryIndex(ArrayList<EngineData> entries, String id) {
+    if (id == null || id.isBlank()) return -1;
+    for (int i = 0; i < entries.size(); i++) {
+      if (id.equals(entries.get(i).id)) return i;
+    }
+    return -1;
+  }
+
+  private void applyThreadPolicyOffEdt(String entryId) {
+    if (entryId == null || entryId.isBlank()) return;
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() {
+        EngineData saved = EngineThreadPolicy.findSavedEntry(entryId);
+        if (saved == null
+            || Lizzie.engineManager == null
+            || Lizzie.engineManager.engineList == null) {
+          return null;
+        }
+        for (Leelaz engine : Lizzie.engineManager.engineList) {
+          if (entryId.equals(engine.savedEntryId)) engine.applySavedThreadPolicy(saved);
+        }
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        updateThreadPolicyDetails();
+        scheduleThreadPolicyStatusRefresh(entryId);
+      }
+    }.execute();
+  }
+
+  private void scheduleThreadPolicyStatusRefresh(String entryId) {
+    if (threadPolicyRefreshTimer != null) threadPolicyRefreshTimer.stop();
+    threadPolicyRefreshTimer =
+        new Timer(
+            500,
+            event -> {
+              EngineData saved = EngineThreadPolicy.findSavedEntry(entryId);
+              updateThreadPolicyDetails();
+              if (saved == null || !isThreadPolicyPending(saved) || !isShowing()) {
+                ((Timer) event.getSource()).stop();
+              }
+            });
+    threadPolicyRefreshTimer.start();
+  }
+
+  private void showThreadPolicySaveFailure(Throwable failure) {
+    String detail = failure == null || failure.getMessage() == null ? "" : failure.getMessage();
+    JOptionPane.showMessageDialog(
+        engjf,
+        String.format(EngineThreadPolicy.message("saveFailed"), detail),
+        EngineThreadPolicy.message("settings"),
+        JOptionPane.ERROR_MESSAGE);
   }
 
   static void copyGtpConfigurationForUnchangedCommand(
@@ -1134,7 +1298,7 @@ public class MoreEngines extends JPanel {
     if (curIndex < 0) {
       return;
     }
-    saveCurrentEngineConfig();
+    if (!saveCurrentEngineConfig()) return;
     ArrayList<EngineData> engines = Utils.getEngineData();
     if (curIndex >= engines.size()) {
       return;
@@ -1203,16 +1367,21 @@ public class MoreEngines extends JPanel {
       protected void done() {
         try {
           GtpConfigurationProbe.ApplyResult result = get();
-          persistGtpConfiguration(selectedIndex, selectedCommand, schema.protocol(), result.profile());
+          persistGtpConfiguration(
+              selectedIndex, selectedCommand, schema.protocol(), result.profile());
           applyProfileToRunningEngine(selectedIndex, result.profile());
         } catch (InterruptedException error) {
           Thread.currentThread().interrupt();
           restoreGtpConfigurationButton();
           showGtpConfigurationError(error);
-        } catch (ExecutionException | IllegalStateException error) {
+        } catch (ExecutionException | RuntimeException error) {
           restoreGtpConfigurationButton();
           Throwable cause = error instanceof ExecutionException ? error.getCause() : error;
-          showGtpConfigurationError(cause);
+          if (cause instanceof java.io.UncheckedIOException) {
+            showThreadPolicySaveFailure(cause.getCause());
+          } else {
+            showGtpConfigurationError(cause);
+          }
         }
       }
     }.execute();
@@ -1370,6 +1539,10 @@ public class MoreEngines extends JPanel {
   }
 
   public static JDialog createDialog() {
+    return createDialog(null);
+  }
+
+  public static JDialog createDialog(String entryId) {
     engjf = new JDialog();
     needUpdateEngine = false;
     engjf.setTitle(Lizzie.resourceBundle.getString("MoreEngines.title"));
@@ -1393,7 +1566,20 @@ public class MoreEngines extends JPanel {
     MoreEngines newContentPane = new MoreEngines();
     newContentPane.setOpaque(true);
     engjf.setContentPane(newContentPane);
-    Lizzie.setFrameSize(engjf, 891, 794);
+    if (entryId != null && !entryId.isBlank()) {
+      int row = findEntryIndex(Utils.getEngineData(), entryId);
+      if (row >= 0) {
+        table.getSelectionModel().setSelectionInterval(row, row);
+        newContentPane.handleTableClick(row);
+      } else {
+        JOptionPane.showMessageDialog(
+            engjf,
+            EngineThreadPolicy.message("targetDeleted"),
+            EngineThreadPolicy.message("settings"),
+            JOptionPane.WARNING_MESSAGE);
+      }
+    }
+    Lizzie.setFrameSize(engjf, 891, 842);
     engjf.setResizable(false);
     try {
       engjf.setIconImage(ImageIO.read(MoreEngines.class.getResourceAsStream("/assets/logo.png")));

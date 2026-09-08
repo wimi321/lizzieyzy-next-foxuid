@@ -284,8 +284,7 @@ public final class KataGoRuntimeHelper {
   private static Boolean benchmarkPreviousShowPonderTips = null;
   private static Leelaz benchmarkPausedEngine = null;
   private static EngineManager benchmarkPausedEngineManager = null;
-  private static List<Leelaz> benchmarkPausedEngineList = null;
-  private static int benchmarkPausedEngineIndex = -1;
+  private static long benchmarkPausedIncarnation = -1;
   private static boolean benchmarkPausedEngineByShutdown = false;
   private static boolean benchmarkComputeIsolated = false;
   private static boolean benchmarkRestartQuickAnalysisPreload = false;
@@ -692,6 +691,92 @@ public final class KataGoRuntimeHelper {
       this.nnEvalsPerSecond = Math.max(0.0, nnEvalsPerSecond);
       this.averageBatchSize = Math.max(0.0, averageBatchSize);
       this.tuningProfile = tuningProfile;
+    }
+  }
+
+  /** A one-shot benchmark of a frozen, persisted engine entry. */
+  public static final class BenchmarkTarget {
+    public final String entryId;
+    public final String name;
+    public final String command;
+    public final SetupSnapshot snapshot;
+    private final JSONObject environment;
+    private final long sourceRevision;
+    private final boolean initialSetup;
+    private final AtomicBoolean started = new AtomicBoolean();
+    private final Leelaz runningEngine;
+    private final long incarnation;
+    private final EngineManager manager;
+    private final boolean useJavaSsh;
+
+    private BenchmarkTarget(EngineData entry, SetupSnapshot snapshot, boolean initialSetup)
+        throws IOException {
+      this.entryId = entry.id;
+      this.name = entry.name;
+      this.command = entry.commands;
+      this.snapshot = snapshot;
+      this.environment = EngineThreadPolicy.environment(snapshot);
+      this.sourceRevision = entry.threadPolicy.optLong("sourceRevision");
+      this.initialSetup = initialSetup && entry.threadPolicy.optBoolean("initialSetup", false);
+      this.manager = Lizzie.engineManager;
+      this.useJavaSsh = entry.useJavaSSH;
+      Leelaz running = null;
+      if (manager != null) {
+        for (Leelaz engine : manager.engineList) {
+          if (engine != null && entry.id.equals(engine.savedEntryId)) {
+            running = engine;
+            break;
+          }
+        }
+      }
+      this.runningEngine = running;
+      this.incarnation = running == null ? -1 : running.trackingStreamIncarnation();
+    }
+  }
+
+  private static final java.util.concurrent.atomic.AtomicReference<BenchmarkTarget>
+      activeEntryBenchmark = new java.util.concurrent.atomic.AtomicReference<>();
+
+  public static BenchmarkTarget captureBenchmarkTarget(SetupSnapshot snapshot, boolean initialSetup)
+      throws IOException {
+    if (snapshot == null) throw new IOException(EngineThreadPolicy.message("selectTarget"));
+    synchronized (Utils.class) {
+      ArrayList<EngineData> entries;
+      try {
+        entries = Utils.normalizeEngineSettings();
+      } catch (java.io.UncheckedIOException failure) {
+        throw failure.getCause();
+      }
+      EngineData target = null;
+      for (EngineData entry : entries) {
+        if (!snapshot.savedEntryId.isBlank()) {
+          if (entry.id.equals(snapshot.savedEntryId)) {
+            target = entry;
+            break;
+          }
+        } else if (EngineThreadPolicy.isLocalKataGoCommand(entry.commands, entry.useJavaSSH)) {
+          SetupSnapshot candidate = KataGoAutoSetupHelper.inspectSavedEngine(entry);
+          if (candidate != null
+              && java.util.Objects.equals(candidate.enginePath, snapshot.enginePath)
+              && java.util.Objects.equals(candidate.gtpConfigPath, snapshot.gtpConfigPath)
+              && java.util.Objects.equals(candidate.activeWeightPath, snapshot.activeWeightPath)
+              && (snapshot.discovery == null
+                  || snapshot.discovery.sourceCommand.isBlank()
+                  || snapshot.discovery.sourceCommand.equals(entry.commands))) {
+            if (target != null) throw new IOException(EngineThreadPolicy.message("selectTarget"));
+            target = entry;
+          }
+        }
+      }
+      if (target == null) throw new IOException(EngineThreadPolicy.message("selectTarget"));
+      SetupSnapshot saved = KataGoAutoSetupHelper.inspectSavedEngine(target);
+      validateBenchmarkSnapshot(saved);
+      if (!java.util.Objects.equals(saved.enginePath, snapshot.enginePath)
+          || !java.util.Objects.equals(saved.gtpConfigPath, snapshot.gtpConfigPath)
+          || !java.util.Objects.equals(saved.activeWeightPath, snapshot.activeWeightPath)) {
+        throw new IOException(EngineThreadPolicy.message("selectTarget"));
+      }
+      return new BenchmarkTarget(target, saved, initialSetup);
     }
   }
 
@@ -1599,15 +1684,25 @@ public final class KataGoRuntimeHelper {
     if (purpose == LaunchPurpose.HUMAN_SL) {
       applyHumanSlLaunchProfile(launchCommand);
     }
-    if (purpose == LaunchPurpose.MAIN_GTP) {
-      launchCommand = applyStoredAppleTuningProfile(launchCommand, enginePath);
-      launchCommand = applyStoredOfficialBenchmarkGpuSettings(launchCommand, enginePath);
-    }
     return launchCommand;
   }
 
+  public static List<String> applyEntryLaunchPolicy(
+      List<String> command, Path enginePath, EngineData entry) {
+    if (entry == null || EngineThreadPolicy.isRemoteManaged(entry.commands, entry.useJavaSSH))
+      return command;
+    int threads = EngineThreadPolicy.threadsForLaunch(entry, command);
+    List<String> launch = applyStoredAppleTuningProfile(command, enginePath, entry);
+    if (!isAppleSiliconHost())
+      launch = applyStoredOfficialBenchmarkGpuSettings(launch, enginePath, entry);
+    return threads > 0
+        ? KataGoCommandSpec.parse(launch)
+            .withForcedOverrides(Map.of("numSearchThreads", String.valueOf(threads)))
+        : launch;
+  }
+
   static List<String> applyStoredOfficialBenchmarkGpuSettings(
-      List<String> command, Path enginePath) {
+      List<String> command, Path enginePath, EngineData entry) {
     if (command == null
         || enginePath == null
         || Lizzie.config == null
@@ -1620,10 +1715,8 @@ public final class KataGoRuntimeHelper {
       return command;
     }
     try {
-      SetupSnapshot snapshot =
-          KataGoAutoSetupHelper.inspectSelectedLocalKataGo(enginePath, configPath, modelPath)
-              .toSnapshot();
-      BenchmarkResult stored = getStoredBenchmarkResult(snapshot);
+      if (!EngineThreadPolicy.environmentStatus(entry).isEmpty()) return command;
+      BenchmarkResult stored = getStoredBenchmarkResult(entry);
       if (stored == null
           || (stored.nnServerThreadsPerModel <= 0 && stored.maxBatchSize <= 0)) {
         return command;
@@ -1784,7 +1877,8 @@ public final class KataGoRuntimeHelper {
     }
   }
 
-  static List<String> applyStoredAppleTuningProfile(List<String> command, Path enginePath) {
+  static List<String> applyStoredAppleTuningProfile(
+      List<String> command, Path enginePath, EngineData entry) {
     if (!isAppleSiliconHost()
         || command == null
         || enginePath == null
@@ -1797,7 +1891,8 @@ public final class KataGoRuntimeHelper {
     if (modelPath == null || configPath == null) {
       return command;
     }
-    KataGoTuningStore tuningStore = new KataGoTuningStore(Lizzie.config.uiConfig);
+    if (entry == null || entry.threadPolicy == null) return command;
+    KataGoTuningStore tuningStore = new KataGoTuningStore(entry.threadPolicy);
     if (!tuningStore.hasStoredProfile()) {
       return command;
     }
@@ -1826,7 +1921,7 @@ public final class KataGoRuntimeHelper {
 
       KataGoTuningProfile profile = stored.get();
       if (!profile.managesHardwareSettings()) {
-        return mergeStoredAppleThreadProfile(command, profile.threads());
+        return command;
       }
       KataGoTuningCandidate candidate =
           new KataGoTuningCandidate("stored", profile.devices(), profile.batch());
@@ -1876,23 +1971,10 @@ public final class KataGoRuntimeHelper {
         key -> "nnMaxBatchSize".equalsIgnoreCase(key == null ? "" : key.trim()))) {
       managedOverrides.remove("nnMaxBatchSize");
     }
-    if (commandSpec.hasOverrideMatching(KataGoRuntimeHelper::isNumSearchThreadsOverride)) {
-      managedOverrides.remove("numSearchThreads");
-    }
+    managedOverrides.remove("numSearchThreads");
     return commandSpec.withManagedOverrides(managedOverrides);
   }
 
-  static List<String> mergeStoredAppleThreadProfile(List<String> command, int profileThreads) {
-    if (profileThreads <= 0 || profileThreads > 4096) {
-      throw new IllegalArgumentException("profileThreads must be between 1 and 4096");
-    }
-    KataGoCommandSpec commandSpec = KataGoCommandSpec.parse(command);
-    if (commandSpec.hasOverrideMatching(KataGoRuntimeHelper::isNumSearchThreadsOverride)) {
-      return command;
-    }
-    return commandSpec.withManagedOverrides(
-        Map.of("numSearchThreads", String.valueOf(profileThreads)));
-  }
 
   /** Returns whether the effective launch command explicitly sets KataGo's search threads. */
   public static boolean hasEffectiveNumSearchThreadsOverride(List<String> launchCommand) {
@@ -1900,8 +1982,12 @@ public final class KataGoRuntimeHelper {
       return false;
     }
     try {
-      return KataGoCommandSpec.parse(launchCommand)
-          .hasOverrideMatching(KataGoRuntimeHelper::isNumSearchThreadsOverride);
+      for (Map.Entry<String, String> entry :
+          KataGoCommandSpec.parse(launchCommand).effectiveOverrides().entrySet()) {
+        if (isNumSearchThreadsOverride(entry.getKey()) && Integer.parseInt(entry.getValue()) > 0)
+          return true;
+      }
+      return false;
     } catch (RuntimeException invalidCommand) {
       return false;
     }
@@ -2699,49 +2785,30 @@ public final class KataGoRuntimeHelper {
     return resolveConfiguredHumanSlCudaFallback(tensorRtEnginePath) != null;
   }
 
-  public static BenchmarkResult getStoredBenchmarkResult() {
-    if (Lizzie.config == null || Lizzie.config.uiConfig == null) {
-      return null;
-    }
-    int recommended = Lizzie.config.uiConfig.optInt("katago-benchmark-threads", 0);
-    if (recommended <= 0) {
-      return null;
-    }
+  public static BenchmarkResult getStoredBenchmarkResult(EngineData entry) {
+    if (entry == null
+        || entry.threadPolicy == null
+        || EngineThreadPolicy.recommendedThreads(entry) <= 0) return null;
+    JSONObject stored = entry.threadPolicy;
     return new BenchmarkResult(
-        recommended,
-        Lizzie.config.uiConfig.optInt("katago-benchmark-current-threads", 0),
-        Lizzie.config.uiConfig.optString("katago-benchmark-backend", "").trim(),
-        Lizzie.config.uiConfig.optString("katago-benchmark-summary", "").trim(),
-        Lizzie.config.uiConfig.optLong("katago-benchmark-updated-at", 0L),
-        Lizzie.config.uiConfig.optString("katago-benchmark-topology", "").trim(),
-        Lizzie.config.uiConfig.optInt("katago-benchmark-nn-server-threads", 0),
-        Lizzie.config.uiConfig.optInt("katago-benchmark-batch-size", 0),
-        Lizzie.config.uiConfig.optDouble("katago-benchmark-visits-per-second", 0.0),
-        Lizzie.config.uiConfig.optDouble("katago-benchmark-nn-evals-per-second", 0.0),
-        Lizzie.config.uiConfig.optDouble("katago-benchmark-average-batch-size", 0.0),
+        EngineThreadPolicy.recommendedThreads(entry),
+        stored.optInt("katago-benchmark-current-threads", 0),
+        stored.optString("katago-benchmark-backend", ""),
+        stored.optString("katago-benchmark-summary", ""),
+        stored.optLong("katago-benchmark-updated-at", 0L),
+        stored.optString("katago-benchmark-topology", ""),
+        stored.optInt("katago-benchmark-nn-server-threads", 0),
+        stored.optInt("katago-benchmark-batch-size", 0),
+        stored.optDouble("katago-benchmark-visits-per-second", 0.0),
+        stored.optDouble("katago-benchmark-nn-evals-per-second", 0.0),
+        stored.optDouble("katago-benchmark-average-batch-size", 0.0),
         null);
   }
 
-  /** Returns the displayed result only when it still belongs to the selected setup. */
   public static BenchmarkResult getStoredBenchmarkResult(SetupSnapshot snapshot) {
-    BenchmarkResult stored = getStoredBenchmarkResult();
-    if (stored == null || snapshot == null) {
-      return null;
-    }
-    String expectedSignature = buildBenchmarkSignature(snapshot);
-    String storedSignature = Lizzie.config.uiConfig.optString(BENCHMARK_SIGNATURE_KEY, "").trim();
-    if (expectedSignature.isEmpty() || !expectedSignature.equals(storedSignature)) {
-      return null;
-    }
-    stored = withResolvedBenchmarkBackend(stored, snapshot);
-    if (!isAppleSiliconOptimizationEligible(snapshot)) {
-      return stored;
-    }
-    boolean currentVersion =
-        Lizzie.config.uiConfig.optInt(APPLE_AUTO_OPTIMIZE_VERSION_KEY, 0)
-            == APPLE_AUTO_OPTIMIZE_VERSION;
-    boolean matchingProfile = matchingAppleTuningProfile(snapshot).isPresent();
-    return currentVersion && matchingProfile ? stored : null;
+    return snapshot == null
+        ? null
+        : getStoredBenchmarkResult(EngineThreadPolicy.findSavedEntry(snapshot.savedEntryId));
   }
 
   public static BenchmarkResult runBenchmark(
@@ -2884,6 +2951,7 @@ public final class KataGoRuntimeHelper {
     ProcessBuilder processBuilder = new ProcessBuilder(command);
     processBuilder.redirectErrorStream(true);
     configureBundledProcessBuilder(processBuilder, snapshot.enginePath);
+    processBuilder.directory(snapshot.executionDirectory.toFile());
 
     Process process;
     try {
@@ -2971,7 +3039,8 @@ public final class KataGoRuntimeHelper {
             resource("AutoSetup.benchmarkFailed", "Unable to run KataGo benchmark right now.")
                 + " (exit "
                 + exitCode
-                + ")");
+                + "): "
+                + output.substring(Math.max(0, output.length() - 2000)).trim());
       }
     } catch (InterruptedException e) {
       process.destroyForcibly();
@@ -3373,24 +3442,46 @@ public final class KataGoRuntimeHelper {
   }
 
   public static BenchmarkResult runBenchmarkAndApply(
-      SetupSnapshot snapshot, ProgressListener listener, DownloadSession session)
+      BenchmarkTarget target, ProgressListener listener, DownloadSession session)
       throws IOException {
-    if (snapshot == null) {
-      snapshot = KataGoAutoSetupHelper.inspectLocalSetup();
+    return runEntryBenchmark(target, listener, session, false);
+  }
+
+  private static BenchmarkResult runEntryBenchmark(
+      BenchmarkTarget target,
+      ProgressListener listener,
+      DownloadSession session,
+      boolean experimental)
+      throws IOException {
+    if (target == null
+        || !target.started.compareAndSet(false, true)
+        || !activeEntryBenchmark.compareAndSet(null, target)) {
+      throw new IOException(EngineThreadPolicy.message("benchmarkBusy"));
     }
-    DownloadSession activeSession = session != null ? session : new DownloadSession();
-    boolean officialAppleSilicon = isAppleSiliconOptimizationEligible(snapshot);
-    BenchmarkResult result =
-        officialAppleSilicon
-            ? runOfficialAppleSiliconBenchmark(snapshot, listener, activeSession)
-            : runBenchmark(snapshot, listener, activeSession);
-    if (officialAppleSilicon) {
-      requireLayeredBenchmarkComputeIsolation();
+    DownloadSession activeSession = session == null ? new DownloadSession() : session;
+    try {
+      SetupSnapshot snapshot = target.snapshot;
+      boolean apple = isAppleSiliconOptimizationEligible(snapshot);
+      if (experimental && !apple)
+        throw new IOException(
+            resource(
+                "AutoSetup.experimentalBenchmarkUnavailable",
+                "Experimental tuning is unavailable."));
+      BenchmarkResult result =
+          experimental
+              ? runLayeredAppleSiliconBenchmark(snapshot, listener, activeSession)
+              : apple
+                  ? runOfficialAppleSiliconBenchmark(snapshot, listener, activeSession)
+                  : runBenchmark(snapshot, listener, activeSession);
+      if (apple) requireLayeredBenchmarkComputeIsolation();
+      activeSession.throwIfCancelled();
+      commitBenchmarkResult(target, result, activeSession);
+      return result;
+    } catch (java.io.UncheckedIOException failure) {
+      throw failure.getCause();
+    } finally {
+      activeEntryBenchmark.compareAndSet(target, null);
     }
-    activeSession.throwIfCancelled();
-    applyBenchmarkResult(result);
-    rememberBenchmarkContext(snapshot, result);
-    return result;
   }
 
   private static BenchmarkResult runOfficialAppleSiliconBenchmark(
@@ -3463,24 +3554,9 @@ public final class KataGoRuntimeHelper {
 
   /** Runs the opt-in Apple Silicon GPU/ANE and batch search. This is never the default path. */
   public static BenchmarkResult runExperimentalAppleSiliconBenchmarkAndApply(
-      SetupSnapshot snapshot, ProgressListener listener, DownloadSession session)
+      BenchmarkTarget target, ProgressListener listener, DownloadSession session)
       throws IOException {
-    if (snapshot == null) {
-      snapshot = KataGoAutoSetupHelper.inspectLocalSetup();
-    }
-    if (!isAppleSiliconOptimizationEligible(snapshot)) {
-      throw new IOException(
-          resource(
-              "AutoSetup.experimentalBenchmarkUnavailable",
-              "Experimental hardware tuning requires the bundled Apple Silicon Metal engine."));
-    }
-    DownloadSession activeSession = session != null ? session : new DownloadSession();
-    BenchmarkResult result = runLayeredAppleSiliconBenchmark(snapshot, listener, activeSession);
-    requireLayeredBenchmarkComputeIsolation();
-    activeSession.throwIfCancelled();
-    applyBenchmarkResult(result);
-    rememberBenchmarkContext(snapshot, result);
-    return result;
+    return runEntryBenchmark(target, listener, session, true);
   }
 
   public static boolean isExperimentalAppleSiliconTuningAvailable(SetupSnapshot snapshot) {
@@ -3754,62 +3830,58 @@ public final class KataGoRuntimeHelper {
     };
   }
 
-  public static void applyBenchmarkResult(BenchmarkResult result) throws IOException {
-    if (result == null
-        || result.recommendedThreads <= 0
-        || Lizzie.config == null
-        || Lizzie.config.uiConfig == null) {
-      return;
-    }
-    JSONObject candidateUi = new JSONObject(Lizzie.config.uiConfig.toString());
-    if (result.tuningProfile == null) {
-      candidateUi.put("chk-kata-engine-threads", true);
-      candidateUi.put("autoload-kata-engine-threads", true);
-      candidateUi.put("txt-kata-engine-threads", String.valueOf(result.recommendedThreads));
-    }
-    candidateUi.put("katago-benchmark-threads", result.recommendedThreads);
-    candidateUi.put("katago-benchmark-current-threads", result.currentThreads);
-    candidateUi.put("katago-benchmark-backend", result.backendLabel);
-    candidateUi.put("katago-benchmark-summary", result.summary);
-    candidateUi.put("katago-benchmark-updated-at", result.completedAtMillis);
-    candidateUi.put("katago-benchmark-topology", result.topologyLabel);
-    candidateUi.put("katago-benchmark-nn-server-threads", result.nnServerThreadsPerModel);
-    candidateUi.put("katago-benchmark-batch-size", result.maxBatchSize);
-    candidateUi.put("katago-benchmark-visits-per-second", result.visitsPerSecond);
-    candidateUi.put("katago-benchmark-nn-evals-per-second", result.nnEvalsPerSecond);
-    candidateUi.put("katago-benchmark-average-batch-size", result.averageBatchSize);
-    if (result.tuningProfile != null) {
-      new KataGoTuningStore(candidateUi).save(result.tuningProfile);
-    }
-    JSONObject currentLeelaz =
-        Lizzie.config.leelazConfig == null ? new JSONObject() : Lizzie.config.leelazConfig;
-    Lizzie.config.saveConfigSections(candidateUi, currentLeelaz);
-    if (result.tuningProfile == null) {
-      Lizzie.config.chkKataEngineThreads = true;
-      Lizzie.config.autoLoadKataEngineThreads = true;
-      Lizzie.config.txtKataEngineThreads = String.valueOf(result.recommendedThreads);
-    }
-  }
-
-  public static void applyBenchmarkResultToRunningEngines(BenchmarkResult result) {
-    if (result == null || result.recommendedThreads <= 0) {
-      return;
-    }
-    if (result.tuningProfile != null && result.tuningProfile.managesHardwareSettings()) {
-      // Metal topology and batch size are startup-only. The benchmark lifecycle lease restarts the
-      // main engine after this call, so avoid briefly applying only the thread portion.
-      restartIdlePreloadedAnalysisEngine();
-      return;
-    }
-    try {
-      Leelaz target = Lizzie.leelaz;
-      if (target != null && target.isLoaded() && target.isKatago
-          && !EngineThreadPolicy.isRemoteManaged(target)) {
-        target.sendCommand("kata-set-param numSearchThreads " + result.recommendedThreads);
+  private static void commitBenchmarkResult(
+      BenchmarkTarget target, BenchmarkResult result, DownloadSession session) throws IOException {
+    if (result == null || result.recommendedThreads <= 0) throw benchmarkFailedException();
+    EngineData savedEntry;
+    synchronized (Utils.class) {
+      session.throwIfCancelled();
+      if (activeEntryBenchmark.get() != target)
+        throw new DownloadCancelledException(EngineThreadPolicy.message("benchmarkBusy"));
+      ArrayList<EngineData> entries = Utils.getEngineData();
+      EngineData entry =
+          entries.stream().filter(e -> e.id.equals(target.entryId)).findFirst().orElse(null);
+      if (entry == null) throw new IOException(EngineThreadPolicy.message("targetDeleted"));
+      JSONObject policy = entry.threadPolicy;
+      policy.put("katago-benchmark-threads", result.recommendedThreads);
+      policy.put("katago-benchmark-current-threads", result.currentThreads);
+      policy.put("katago-benchmark-backend", result.backendLabel);
+      policy.put("katago-benchmark-summary", result.summary);
+      policy.put("katago-benchmark-updated-at", result.completedAtMillis);
+      policy.put("katago-benchmark-topology", result.topologyLabel);
+      policy.put("katago-benchmark-nn-server-threads", result.nnServerThreadsPerModel);
+      policy.put("katago-benchmark-batch-size", result.maxBatchSize);
+      policy.put("katago-benchmark-visits-per-second", result.visitsPerSecond);
+      policy.put("katago-benchmark-nn-evals-per-second", result.nnEvalsPerSecond);
+      policy.put("katago-benchmark-average-batch-size", result.averageBatchSize);
+      policy.put("environment", new JSONObject(target.environment.toString()));
+      policy.put(APPLE_AUTO_OPTIMIZE_VERSION_KEY, APPLE_AUTO_OPTIMIZE_VERSION);
+      policy.remove("legacyOverrideStopped");
+      if (result.tuningProfile != null) new KataGoTuningStore(policy).save(result.tuningProfile);
+      else new KataGoTuningStore(policy).clear();
+      if (target.initialSetup
+          && policy.optLong("sourceRevision") == target.sourceRevision
+          && target.sourceRevision == 0
+          && policy.optBoolean("initialSetup", false)) {
+        policy.put("source", "BENCHMARK");
       }
-    } catch (Exception e) {
+      policy.remove("initialSetup");
+      try {
+        Utils.saveEngineSettings(entries);
+      } catch (java.io.UncheckedIOException failure) {
+        throw failure.getCause();
+      }
+      savedEntry = entry;
     }
-    restartIdlePreloadedAnalysisEngine();
+    if (target.runningEngine != null
+        && savedEntry.useJavaSSH == target.useJavaSsh
+        && !EngineThreadPolicy.isRemoteManaged(savedEntry.commands, savedEntry.useJavaSSH)
+        && Lizzie.engineManager == target.manager
+        && target.runningEngine.matchesThreadStartupEnvironment(target.environment)
+        && target.runningEngine.trackingStreamIncarnation() == target.incarnation
+        && target.command.equals(savedEntry.commands)) {
+      target.runningEngine.applySavedThreadPolicy(savedEntry);
+    }
   }
 
   public static boolean isBenchmarkEngineSyncSuppressed() {
@@ -3859,8 +3931,8 @@ public final class KataGoRuntimeHelper {
         }
         benchmarkPausedEngine = currentEngine;
         benchmarkPausedEngineManager = null;
-        benchmarkPausedEngineList = null;
-        benchmarkPausedEngineIndex = -1;
+        benchmarkPausedIncarnation =
+            currentEngine == null ? -1 : currentEngine.trackingStreamIncarnation();
         benchmarkPausedEngineByShutdown = false;
         benchmarkComputeIsolated = isEngineComputeIsolated(currentEngine);
         benchmarkRestartQuickAnalysisPreload = false;
@@ -3888,8 +3960,6 @@ public final class KataGoRuntimeHelper {
                     && engines.get(engineIndex) == currentEngine;
             benchmarkPausedEngine = currentEngine;
             benchmarkPausedEngineManager = pauseByShutdown ? manager : null;
-            benchmarkPausedEngineList = pauseByShutdown ? engines : null;
-            benchmarkPausedEngineIndex = pauseByShutdown ? engineIndex : -1;
             benchmarkPausedEngineByShutdown = pauseByShutdown;
           }
           if (!pauseByShutdown) {
@@ -3907,6 +3977,9 @@ public final class KataGoRuntimeHelper {
           currentEngine.normalQuit();
           currentEngine.shutdown();
           boolean shutdownConfirmed = waitForEngineShutdown(currentEngine, 8000L);
+          synchronized (BENCHMARK_ANALYSIS_PAUSE_LOCK) {
+            benchmarkPausedIncarnation = currentEngine.trackingStreamIncarnation();
+          }
           boolean computeIsolated =
               shutdownConfirmed
                   && waitForRegisteredLocalComputeShutdown(
@@ -3918,8 +3991,7 @@ public final class KataGoRuntimeHelper {
         } catch (Exception e) {
           synchronized (BENCHMARK_ANALYSIS_PAUSE_LOCK) {
             benchmarkPausedEngineManager = null;
-            benchmarkPausedEngineList = null;
-            benchmarkPausedEngineIndex = -1;
+            benchmarkPausedIncarnation = -1;
             benchmarkPausedEngineByShutdown = false;
             benchmarkComputeIsolated = false;
           }
@@ -3956,11 +4028,11 @@ public final class KataGoRuntimeHelper {
     return pausedEngine != null
         && Lizzie.engineManager == benchmarkPausedEngineManager
         && benchmarkPausedEngineManager != null
-        && benchmarkPausedEngineManager.engineList == benchmarkPausedEngineList
-        && benchmarkPausedEngineList != null
+        && benchmarkPausedEngineManager.engineList != null
         && pausedEngineIndex >= 0
-        && pausedEngineIndex < benchmarkPausedEngineList.size()
-        && benchmarkPausedEngineList.get(pausedEngineIndex) == pausedEngine;
+        && pausedEngineIndex < benchmarkPausedEngineManager.engineList.size()
+        && benchmarkPausedEngineManager.engineList.get(pausedEngineIndex) == pausedEngine
+        && pausedEngine.trackingStreamIncarnation() == benchmarkPausedIncarnation;
   }
 
   private static void releaseIdleAuxiliaryComputeForBenchmark() {
@@ -3997,7 +4069,10 @@ public final class KataGoRuntimeHelper {
       }
       benchmarkPreviousShowPonderTips = null;
       pausedEngine = benchmarkPausedEngine;
-      pausedEngineIndex = benchmarkPausedEngineIndex;
+      pausedEngineIndex =
+          benchmarkPausedEngineManager == null || benchmarkPausedEngineManager.engineList == null
+              ? -1
+              : benchmarkPausedEngineManager.engineList.indexOf(pausedEngine);
       pausedEngineByShutdown = benchmarkPausedEngineByShutdown;
       restartQuickAnalysisPreload = benchmarkRestartQuickAnalysisPreload;
       if (pausedEngineByShutdown
@@ -4011,8 +4086,7 @@ public final class KataGoRuntimeHelper {
       }
       benchmarkPausedEngine = null;
       benchmarkPausedEngineManager = null;
-      benchmarkPausedEngineList = null;
-      benchmarkPausedEngineIndex = -1;
+      benchmarkPausedIncarnation = -1;
       benchmarkPausedEngineByShutdown = false;
       benchmarkComputeIsolated = false;
       benchmarkRestartQuickAnalysisPreload = false;
@@ -4043,7 +4117,7 @@ public final class KataGoRuntimeHelper {
       return;
     }
     try {
-      pausedEngine.togglePonder();
+      pausedEngine.ponderIfAnalysisControlAllows();
     } catch (Exception ignored) {
     }
   }
@@ -4152,16 +4226,13 @@ public final class KataGoRuntimeHelper {
                     || !isCurrentPrimaryEngineEligibleForAutomaticBenchmark()) {
                   return;
                 }
+                BenchmarkTarget target = captureBenchmarkTarget(snapshot, true);
 
                 DownloadSession session = new DownloadSession();
                 notice =
                     showBenchmarkNotice(
-                        "正在进行 Apple Silicon 智能提升算棋速度",
-                        "正在使用当前模型和当前硬件配置运行 KataGo 官方 benchmark。<br/>"
-                            + "通常需要 2-10 分钟；不会更换模型，也不会默认尝试实验性 GPU/ANE 组合。<br/>"
-                            + "完成后只会为完全匹配的电脑、引擎、模型和配置保存官方推荐线程数。<br/>"
-                            + "优化期间会暂停当前分析，完成后会自动恢复。<br/>"
-                            + "你可以继续使用主窗口；如果暂时不想优化，关闭这个窗口即可停止本次优化。",
+                        resource("AutoSetup.benchmarking", "Benchmark") + " — " + target.name,
+                        automaticBenchmarkDescription(target),
                         session);
                 final JDialog progressNotice = notice;
                 if (session.isCancelled()) return;
@@ -4176,7 +4247,7 @@ public final class KataGoRuntimeHelper {
                     "Running Apple Silicon KataGo benchmark in background for automatic tuning...");
                 BenchmarkResult result =
                     runBenchmarkAndApply(
-                        snapshot,
+                        target,
                         (statusText, downloadedBytes, totalBytes) -> {
                           if (progressNotice != null) {
                             updateBenchmarkNotice(
@@ -4184,7 +4255,6 @@ public final class KataGoRuntimeHelper {
                           }
                         },
                         session);
-                applyBenchmarkResultToRunningEngines(result);
                 System.out.println(
                     "Apple Silicon KataGo tuning applied: " + formatBenchmarkResult(result));
               } catch (DownloadCancelledException e) {
@@ -4194,6 +4264,7 @@ public final class KataGoRuntimeHelper {
                 System.err.println(
                     "Apple Silicon KataGo auto benchmark failed: " + e.getLocalizedMessage());
                 e.printStackTrace();
+                showAutomaticBenchmarkFailure(e);
               } finally {
                 if (notice != null) {
                   disposeBenchmarkNotice(notice);
@@ -4209,6 +4280,36 @@ public final class KataGoRuntimeHelper {
             "katago-apple-auto-optimize");
     worker.setDaemon(true);
     worker.start();
+  }
+
+  private static String automaticBenchmarkDescription(BenchmarkTarget target) {
+    String text =
+        EngineThreadPolicy.message("automaticBenchmark")
+            + "\n\n"
+            + String.format(EngineThreadPolicy.message("target"), target.name)
+            + "\n"
+            + target.snapshot.enginePath
+            + "\n"
+            + target.snapshot.activeWeightPath
+            + "\n"
+            + target.snapshot.gtpConfigPath;
+    return "<div style='width:520px'>"
+        + text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br/>")
+        + "</div>";
+  }
+
+  private static void showAutomaticBenchmarkFailure(Exception error) {
+    if (Lizzie.frame != null)
+      SwingUtilities.invokeLater(
+          () ->
+              Utils.showMsg(
+                  resource("AutoSetup.benchmarkFailed", "Benchmark failed")
+                      + "\n"
+                      + error.getLocalizedMessage(),
+                  Lizzie.frame));
   }
 
   private static JDialog showBenchmarkNotice(String title, String message) {
@@ -4611,8 +4712,7 @@ public final class KataGoRuntimeHelper {
                 Thread.currentThread().interrupt();
                 return;
               }
-              if (!waitForPrimaryEngineReadyBeforeBenchmark(
-                  AUTO_BENCHMARK_READY_TIMEOUT_MILLIS)) {
+              if (!waitForPrimaryEngineReadyBeforeBenchmark(AUTO_BENCHMARK_READY_TIMEOUT_MILLIS)) {
                 return;
               }
               if (!isCurrentPrimaryEngineEligibleForAutomaticBenchmark()) {
@@ -4633,18 +4733,20 @@ public final class KataGoRuntimeHelper {
               if (getStoredBenchmarkResult(snapshot) != null) return;
               if (isStartupBenchmarkDismissed(snapshot)) return;
               if (!isCurrentPrimaryEngineEligibleForAutomaticBenchmark()) return;
+              final BenchmarkTarget target;
+              try {
+                target = captureBenchmarkTarget(snapshot, true);
+              } catch (IOException failure) {
+                System.err.println(failure.getLocalizedMessage());
+                return;
+              }
 
               final DownloadSession benchmarkSession = new DownloadSession();
               final javax.swing.JDialog notice =
                   Lizzie.frame != null && Lizzie.frame.isShowing()
                       ? showBenchmarkNotice(
-                          "KataGo 智能提升算棋速度",
-                          "首次启动正在进行一次 KataGo 智能提升算棋速度，<br/>"
-                              + "将使用当前模型运行 KataGo 官方线程 benchmark，<br/>"
-                              + "不会自动更换模型或启用实验性硬件组合。<br/><br/>"
-                              + "通常需要 2-10 分钟；电脑较慢、模型较大时可能更久，请稍候。<br/>"
-                              + "期间分析会被暂停，完成后会自动恢复。<br/>"
-                              + "如果暂时不想优化，可以关闭这个窗口停止优化。",
+                          resource("AutoSetup.benchmarking", "Benchmark") + " — " + target.name,
+                          automaticBenchmarkDescription(target),
                           benchmarkSession)
                       : null;
 
@@ -4663,11 +4765,10 @@ public final class KataGoRuntimeHelper {
                 pausedAnalysis = pauseResult.analysisWasPondering();
                 BenchmarkResult result =
                     runBenchmarkAndApply(
-                        snapshot,
+                        target,
                         (statusText, downloadedBytes, totalBytes) ->
                             updateBenchmarkNotice(notice, statusText, downloadedBytes, totalBytes),
                         benchmarkSession);
-                applyBenchmarkResultToRunningEngines(result);
                 System.out.println(
                     "First-run KataGo benchmark applied: " + formatBenchmarkResult(result));
               } catch (DownloadCancelledException e) {
@@ -4675,6 +4776,7 @@ public final class KataGoRuntimeHelper {
                 System.out.println("First-run KataGo benchmark cancelled by user.");
               } catch (Exception e) {
                 System.err.println("First-run KataGo benchmark failed: " + e.getLocalizedMessage());
+                showAutomaticBenchmarkFailure(e);
               } finally {
                 if (notice != null) {
                   disposeBenchmarkNotice(notice);
@@ -5495,7 +5597,9 @@ public final class KataGoRuntimeHelper {
     if (snapshot == null || Lizzie.config == null || Lizzie.config.uiConfig == null) {
       return Optional.empty();
     }
-    KataGoTuningStore tuningStore = new KataGoTuningStore(Lizzie.config.uiConfig);
+    EngineData entry = EngineThreadPolicy.findSavedEntry(snapshot.savedEntryId);
+    if (entry == null || entry.threadPolicy == null) return Optional.empty();
+    KataGoTuningStore tuningStore = new KataGoTuningStore(entry.threadPolicy);
     if (!tuningStore.hasStoredProfile()) {
       return Optional.empty();
     }
@@ -5567,24 +5671,6 @@ public final class KataGoRuntimeHelper {
     return enginePath.contains("macos-arm64");
   }
 
-  private static void rememberBenchmarkContext(SetupSnapshot snapshot, BenchmarkResult result) {
-    if (snapshot == null
-        || result == null
-        || result.recommendedThreads <= 0
-        || Lizzie.config == null
-        || Lizzie.config.uiConfig == null) {
-      return;
-    }
-    Lizzie.config.uiConfig.put(BENCHMARK_SIGNATURE_KEY, buildBenchmarkSignature(snapshot));
-    if (isAppleSiliconOptimizationEligible(snapshot)) {
-      Lizzie.config.uiConfig.put(APPLE_AUTO_OPTIMIZE_VERSION_KEY, APPLE_AUTO_OPTIMIZE_VERSION);
-    }
-    try {
-      Lizzie.config.save();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-  }
 
   static String buildBenchmarkSignature(SetupSnapshot snapshot) {
     if (snapshot == null) {
@@ -5613,33 +5699,6 @@ public final class KataGoRuntimeHelper {
     }
   }
 
-  private static void restartIdlePreloadedAnalysisEngine() {
-    if (Lizzie.config == null
-        || !Lizzie.config.analysisEnginePreLoad
-        || Lizzie.frame == null
-        || Lizzie.frame.analysisEngine == null) {
-      return;
-    }
-    AnalysisEngine currentEngine = Lizzie.frame.analysisEngine;
-    if (currentEngine == null || currentEngine.isAnalysisInProgress()) {
-      return;
-    }
-    SwingUtilities.invokeLater(
-        () -> {
-          try {
-            if (Lizzie.frame == null || Lizzie.frame.analysisEngine == null) {
-              return;
-            }
-            if (Lizzie.frame.analysisEngine.isAnalysisInProgress()) {
-              return;
-            }
-            Lizzie.frame.destroyAnalysisEngine();
-            Lizzie.frame.analysisEngine = new AnalysisEngine(true);
-          } catch (IOException e) {
-            e.printStackTrace();
-          }
-        });
-  }
 
   private static List<Path> collectRuntimeSearchDirs(
       Path enginePath, Path runtimeDir, String runtimeSearchPath) {
