@@ -116,8 +116,12 @@ class MoreEnginesDraftTest {
         () -> {
           clickRow(0);
           assertFalse(editor.threadPolicyStatus.isVisible());
-          assertFalse(editor.threadPolicyCfg.isVisible());
-          assertFalse(editor.benchmarkSelectedEngine.isVisible());
+          assertTrue(editor.threadPolicyCfg.isVisible());
+          assertTrue(editor.threadPolicyCfg.isSelected());
+          assertFalse(editor.threadPolicyCfg.isEnabled());
+          assertTrue(editor.threadPolicyBenchmark.isVisible());
+          assertFalse(editor.threadPolicyBenchmark.isEnabled());
+          assertFalse(editor.benchmarkSelectedEngine.isEnabled());
           editor.add.doClick();
           assertFalse(editor.threadPolicyStatus.isVisible());
           assertNull(editor.threadPolicyStatus.getToolTipText());
@@ -140,6 +144,37 @@ class MoreEnginesDraftTest {
           clickRow(3);
           assertNull(editor.threadPolicyStatus.getToolTipText());
           assertFalse(editor.threadPolicyStatus.isVisible());
+        });
+  }
+
+  @Test
+  void unknownDraftLocksCfgWithoutChangingSavedThreadPreference() throws Exception {
+    SwingUtilities.invokeAndWait(
+        () -> {
+          clickRow(0);
+          editor.txtName.setText("KataGo A");
+          editor.command.setText("katago gtp");
+          editor.save.doClick();
+          ArrayList<EngineData> entries = Utils.getEngineData();
+          entries.get(0).threadPolicy.put("katago-benchmark-threads", 16).put("source", "BENCHMARK");
+          Utils.saveEngineSettings(entries);
+          editor.cancel.doClick();
+          clickRow(0);
+          assertTrue(editor.threadPolicyBenchmark.isSelected());
+          editor.command.setText("unknown://target");
+          assertTrue(editor.threadPolicyCfg.isVisible());
+          assertTrue(editor.threadPolicyCfg.isSelected());
+          assertFalse(editor.threadPolicyCfg.isEnabled());
+          assertFalse(editor.threadPolicyBenchmark.isEnabled());
+          assertFalse(editor.benchmarkSelectedEngine.isEnabled());
+          assertFalse(editor.threadPolicyStatus.isVisible());
+          assertNull(editor.threadPolicyStatus.getToolTipText());
+          editor.command.setText("katago gtp");
+          assertTrue(editor.threadPolicyBenchmark.isSelected());
+          assertTrue(editor.threadPolicyBenchmark.isEnabled());
+          clickRow(3);
+          assertTrue(editor.threadPolicyCfg.isSelected());
+          assertFalse(editor.threadPolicyBenchmark.isSelected());
         });
   }
 

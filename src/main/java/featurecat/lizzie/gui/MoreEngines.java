@@ -989,15 +989,24 @@ public class MoreEngines extends JPanel {
                 command.getText(), chkRemoteEngine.isSelected());
     boolean unknown =
         curIndex >= 0 && isUnknownThreadTarget(command.getText(), remote, local);
-    threadPolicyPanel.setVisible(remote || local || unknown);
+    boolean lockedCfg = curIndex >= 0 && !remote && (unknown || command.getText().isBlank());
+    threadPolicyPanel.setVisible(remote || local || lockedCfg);
     remoteManagedThreads.setVisible(remote);
-    threadPolicyCfg.setVisible(local);
-    threadPolicyBenchmark.setVisible(local);
-    benchmarkSelectedEngine.setVisible(local && saved != null);
-    threadPolicyStatus.setVisible(local || unknown);
+    threadPolicyCfg.setVisible(local || lockedCfg);
+    threadPolicyBenchmark.setVisible(local || lockedCfg);
+    benchmarkSelectedEngine.setVisible((local && saved != null) || lockedCfg);
+    threadPolicyStatus.setVisible(local);
     if (!local) {
-      if (unknown) {
-        threadPolicyStatus.setText(EngineThreadPolicy.message("unknownBenchmarkTarget"));
+      threadPolicyCfg.setEnabled(false);
+      threadPolicyBenchmark.setEnabled(false);
+      benchmarkSelectedEngine.setEnabled(false);
+      if (lockedCfg) {
+        threadPolicyCfg.setSelected(true);
+        threadPolicyBenchmark.setText(resourceBundle.getString("EngineThreadPolicy.benchmark"));
+        benchmarkSelectedEngine.setText(resourceBundle.getString("EngineThreadPolicy.startBenchmark"));
+        AccessibilitySupport.button(
+            benchmarkSelectedEngine, benchmarkSelectedEngine.getText(), benchmarkSelectedEngine.getText());
+        benchmarkSelectedEngine.setToolTipText(null);
       }
       layoutThreadPolicyDetails();
       return;
