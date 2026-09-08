@@ -13,6 +13,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FileDialog;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Insets;
 import java.awt.LayoutManager;
@@ -74,7 +75,11 @@ public class MoreEngines extends JPanel {
   JFontTextField txtName;
   JFontLabel engineName;
   JFontLabel remoteManagedThreads;
-  JFontLabel threadPolicyStatus;
+  JTextArea threadPolicyStatus;
+  private JPanel threadPolicyPanel;
+  private JPanel threadPolicyControls;
+  private JPanel threadPolicyChoices;
+  private JPanel engineActionsPanel;
   JFontRadioButton threadPolicyCfg;
   JFontRadioButton threadPolicyBenchmark;
   JFontButton benchmarkSelectedEngine;
@@ -214,16 +219,22 @@ public class MoreEngines extends JPanel {
     JFontLabel lblKomi = new JFontLabel(this.resourceBundle.getString("MoreEngines.lblKomi"));
     this.remoteManagedThreads =
         new JFontLabel(this.resourceBundle.getString("EngineThreadPolicy.remoteManaged"));
-    this.remoteManagedThreads.setForeground(Color.BLUE);
     this.remoteManagedThreads.setVisible(false);
     this.threadPolicyCfg =
         new JFontRadioButton(this.resourceBundle.getString("EngineThreadPolicy.cfg"));
     this.threadPolicyBenchmark =
         new JFontRadioButton(this.resourceBundle.getString("EngineThreadPolicy.benchmark"));
-    this.threadPolicyStatus = new JFontLabel();
+    this.threadPolicyStatus = new JTextArea();
+    this.threadPolicyStatus.setFont(threadPolicyCfg.getFont());
+    this.threadPolicyStatus.setForeground(threadPolicyCfg.getForeground());
+    this.threadPolicyStatus.setEditable(false);
+    this.threadPolicyStatus.setFocusable(false);
+    this.threadPolicyStatus.setOpaque(false);
+    this.threadPolicyStatus.setBorder(null);
+    this.threadPolicyStatus.setLineWrap(true);
+    this.threadPolicyStatus.setWrapStyleWord(true);
     this.benchmarkSelectedEngine =
-        new JFontButton(this.resourceBundle.getString("AutoSetup.optimizePerformance"));
-    this.threadPolicyStatus.setForeground(Color.BLUE);
+        new JFontButton(this.resourceBundle.getString("EngineThreadPolicy.startBenchmark"));
     ButtonGroup threadPolicyGroup = new ButtonGroup();
     threadPolicyGroup.add(threadPolicyCfg);
     threadPolicyGroup.add(threadPolicyBenchmark);
@@ -435,21 +446,28 @@ public class MoreEngines extends JPanel {
     boardSettingsX = placeInRow(txtHeight, boardSettingsX, 270, 12, 40);
     boardSettingsX = placeInRow(lblKomi, boardSettingsX, 270, 4, 0);
     placeInRow(txtKomi, boardSettingsX, 270, 0, 48);
-    int policyX = 5;
-    policyX = placeInRow(threadPolicyCfg, policyX, 296, 8, 0);
-    policyX = placeInRow(threadPolicyBenchmark, policyX, 296, 12, 0);
-    String benchmarkAgainText = resourceBundle.getString("AutoSetup.optimizePerformanceAgain");
-    int benchmarkButtonWidth =
-        Math.max(
-            benchmarkSelectedEngine.getPreferredSize().width,
-            benchmarkSelectedEngine
-                    .getFontMetrics(benchmarkSelectedEngine.getFont())
-                    .stringWidth(benchmarkAgainText)
-                + 24);
-    benchmarkSelectedEngine.setBounds(policyX, 296, benchmarkButtonWidth, 24);
-    this.threadPolicyStatus.setBounds(5, 320, 875, 64);
-    this.threadPolicyStatus.setVerticalAlignment(JLabel.TOP);
-    this.remoteManagedThreads.setBounds(5, 320, 875, 24);
+    JFontLabel threadSourceLabel =
+        new JFontLabel(resourceBundle.getString("EngineThreadPolicy.sourceLabel"));
+    threadSourceLabel.setFont(threadSourceLabel.getFont().deriveFont(Font.BOLD));
+    AccessibilitySupport.labelFor(
+        threadSourceLabel, threadPolicyCfg, threadSourceLabel.getText());
+    threadPolicyChoices = new JPanel(new FlowLayout(FlowLayout.LEADING, 12, 0));
+    threadPolicyChoices.setOpaque(false);
+    threadPolicyChoices.add(threadPolicyCfg);
+    threadPolicyChoices.add(threadPolicyBenchmark);
+    threadPolicyControls = new JPanel(new BorderLayout(12, 0));
+    threadPolicyControls.setOpaque(false);
+    threadPolicyControls.add(threadSourceLabel, BorderLayout.WEST);
+    threadPolicyControls.add(threadPolicyChoices, BorderLayout.CENTER);
+    threadPolicyControls.add(benchmarkSelectedEngine, BorderLayout.EAST);
+    threadPolicyControls.setPreferredSize(
+        new Dimension(880, Math.max(28, threadPolicyControls.getPreferredSize().height)));
+    threadPolicyPanel = new JPanel(new BorderLayout(0, 6));
+    threadPolicyPanel.setOpaque(false);
+    threadPolicyPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 12, 0));
+    threadPolicyPanel.add(threadPolicyControls, BorderLayout.NORTH);
+    threadPolicyPanel.add(remoteManagedThreads, BorderLayout.CENTER);
+    threadPolicyPanel.add(threadPolicyStatus, BorderLayout.SOUTH);
     int remoteX = 5;
     remoteX = placeInRow(chkRemoteEngine, remoteX, 384, 6, 0);
     remoteX = placeInRow(btnRemoteEngine, remoteX, 384, 8, 24);
@@ -552,11 +570,7 @@ public class MoreEngines extends JPanel {
     this.selectpanel.add(this.txtHeight);
     this.selectpanel.add(lblKomi);
     this.selectpanel.add(this.txtKomi);
-    this.selectpanel.add(this.remoteManagedThreads);
-    this.selectpanel.add(this.threadPolicyCfg);
-    this.selectpanel.add(this.threadPolicyBenchmark);
-    this.selectpanel.add(this.threadPolicyStatus);
-    this.selectpanel.add(this.benchmarkSelectedEngine);
+    this.selectpanel.add(threadPolicyPanel);
     this.selectpanel.add(this.scan);
     this.selectpanel.add(this.add);
     this.selectpanel.add(this.save);
@@ -698,6 +712,7 @@ public class MoreEngines extends JPanel {
             threadPolicySourceChanged = false;
             setEnable(false);
             table.getSelectionModel().clearSelection();
+            updateThreadPolicyDetails();
           }
         });
     this.save.addActionListener(
@@ -726,6 +741,16 @@ public class MoreEngines extends JPanel {
     this.moveUp5.addActionListener(event -> moveSelectedEngine(-5));
     this.moveDown.addActionListener(event -> moveSelectedEngine(1));
     this.moveDown5.addActionListener(event -> moveSelectedEngine(5));
+    engineActionsPanel = new JPanel(null);
+    engineActionsPanel.setOpaque(false);
+    for (Component component : selectpanel.getComponents()) {
+      if (component != threadPolicyPanel && component.getY() >= 384) {
+        component.setLocation(component.getX(), component.getY() - 384);
+        engineActionsPanel.add(component);
+      }
+    }
+    selectpanel.add(engineActionsPanel);
+    updateThreadPolicyDetails();
   }
 
   private static int placeInRow(
@@ -944,56 +969,71 @@ public class MoreEngines extends JPanel {
   }
 
   private void updateThreadPolicyDetails() {
+    threadPolicyStatus.setText("");
+    threadPolicyStatus.setToolTipText(null);
+    threadPolicyBenchmark.setToolTipText(null);
+    benchmarkSelectedEngine.setToolTipText(null);
     boolean remote =
-        EngineThreadPolicy.isRemoteManaged(command.getText(), chkRemoteEngine.isSelected());
+        curIndex >= 0
+            && EngineThreadPolicy.isRemoteManaged(command.getText(), chkRemoteEngine.isSelected());
     EngineData saved = EngineThreadPolicy.findSavedEntry(selectedEntryId);
     boolean local =
-        !remote
+        curIndex >= 0
+            && !remote
             && EngineThreadPolicy.isLocalKataGoCommand(
                 command.getText(), chkRemoteEngine.isSelected());
-    boolean unknown = isUnknownThreadTarget(command.getText(), remote, local);
+    boolean unknown =
+        curIndex >= 0 && isUnknownThreadTarget(command.getText(), remote, local);
+    threadPolicyPanel.setVisible(remote || local || unknown);
     remoteManagedThreads.setVisible(remote);
+    threadPolicyChoices.setVisible(local);
     threadPolicyCfg.setVisible(local);
     threadPolicyBenchmark.setVisible(local);
     benchmarkSelectedEngine.setVisible(local && saved != null);
     threadPolicyStatus.setVisible(local || unknown);
-    if (remote) return;
     if (!local) {
-      threadPolicyStatus.setText(
-          unknown ? EngineThreadPolicy.message("unknownBenchmarkTarget") : "");
+      if (unknown) {
+        threadPolicyStatus.setText(EngineThreadPolicy.message("unknownBenchmarkTarget"));
+      }
+      layoutThreadPolicyDetails();
       return;
     }
     int recommendation = EngineThreadPolicy.recommendedThreads(saved);
+    threadPolicyBenchmark.setText(
+        recommendation > 0
+            ? String.format(
+                resourceBundle.getString("EngineThreadPolicy.benchmarkWithThreads"), recommendation)
+            : resourceBundle.getString("EngineThreadPolicy.benchmarkNotDetected"));
     benchmarkSelectedEngine.setText(
         resourceBundle.getString(
             recommendation > 0
-                ? "AutoSetup.optimizePerformanceAgain"
-                : "AutoSetup.optimizePerformance"));
+                ? "EngineThreadPolicy.rerunBenchmark"
+                : "EngineThreadPolicy.startBenchmark"));
     AccessibilitySupport.button(
         benchmarkSelectedEngine,
         benchmarkSelectedEngine.getText(),
         benchmarkSelectedEngine.getText());
-    benchmarkSelectedEngine.setEnabled(curIndex >= 0 && saved != null);
+    benchmarkSelectedEngine.setEnabled(saved != null);
     loadingThreadPolicy = true;
     try {
       threadPolicyCfg.setSelected(selectedThreadSource == EngineThreadPolicy.Source.CFG);
       threadPolicyBenchmark.setSelected(
           selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK);
-      threadPolicyCfg.setEnabled(curIndex >= 0);
+      threadPolicyCfg.setEnabled(true);
       threadPolicyBenchmark.setEnabled(
-          curIndex >= 0
-              && (recommendation > 0
-                  || selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK));
+          recommendation > 0 || selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK);
     } finally {
       loadingThreadPolicy = false;
     }
     ArrayList<String> statuses = new ArrayList<>();
-    if (recommendation > 0) {
-      statuses.add(String.format(EngineThreadPolicy.message("recommendation"), recommendation));
-    } else if (selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK) {
+    if (selectedThreadSource == EngineThreadPolicy.Source.BENCHMARK && recommendation <= 0) {
       statuses.add(EngineThreadPolicy.message("invalidRecommendation"));
     } else {
-      statuses.add(EngineThreadPolicy.message("notDetected"));
+      statuses.add(
+          resourceBundle.getString(
+              selectedThreadSource == EngineThreadPolicy.Source.CFG
+                  ? "EngineThreadPolicy.cfgDescription"
+                  : "EngineThreadPolicy.benchmarkDescription"));
     }
     if (saved != null) {
       String environment = EngineThreadPolicy.environmentStatus(saved);
@@ -1010,15 +1050,38 @@ public class MoreEngines extends JPanel {
       }
     }
     String statusText = String.join(" · ", statuses);
-    threadPolicyStatus.setText(
-        "<html><div style='width:840px'>"
-            + statusText.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            + "</div></html>");
+    threadPolicyStatus.setText(statusText);
     threadPolicyStatus.setToolTipText(statusText);
+    layoutThreadPolicyDetails();
+  }
+
+  private void layoutThreadPolicyDetails() {
+    if (engineActionsPanel == null) return;
+    int width = 880;
+    int sectionHeight = 0;
+    if (threadPolicyPanel.isVisible()) {
+      sectionHeight = Math.max(28, threadPolicyControls.getPreferredSize().height);
+      if (remoteManagedThreads.isVisible()) {
+        sectionHeight += 6 + remoteManagedThreads.getPreferredSize().height;
+      }
+      if (threadPolicyStatus.isVisible()) {
+        threadPolicyStatus.setSize(width, Short.MAX_VALUE);
+        sectionHeight += 6 + threadPolicyStatus.getPreferredSize().height;
+      }
+      sectionHeight += 12;
+    }
+    threadPolicyPanel.setBounds(5, 302, width, sectionHeight);
+    engineActionsPanel.setBounds(0, 306 + sectionHeight, 900, 116);
+    int tableTop = engineActionsPanel.getY() + engineActionsPanel.getHeight();
+    selectpanel.setSize(900, tableTop);
+    tablepanel.setBounds(0, tableTop, 885, 785 - tableTop);
+    threadPolicyPanel.revalidate();
+    selectpanel.revalidate();
+    repaint();
   }
 
   private boolean isUnknownThreadTarget(String rawCommand, boolean remote, boolean local) {
-    if (remote || local) return false;
+    if (remote || local || rawCommand == null || rawCommand.isBlank()) return false;
     String decoded = rawCommand == null ? "" : rawCommand.trim();
     if (decoded.startsWith("encryption||")) decoded = Utils.doDecrypt2(decoded.substring(12));
     java.util.List<String> tokens = Utils.splitCommand(decoded);

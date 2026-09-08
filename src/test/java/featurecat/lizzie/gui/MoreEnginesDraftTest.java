@@ -1,6 +1,9 @@
 package featurecat.lizzie.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import featurecat.lizzie.Config;
@@ -104,6 +107,39 @@ class MoreEnginesDraftTest {
           assertEquals("leelaz --gtp", editor.command.getText());
           assertEquals("boardsize 13", editor.txtInitialCommand.getText());
           assertEquals("13", editor.txtWidth.getText());
+        });
+  }
+
+  @Test
+  void emptyRowsAndEmptySavedEntriesDoNotShowBenchmarkWarnings() throws Exception {
+    SwingUtilities.invokeAndWait(
+        () -> {
+          clickRow(0);
+          assertFalse(editor.threadPolicyStatus.isVisible());
+          assertFalse(editor.threadPolicyCfg.isVisible());
+          assertFalse(editor.benchmarkSelectedEngine.isVisible());
+          editor.add.doClick();
+          assertFalse(editor.threadPolicyStatus.isVisible());
+          assertNull(editor.threadPolicyStatus.getToolTipText());
+        });
+  }
+
+  @Test
+  void leavingBenchmarkedEntryClearsItsStatusTooltip() throws Exception {
+    SwingUtilities.invokeAndWait(
+        () -> {
+          clickRow(0);
+          editor.txtName.setText("KataGo A");
+          editor.command.setText("katago gtp");
+          editor.save.doClick();
+          ArrayList<EngineData> entries = Utils.getEngineData();
+          entries.get(0).threadPolicy.put("katago-benchmark-threads", 16);
+          Utils.saveEngineSettings(entries);
+          clickRow(0);
+          assertNotNull(editor.threadPolicyStatus.getToolTipText());
+          clickRow(3);
+          assertNull(editor.threadPolicyStatus.getToolTipText());
+          assertFalse(editor.threadPolicyStatus.isVisible());
         });
   }
 
